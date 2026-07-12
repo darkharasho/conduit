@@ -8,3 +8,4 @@ serde = { version = "1", features = ["derive"] }
 indexmap = { version = "2", features = ["serde"] }
 regex = "1"
 thiserror = "1"
+toml = "0.8"
