@@ -80,6 +80,9 @@ describe("listDevices", () => {
         id: "1234:5678/Keyboard",
         class: "keyboard",
         phys: "",
+        keys: [30, 31],
+        wheel: false,
+        hwheel: false,
       },
     ];
     mockInvoke.mockResolvedValueOnce(devices);

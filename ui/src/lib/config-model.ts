@@ -337,6 +337,11 @@ export interface DeviceIdent {
   product: number;
   /** Physical port path; only consulted by `@phys`-suffixed selectors. */
   phys?: string;
+  /** EV_KEY codes the device declares (viz filtering; optional). */
+  keys?: number[];
+  /** Declares REL_WHEEL / REL_HWHEEL (viz filtering; optional). */
+  wheel?: boolean;
+  hwheel?: boolean;
 }
 
 function parseVidPid(s: string): [number, number] | null {

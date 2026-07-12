@@ -1,6 +1,8 @@
 import type { ConfigModel, DeviceIdent } from "../lib/config-model";
 import { getEffectiveAction } from "../lib/config-model";
+import { codeForKeyName } from "../lib/keyboard-layout";
 import { actionHint } from "./KeyboardViz";
+import { ExtraKeys } from "./ExtraKeys";
 
 interface Props {
   model: ConfigModel;
@@ -12,13 +14,21 @@ interface Props {
   dev?: DeviceIdent | null;
 }
 
-const WHEEL_KEYS = ["wheelup", "wheeldown", "wheelleft", "wheelright"] as const;
-const EXTRA_KEYS = ["btn_forward", "btn_back", "btn_task"] as const;
+/** Names the diagram/chips can show, in display order. */
+const SIDE_KEYS = ["mouse4", "mouse5"] as const;
+const EXTRA_BTN_KEYS = ["btn_forward", "btn_back", "btn_task"] as const;
+const DIAGRAM_CODES = new Set(
+  ["btn_left", "btn_right", "btn_middle", ...SIDE_KEYS, ...EXTRA_BTN_KEYS].map(
+    (n) => codeForKeyName(n)!
+  )
+);
 
 /**
- * Mouse visualization for mouse/touchpad device tabs: a diagram for the
- * primary buttons and side buttons, plus chip groups for wheel directions
- * and the extra HID buttons. Mirrors KeyboardViz's selection contract.
+ * Mouse visualization for mouse/touchpad device tabs, driven by the device's
+ * declared capabilities: only buttons that exist render, wheel chips follow
+ * REL_WHEEL/REL_HWHEEL, and any other declared codes (gaming buttons, media
+ * keys on combo devices) appear as mappable chips. Without capability data
+ * (dev null or empty keys) everything renders.
  */
 export function MouseViz({
   model,
@@ -28,6 +38,23 @@ export function MouseViz({
   onSelectKey,
   dev = null,
 }: Props) {
+  const declared = dev?.keys && dev.keys.length > 0 ? new Set(dev.keys) : null;
+  const has = (key: string) => {
+    if (!declared) return true; // no capability data → show everything
+    const code = codeForKeyName(key);
+    return code !== null && declared.has(code);
+  };
+  const hasWheel = declared ? dev?.wheel === true : true;
+  const hasHWheel = declared ? dev?.hwheel === true : true;
+  const wheelKeys = [
+    ...(hasWheel ? ["wheelup", "wheeldown"] : []),
+    ...(hasHWheel ? ["wheelleft", "wheelright"] : []),
+  ];
+  const extraBtnKeys = EXTRA_BTN_KEYS.filter(has);
+  const extraCodes = declared
+    ? [...declared].filter((c) => !DIAGRAM_CODES.has(c)).sort((a, b) => a - b)
+    : [];
+
   const control = (key: string, label: string, extraClass = "") => {
     const eff = getEffectiveAction(model, activeProfile, dev, activeLayer, key);
     const hint = actionHint(eff?.action ?? null);
@@ -56,31 +83,49 @@ export function MouseViz({
     );
   };
 
+  const sideKeys = SIDE_KEYS.filter(has);
+
   return (
-    <div className="mouse-viz" aria-label="Mouse layout">
-      <div className="mouse-viz__body">
-        {control("btn_left", "M1", "mousekey--m1")}
-        {control("btn_middle", "M3", "mousekey--m3")}
-        {control("btn_right", "M2", "mousekey--m2")}
-        <div className="mouse-viz__side">
-          {control("mouse4", "M4", "mousekey--side")}
-          {control("mouse5", "M5", "mousekey--side")}
+    <div className="mouse-viz-wrap">
+      <div className="mouse-viz" aria-label="Mouse layout">
+        <div className="mouse-viz__body">
+          {has("btn_left") && control("btn_left", "M1", "mousekey--m1")}
+          {has("btn_middle") && control("btn_middle", "M3", "mousekey--m3")}
+          {has("btn_right") && control("btn_right", "M2", "mousekey--m2")}
+          {sideKeys.length > 0 && (
+            <div className="mouse-viz__side">
+              {sideKeys.map((k, i) => control(k, `M${i + 4}`, "mousekey--side"))}
+            </div>
+          )}
+        </div>
+        <div className="mouse-viz__groups">
+          {wheelKeys.length > 0 && (
+            <div>
+              <div className="mouse-viz__group-label">Wheel</div>
+              <div className="mouse-viz__chips">
+                {wheelKeys.map((k) => control(k, k.replace("wheel", "wheel ")))}
+              </div>
+            </div>
+          )}
+          {extraBtnKeys.length > 0 && (
+            <div>
+              <div className="mouse-viz__group-label">Extra buttons</div>
+              <div className="mouse-viz__chips">
+                {extraBtnKeys.map((k) => control(k, k.replace("btn_", "")))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
-      <div className="mouse-viz__groups">
-        <div>
-          <div className="mouse-viz__group-label">Wheel</div>
-          <div className="mouse-viz__chips">
-            {WHEEL_KEYS.map((k) => control(k, k.replace("wheel", "wheel ")))}
-          </div>
-        </div>
-        <div>
-          <div className="mouse-viz__group-label">Extra buttons</div>
-          <div className="mouse-viz__chips">
-            {EXTRA_KEYS.map((k) => control(k, k.replace("btn_", "")))}
-          </div>
-        </div>
-      </div>
+      <ExtraKeys
+        model={model}
+        activeProfile={activeProfile}
+        activeLayer={activeLayer}
+        selectedKey={selectedKey}
+        onSelectKey={onSelectKey}
+        dev={dev}
+        codes={extraCodes}
+      />
     </div>
   );
 }

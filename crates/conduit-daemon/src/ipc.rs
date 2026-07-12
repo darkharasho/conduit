@@ -338,6 +338,9 @@ fn list_devices_response(tx: &Sender<Msg>) -> Response {
                 id: d.id(),
                 class: d.class.as_str().to_string(),
                 phys: d.phys.clone(),
+                keys: d.keys.clone(),
+                wheel: d.wheel,
+                hwheel: d.hwheel,
             }
         })
         .collect();

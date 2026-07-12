@@ -31,6 +31,11 @@ export interface DeviceInfo {
   /** keyboard | mouse | touchpad | gamepad | media | other */
   class: string;
   phys: string;
+  /** EV_KEY codes this device declares (sorted) */
+  keys: number[];
+  /** Declares REL_WHEEL / REL_HWHEEL */
+  wheel: boolean;
+  hwheel: boolean;
 }
 
 export interface WireEvent {

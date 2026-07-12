@@ -21,6 +21,11 @@ pub struct Discovered {
     pub product: u16,
     pub phys: String,
     pub class: DeviceClass,
+    /// EV_KEY codes the device declares (sorted).
+    pub keys: Vec<u16>,
+    /// Declares REL_WHEEL / REL_HWHEEL.
+    pub wheel: bool,
+    pub hwheel: bool,
 }
 
 impl Discovered {
@@ -59,14 +64,23 @@ pub fn probe(path: PathBuf) -> Option<Discovered> {
         .supported_keys()
         .map(|set| set.iter().map(|k| k.code()).collect())
         .unwrap_or_default();
-    let rel_x_y = dev.supported_relative_axes().map_or(false, |r| {
+    let rel = dev.supported_relative_axes();
+    let rel_x_y = rel.as_ref().map_or(false, |r| {
         r.contains(evdev::RelativeAxisType::REL_X) && r.contains(evdev::RelativeAxisType::REL_Y)
     });
+    let wheel = rel
+        .as_ref()
+        .map_or(false, |r| r.contains(evdev::RelativeAxisType::REL_WHEEL));
+    let hwheel = rel
+        .as_ref()
+        .map_or(false, |r| r.contains(evdev::RelativeAxisType::REL_HWHEEL));
     let abs_x_y = dev.supported_absolute_axes().map_or(false, |a| {
         a.contains(evdev::AbsoluteAxisType::ABS_X) && a.contains(evdev::AbsoluteAxisType::ABS_Y)
     });
     let prop_pointer = dev.properties().contains(evdev::PropType::POINTER);
     let caps = Caps { keys, rel_x_y, abs_x_y, prop_pointer };
+    let mut keys = caps.keys.clone();
+    keys.sort_unstable();
 
     Some(Discovered {
         path,
@@ -75,6 +89,9 @@ pub fn probe(path: PathBuf) -> Option<Discovered> {
         product: id.product(),
         phys: dev.physical_path().unwrap_or("").to_owned(),
         class: classify(&caps),
+        keys,
+        wheel,
+        hwheel,
     })
 }
 
@@ -408,6 +425,9 @@ mod tests {
             product: 0xc24a,
             phys: String::new(),
             class,
+            keys: Vec::new(),
+            wheel: false,
+            hwheel: false,
         }
     }
 

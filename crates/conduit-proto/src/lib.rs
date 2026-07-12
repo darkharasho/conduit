@@ -63,6 +63,16 @@ pub struct DeviceInfo {
     /// Physical topology path (e.g. `usb-0000:00:14.0-1/input0`), often empty.
     #[serde(default)]
     pub phys: String,
+    /// EV_KEY codes this device declares (sorted). The UI renders only
+    /// controls that actually exist on the device.
+    #[serde(default)]
+    pub keys: Vec<u16>,
+    /// Declares REL_WHEEL (vertical scroll).
+    #[serde(default)]
+    pub wheel: bool,
+    /// Declares REL_HWHEEL (horizontal scroll).
+    #[serde(default)]
+    pub hwheel: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -149,6 +159,9 @@ mod tests {
                 id: "046d:c24a/G600".into(),
                 class: "mouse".into(),
                 phys: "usb-0000:00:14.0-1/input0".into(),
+                keys: vec![0x110, 0x111],
+                wheel: true,
+                hwheel: false,
             }],
         };
         let json = serde_json::to_string(&one).unwrap();

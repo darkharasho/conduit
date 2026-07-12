@@ -44,6 +44,36 @@ describe("MouseViz", () => {
     }
   });
 
+  it("renders only capabilities the device declares", () => {
+    const model = parseConfigToml(TOML);
+    // 3 buttons + mouse4 only, vertical wheel only, one gaming extra (0x120)
+    const capDev = {
+      ...dev,
+      keys: [0x110, 0x111, 0x112, 0x113, 0x120],
+      wheel: true,
+      hwheel: false,
+    };
+    const { container } = render(
+      <MouseViz
+        model={model}
+        activeProfile="default"
+        activeLayer="base"
+        selectedKey={null}
+        onSelectKey={() => {}}
+        dev={capDev}
+      />
+    );
+    for (const present of ["btn_left", "btn_right", "btn_middle", "mouse4", "wheelup", "wheeldown"]) {
+      expect(container.querySelector(`[data-key="${present}"]`), present).not.toBeNull();
+    }
+    for (const absent of ["mouse5", "btn_forward", "btn_back", "btn_task", "wheelleft", "wheelright"]) {
+      expect(container.querySelector(`[data-key="${absent}"]`), absent).toBeNull();
+    }
+    // undeclared-by-name code shows as a mappable key:N chip
+    expect(container.querySelector('[data-key="key:288"]')).not.toBeNull();
+    expect(container.textContent).toContain("Also on this device (1)");
+  });
+
   it("without a device: profile mappings show, no devspec markers", () => {
     const model = parseConfigToml(TOML);
     const { container } = render(

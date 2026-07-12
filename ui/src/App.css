@@ -1060,6 +1060,24 @@ button {
   border-radius: 3px;
 }
 
+.keycap--absent {
+  opacity: 0.3;
+}
+
+.extra-keys {
+  margin-top: 12px;
+}
+
+.extra-keys__chips .mousekey {
+  min-width: 56px;
+  min-height: 34px;
+  padding: 4px 8px;
+}
+
+.extra-keys__more {
+  font-size: 10px;
+}
+
 .keycap--devspec::after {
   content: "●";
   position: absolute;
