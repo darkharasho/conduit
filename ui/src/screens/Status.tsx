@@ -1,195 +1,129 @@
 import { useEffect, useState } from "react";
-import {
-  getStatus,
-  suspend,
-  resume,
-  onStatus,
-  onConnection,
-} from "../lib/client";
+import { getStatus, onStatus, onConnection } from "../lib/client";
 import type { Status as StatusData } from "../lib/client";
 import { SetupCheck } from "../components/SetupCheck";
+import { Toolbar } from "../components/Toolbar";
 
 export function StatusScreen() {
   const [status, setStatus] = useState<StatusData | null>(null);
   const [connected, setConnected] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Fetch initial status
     getStatus()
-      .then((s) => {
-        setStatus(s);
-        setConnected(true);
-        setError(null);
-      })
-      .catch((err) => {
-        setConnected(false);
-        setError(String(err));
-      });
+      .then((s) => { setStatus(s); setConnected(true); setError(null); })
+      .catch((err) => { setConnected(false); setError(String(err)); });
 
-    // Subscribe to live status updates
-    const unlistenStatus = onStatus((s) => {
-      setStatus(s);
-      setConnected(true);
-    });
-
-    // Subscribe to connection events
+    const unlistenStatus = onStatus((s) => { setStatus(s); setConnected(true); });
     const unlistenConn = onConnection((c) => {
       setConnected(c);
-      if (c) {
-        // Re-fetch on reconnect
-        getStatus()
-          .then(setStatus)
-          .catch(() => {});
-      }
+      if (c) getStatus().then(setStatus).catch(() => {});
     });
 
     return () => {
-      unlistenStatus.then((fn) => fn());
-      unlistenConn.then(([fn1, fn2]) => {
-        fn1();
-        fn2();
-      });
+      unlistenStatus.then((f) => f());
+      unlistenConn.then(([f1, f2]) => { f1(); f2(); });
     };
   }, []);
 
-  const handleSuspend = async () => {
-    setActionError(null);
-    try {
-      await suspend();
-    } catch (err) {
-      setActionError(`Suspend failed: ${String(err)}`);
-    }
-  };
-
-  const handleResume = async () => {
-    setActionError(null);
-    try {
-      await resume();
-    } catch (err) {
-      setActionError(`Resume failed: ${String(err)}`);
-    }
-  };
-
   return (
-    <div className="screen status-screen">
-      {/* Connection banner */}
-      {connected === false && (
-        <div className="banner banner--error" role="alert">
-          Daemon unreachable
-          {error && <span className="banner__detail"> — {error}</span>}
-        </div>
-      )}
-      {connected === true && (
-        <div className="banner banner--ok" role="status">
-          Daemon connected
-        </div>
-      )}
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+      <Toolbar title="Status" />
 
-      <h2 className="screen__title">Status</h2>
+      <div className="screen-content">
+        {/* Connection banner */}
+        {connected === false && (
+          <div className="banner--error" role="alert">
+            Daemon unreachable{error ? ` — ${error}` : ""}
+          </div>
+        )}
+        {connected === true && !status && (
+          <div className="banner--ok" role="status">Daemon connected</div>
+        )}
 
-      {connected === false && <SetupCheck />}
+        {/* Setup check (when not connected) */}
+        {connected === false && <SetupCheck />}
 
-      {status ? (
-        <div className="status-grid">
-          <section className="status-card">
-            <div className="status-card__label">Active Profile</div>
-            <div className="status-card__value status-card__value--primary">
-              {status.active_profile}
-            </div>
-          </section>
-
-          <section className="status-card">
-            <div className="status-card__label">Active Layers</div>
-            <div className="status-card__value">
-              {status.active_layers.length > 0 ? (
-                <ul className="layer-list">
-                  {status.active_layers.map((layer) => (
-                    <li key={layer} className="layer-list__item">
-                      {layer}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <span className="muted">none</span>
-              )}
-            </div>
-          </section>
-
-          <section className="status-card">
-            <div className="status-card__label">Remapping State</div>
-            <div className="status-card__value">
-              <span
-                className={`badge ${
-                  status.suspended ? "badge--warn" : "badge--ok"
-                }`}
-              >
-                {status.suspended ? "Suspended" : "Active"}
-              </span>
-              <div className="suspend-actions">
-                {status.suspended ? (
-                  <button
-                    className="btn btn--primary"
-                    onClick={handleResume}
-                    disabled={!connected}
-                  >
-                    Resume
-                  </button>
-                ) : (
-                  <button
-                    className="btn btn--secondary"
-                    onClick={handleSuspend}
-                    disabled={!connected}
-                  >
-                    Suspend
-                  </button>
-                )}
+        {/* Status definition-list panels */}
+        {status && (
+          <div className="status-panels">
+            <div className="status-panel">
+              {/* Daemon */}
+              <div className="status-panel__row">
+                <dt className="status-panel__dt">Daemon</dt>
+                <dd className="status-panel__dd">
+                  <span className={`status-dot ${connected ? "status-dot--ok" : "status-dot--err"}`} />
+                  {connected ? "connected" : "unreachable"}
+                  <span className="muted" style={{ fontSize: 11, marginLeft: 8 }}>{status.version}</span>
+                </dd>
               </div>
-              {actionError && (
-                <div className="action-error">{actionError}</div>
-              )}
-            </div>
-          </section>
 
-          <section className="status-card">
-            <div className="status-card__label">Grabbed Devices</div>
-            <div className="status-card__value">
-              <span className="count">{status.grabbed_devices.length}</span>
-              {status.grabbed_devices.length > 0 && (
-                <ul className="device-list">
-                  {status.grabbed_devices.map((dev) => (
-                    <li key={dev} className="device-list__item">
-                      {dev}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </section>
-
-          {status.focus && (
-            <section className="status-card">
-              <div className="status-card__label">Focus</div>
-              <div className="status-card__value">
-                <span className="focus-process">{status.focus.process}</span>
-                <span className="muted"> — {status.focus.title}</span>
+              {/* Remapping state */}
+              <div className="status-panel__row">
+                <dt className="status-panel__dt">Remapping</dt>
+                <dd className="status-panel__dd">
+                  <span className={`status-dot ${status.suspended ? "status-dot--warn" : "status-dot--ok"}`} />
+                  {status.suspended ? "suspended" : "active"}
+                </dd>
               </div>
-            </section>
-          )}
 
-          <section className="status-card">
-            <div className="status-card__label">Daemon Version</div>
-            <div className="status-card__value muted">{status.version}</div>
-          </section>
-        </div>
-      ) : (
-        <div className="status-placeholder">
-          {connected === false
-            ? "Cannot reach daemon."
-            : "Loading status..."}
-        </div>
-      )}
+              {/* Active profile */}
+              <div className="status-panel__row">
+                <dt className="status-panel__dt">Profile</dt>
+                <dd className="status-panel__dd" style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
+                  {status.active_profile}
+                </dd>
+              </div>
+
+              {/* Active layers */}
+              <div className="status-panel__row">
+                <dt className="status-panel__dt">Layers</dt>
+                <dd className="status-panel__dd">
+                  {status.active_layers.length > 0 ? (
+                    status.active_layers.map((l) => (
+                      <span key={l} className="status-layer-chip">{l}</span>
+                    ))
+                  ) : (
+                    <span className="muted" style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>base</span>
+                  )}
+                </dd>
+              </div>
+
+              {/* Focus */}
+              {status.focus && (
+                <div className="status-panel__row">
+                  <dt className="status-panel__dt">Focus</dt>
+                  <dd className="status-panel__dd">
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-hi)" }}>
+                      {status.focus.process}
+                    </span>
+                    <span className="muted" style={{ fontSize: 11 }}> — {status.focus.title}</span>
+                  </dd>
+                </div>
+              )}
+
+              {/* Grabbed devices */}
+              <div className="status-panel__row">
+                <dt className="status-panel__dt">Grabbed devices</dt>
+                <dd className="status-panel__dd">
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-hi)" }}>
+                    {status.grabbed_devices.length}
+                  </span>
+                  {status.grabbed_devices.length > 0 && (
+                    <span className="muted" style={{ fontSize: 11, fontFamily: "var(--font-mono)" }}>
+                      {" "}({status.grabbed_devices.join(", ")})
+                    </span>
+                  )}
+                </dd>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!status && !error && (
+          <span className="muted" style={{ fontSize: 12 }}>Loading status…</span>
+        )}
+      </div>
     </div>
   );
 }

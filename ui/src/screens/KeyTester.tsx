@@ -3,15 +3,16 @@ import { onStatus, onKeyEvent } from "../lib/client";
 import type { Status } from "../lib/client";
 import { reduceEvents } from "../lib/event-pairing";
 import type { TesterRow } from "../lib/event-pairing";
+import { Toolbar } from "../components/Toolbar";
 
 // ---- Sub-components ----
 
-interface KeyChipProps {
+interface InKeyChipProps {
   name: string;
   state: string;
 }
 
-function KeyChip({ name, state }: KeyChipProps) {
+function InKeyChip({ name, state }: InKeyChipProps) {
   const mod =
     state === "press"
       ? "key-chip--press"
@@ -21,18 +22,14 @@ function KeyChip({ name, state }: KeyChipProps) {
   return <span className={`key-chip ${mod}`}>{name}</span>;
 }
 
-interface ResolutionBadgeProps {
+interface OutKeyChipProps {
   text: string;
 }
 
-function ResolutionBadge({ text }: ResolutionBadgeProps) {
+function OutKeyChip({ text }: OutKeyChipProps) {
   const isSwallowed = text === "(swallowed)";
   return (
-    <span
-      className={`resolution-badge ${
-        isSwallowed ? "resolution-badge--swallowed" : ""
-      }`}
-    >
+    <span className={isSwallowed ? "out-chip out-chip--swallowed" : "out-chip"}>
       {text}
     </span>
   );
@@ -46,26 +43,26 @@ function RowItem({ row }: RowItemProps) {
   return (
     <div className="tester-row">
       {/* You pressed column */}
-      <div className="tester-col tester-col--pre">
-        <KeyChip name={row.pre.name} state={row.pre.state} />
+      <div className="tester-col">
+        <InKeyChip name={row.pre.name} state={row.pre.state} />
         {row.repeats !== undefined && row.repeats > 0 && (
           <span className="repeat-count">×{row.repeats + 1}</span>
         )}
       </div>
 
       {/* Apps received column */}
-      <div className="tester-col tester-col--post">
+      <div className="tester-col">
         {row.post.length > 0 ? (
           row.post
             .filter((p) => p.state === "press")
-            .map((p, i) => <KeyChip key={i} name={p.name} state={p.state} />)
+            .map((p, i) => <OutKeyChip key={i} text={p.name} />)
         ) : row._open ? (
-          <span className="muted tester-pending">…</span>
+          <span className="tester-pending">…</span>
         ) : row.resolution === undefined ? (
           <span className="muted">—</span>
         ) : null}
         {row.resolution !== undefined && (
-          <ResolutionBadge text={row.resolution} />
+          <OutKeyChip text={row.resolution} />
         )}
       </div>
     </div>
@@ -80,89 +77,64 @@ export function KeyTesterScreen() {
   const listRef = useRef<HTMLDivElement>(null);
   const hoverRef = useRef(false);
 
-  // Subscribe to status for active profile display
   useEffect(() => {
-    const unlistenP = onStatus((s: Status) => {
-      setProfile(s.active_profile);
-    });
-    return () => {
-      unlistenP.then((fn) => fn());
-    };
+    const p = onStatus((s: Status) => setProfile(s.active_profile));
+    return () => { p.then((f) => f()); };
   }, []);
 
-  // Subscribe to key events, feed into reduceEvents via functional setState
   useEffect(() => {
-    const unlistenP = onKeyEvent((ev) => {
+    const p = onKeyEvent((ev) => {
       setRows((prev) => reduceEvents(prev, ev));
     });
-    return () => {
-      unlistenP.then((fn) => fn());
-    };
+    return () => { p.then((f) => f()); };
   }, []);
 
-  // Auto-scroll to top when rows change, unless pointer is hovering
   useEffect(() => {
     if (!hoverRef.current && listRef.current) {
       listRef.current.scrollTop = 0;
     }
   }, [rows]);
 
-  const handleClear = useCallback(() => {
-    setRows([]);
-  }, []);
+  const handleClear = useCallback(() => setRows([]), []);
 
-  // Reverse for newest-on-top display
   const displayRows = [...rows].reverse();
 
   return (
-    <div className="screen key-tester-screen">
-      {/* Header */}
-      <div className="tester-header">
-        <div className="tester-header__left">
-          <h2 className="screen__title">Key Tester</h2>
-          {profile !== null && (
-            <span className="tester-profile-badge">{profile}</span>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+      <Toolbar
+        title="Key Tester"
+        sub={profile ? ` — ${profile}` : undefined}
+      >
+        <span className="muted" style={{ fontSize: 11 }}>hover to pause scroll</span>
+        <button className="btn" onClick={handleClear} aria-label="Clear key tester history">
+          Clear
+        </button>
+      </Toolbar>
+
+      <div className="screen-content">
+        {/* Column headers */}
+        <div className="tester-cols-header">
+          <div className="tester-col-label">You pressed</div>
+          <div className="tester-col-label">Apps received</div>
+        </div>
+
+        {/* Event list */}
+        <div
+          ref={listRef}
+          className="tester-list"
+          onMouseEnter={() => { hoverRef.current = true; }}
+          onMouseLeave={() => { hoverRef.current = false; }}
+          role="log"
+          aria-label="Key event log"
+          aria-live="polite"
+          style={{ flex: 1 }}
+        >
+          {displayRows.length === 0 ? (
+            <div className="tester-empty">Press any key to start recording…</div>
+          ) : (
+            displayRows.map((row) => <RowItem key={row.id} row={row} />)
           )}
         </div>
-        <div className="tester-header__right">
-          <span className="tester-hint muted">Hover list to pause scroll</span>
-          <button
-            className="btn btn--secondary tester-clear-btn"
-            onClick={handleClear}
-            aria-label="Clear key tester history"
-          >
-            Clear
-          </button>
-        </div>
-      </div>
-
-      {/* Column headers */}
-      <div className="tester-cols-header">
-        <div className="tester-col-label">You pressed</div>
-        <div className="tester-col-label">Apps received</div>
-      </div>
-
-      {/* Event list */}
-      <div
-        ref={listRef}
-        className="tester-list"
-        onMouseEnter={() => {
-          hoverRef.current = true;
-        }}
-        onMouseLeave={() => {
-          hoverRef.current = false;
-        }}
-        role="log"
-        aria-label="Key event log"
-        aria-live="polite"
-      >
-        {displayRows.length === 0 ? (
-          <div className="tester-empty muted">
-            Press any key to start recording…
-          </div>
-        ) : (
-          displayRows.map((row) => <RowItem key={row.id} row={row} />)
-        )}
       </div>
     </div>
   );

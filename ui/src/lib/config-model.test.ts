@@ -11,6 +11,8 @@ import {
   getDeviceGrabs,
   setKeyboardGrab,
   setMouseGrab,
+  getProfileMatchLabel,
+  actionToTomlLine,
 } from "./config-model";
 
 // The spec example TOML from crates/conduit-core/src/config.rs tests.
@@ -431,5 +433,105 @@ describe("setMouseGrab", () => {
     const m = parseConfigToml(EXPLICIT_KEYBOARDS_TOML);
     setMouseGrab(m, "mouse-x", false);
     expect(getDeviceGrabs(m).grabMice).toEqual(["mouse-x"]);
+  });
+});
+
+describe("getProfileMatchLabel", () => {
+  it("returns null for default profile (no match rule)", () => {
+    const m = parseConfigToml(SPEC_TOML);
+    expect(getProfileMatchLabel(m, "default")).toBeNull();
+  });
+
+  it("returns class:firefox for the firefox profile", () => {
+    const m = parseConfigToml(SPEC_TOML);
+    expect(getProfileMatchLabel(m, "firefox")).toBe("class:firefox");
+  });
+
+  it("returns null for unknown profile", () => {
+    const m = parseConfigToml(SPEC_TOML);
+    expect(getProfileMatchLabel(m, "nonexistent")).toBeNull();
+  });
+
+  it("returns process: when class is absent", () => {
+    const toml = `
+[profile.default.keys]
+a = "b"
+[profile.terminal]
+match = { process = "alacritty" }
+[profile.terminal.keys]
+`;
+    const m = parseConfigToml(toml);
+    expect(getProfileMatchLabel(m, "terminal")).toBe("process:alacritty");
+  });
+});
+
+describe("actionToTomlLine", () => {
+  it("renders key remap on base layer", () => {
+    const line = actionToTomlLine("default", "base", "capslock", {
+      kind: "key",
+      key: "esc",
+    });
+    expect(line).toBe(`conduit.toml → [profile.default.keys] capslock = "esc"`);
+  });
+
+  it("renders taphold on base layer", () => {
+    const line = actionToTomlLine("default", "base", "capslock", {
+      kind: "taphold",
+      tap: "esc",
+      hold: "leftctrl",
+    });
+    expect(line).toBe(
+      `conduit.toml → [profile.default.keys] capslock = { tap = "esc", hold = "leftctrl" }`
+    );
+  });
+
+  it("renders taphold with timeoutMs", () => {
+    const line = actionToTomlLine("default", "base", "f", {
+      kind: "taphold",
+      tap: "f",
+      hold: "layer:nav",
+      timeoutMs: 150,
+    });
+    expect(line).toBe(
+      `conduit.toml → [profile.default.keys] f = { tap = "f", hold = "layer:nav", timeout_ms = 150 }`
+    );
+  });
+
+  it("renders layer_toggle on named layer", () => {
+    const line = actionToTomlLine("default", "nav", "h", {
+      kind: "layer_toggle",
+      layer: "media",
+    });
+    expect(line).toBe(
+      `conduit.toml → [profile.default.layers.nav] h = "layer:media"`
+    );
+  });
+
+  it("renders disabled", () => {
+    const line = actionToTomlLine("default", "base", "capslock", {
+      kind: "disabled",
+    });
+    expect(line).toBe(
+      `conduit.toml → [profile.default.keys] capslock = "disabled"`
+    );
+  });
+
+  it("renders passthrough", () => {
+    const line = actionToTomlLine("firefox", "base", "mouse4", {
+      kind: "passthrough",
+    });
+    expect(line).toBe(
+      `conduit.toml → [profile.firefox.keys] mouse4 = "passthrough"`
+    );
+  });
+
+  it("uses profile.P.layers.L section for named layer", () => {
+    const line = actionToTomlLine("myprofile", "symbols", "a", {
+      kind: "key",
+      key: "b",
+    });
+    expect(line).toBe(
+      `conduit.toml → [profile.myprofile.layers.symbols] a = "b"`
+    );
   });
 });

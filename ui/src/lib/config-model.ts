@@ -360,3 +360,72 @@ export function setMouseGrab(
 
   return { ...m, devices: d };
 }
+
+// ── Presentation helpers (pure, no side effects) ──────────────────────────────
+
+/**
+ * Returns a short human-readable match rule label for display in the rail,
+ * e.g. `class:firefox` or `process:code`.
+ * Returns null for the default profile (no match rule).
+ */
+export function getProfileMatchLabel(
+  m: ConfigModel,
+  profileName: string
+): string | null {
+  const prof = m.profiles.find((p) => p.name === profileName);
+  if (!prof || !prof.match) return null;
+  const entries = Object.entries(prof.match);
+  if (entries.length === 0) return null;
+  // Prefer class, then process, then title, then first available
+  const preferred = ["class", "process", "title"];
+  const entry =
+    preferred.map((k) => entries.find(([ek]) => ek === k)).find(Boolean) ??
+    entries[0];
+  return `${entry[0]}:${entry[1]}`;
+}
+
+/**
+ * Renders the exact TOML assignment line that would be written to conduit.toml
+ * for a given key action.
+ *
+ * Examples:
+ *   `conduit.toml → [profile.default.keys] capslock = { tap = "esc", hold = "leftctrl" }`
+ *   `conduit.toml → [profile.default.layers.nav] h = "left"`
+ */
+export function actionToTomlLine(
+  profileName: string,
+  layer: string,
+  keyName: string,
+  action: ActionModel
+): string {
+  const section =
+    layer === "base"
+      ? `profile.${profileName}.keys`
+      : `profile.${profileName}.layers.${layer}`;
+
+  let valueStr: string;
+  switch (action.kind) {
+    case "key":
+      valueStr = `"${action.key}"`;
+      break;
+    case "disabled":
+      valueStr = `"disabled"`;
+      break;
+    case "passthrough":
+      valueStr = `"passthrough"`;
+      break;
+    case "layer_toggle":
+      valueStr = `"layer:${action.layer}"`;
+      break;
+    case "taphold": {
+      const parts = [`tap = "${action.tap}"`, `hold = "${action.hold}"`];
+      if (action.timeoutMs !== undefined) {
+        parts.push(`timeout_ms = ${action.timeoutMs}`);
+      }
+      valueStr = `{ ${parts.join(", ")} }`;
+      break;
+    }
+  }
+
+  return `conduit.toml → [${section}] ${keyName} = ${valueStr}`;
+}
