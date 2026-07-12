@@ -22,6 +22,10 @@ static KEYS: &[(&str, u16)] = &[
     ("compose", 127), ("back", 158), ("forward", 159), ("print", 210),
     ("btn_left", 272), ("btn_right", 273), ("btn_middle", 274),
     ("mouse4", 275), ("mouse5", 276), // BTN_SIDE / BTN_EXTRA — canonical UI names
+    ("btn_forward", 277), ("btn_back", 278), ("btn_task", 279),
+    // Wheel pseudo-keys: unassigned evdev codes used internally so scroll
+    // ticks can flow through the engine as ordinary key events.
+    ("wheelup", 760), ("wheeldown", 761), ("wheelleft", 762), ("wheelright", 763),
 ];
 
 static ALIASES: &[(&str, &str)] = &[
@@ -50,6 +54,15 @@ pub fn is_mouse_button(key: Key) -> bool {
     (0x110..=0x117).contains(&key.0) // BTN_LEFT..BTN_TASK
 }
 
+pub const WHEEL_UP: Key = Key(760);
+pub const WHEEL_DOWN: Key = Key(761);
+pub const WHEEL_LEFT: Key = Key(762);
+pub const WHEEL_RIGHT: Key = Key(763);
+
+pub fn is_wheel(key: Key) -> bool {
+    (760..=763).contains(&key.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -72,5 +85,27 @@ mod tests {
     #[test]
     fn unknown_name_is_none() {
         assert_eq!(from_name("notakey"), None);
+    }
+
+    #[test]
+    fn wheel_and_button_names_round_trip() {
+        for name in ["btn_forward", "btn_back", "btn_task", "wheelup", "wheeldown", "wheelleft", "wheelright"] {
+            let k = from_name(name).expect(name);
+            assert_eq!(super::name(k), name);
+        }
+    }
+
+    #[test]
+    fn wheel_consts_and_predicate() {
+        assert_eq!(from_name("wheelup"), Some(WHEEL_UP));
+        assert_eq!(from_name("wheeldown"), Some(WHEEL_DOWN));
+        assert_eq!(from_name("wheelleft"), Some(WHEEL_LEFT));
+        assert_eq!(from_name("wheelright"), Some(WHEEL_RIGHT));
+        for k in [WHEEL_UP, WHEEL_DOWN, WHEEL_LEFT, WHEEL_RIGHT] {
+            assert!(is_wheel(k));
+            assert!((k.0 as usize) < crate::config::KEY_TABLE_SIZE);
+        }
+        assert!(!is_wheel(Key(30)));
+        assert!(!is_wheel(Key(272)));
     }
 }
