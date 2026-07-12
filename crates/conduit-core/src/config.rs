@@ -92,6 +92,10 @@ pub enum ConfigError {
     InheritCycle(String),
     #[error("panic chord unreachable in profile `{profile}`")]
     PanicChordUnreachable { profile: String },
+    #[error("profile '{profile}': invalid title regex: {message}")]
+    InvalidRegex { profile: String, message: String },
+    #[error("profile '{0}' has no match rule; only 'default' may omit match")]
+    NoMatcher(String),
     #[error("config is empty: no default profile and no keys")]
     Empty,
 }
@@ -176,10 +180,18 @@ pub fn compile(toml_str: &str) -> Result<CompiledConfig, ConfigError> {
             .panic_chord
             .iter()
             .map(|n| {
-                keys::from_name(n).ok_or_else(|| ConfigError::UnknownKey {
-                    profile: "<settings>".to_string(),
+                let key = keys::from_name(n).ok_or_else(|| ConfigError::UnknownKey {
+                    profile: "settings".to_string(),
                     name: n.clone(),
-                })
+                })?;
+                // Bounds check panic_chord keys
+                if key.0 as usize >= KEY_TABLE_SIZE {
+                    return Err(ConfigError::UnknownKey {
+                        profile: "settings".to_string(),
+                        name: n.clone(),
+                    });
+                }
+                Ok(key)
             })
             .collect::<Result<Vec<_>, _>>()?
     };
@@ -295,12 +307,21 @@ pub fn compile(toml_str: &str) -> Result<CompiledConfig, ConfigError> {
                             name: lname.to_string(),
                         })
                 }
-                s => keys::from_name(s)
-                    .map(Action::Key)
-                    .ok_or_else(|| ConfigError::UnknownKey {
-                        profile: profile_name.to_string(),
-                        name: s.to_string(),
-                    }),
+                s => {
+                    let key = keys::from_name(s)
+                        .ok_or_else(|| ConfigError::UnknownKey {
+                            profile: profile_name.to_string(),
+                            name: s.to_string(),
+                        })?;
+                    // Bounds check for output keys
+                    if key.0 as usize >= KEY_TABLE_SIZE {
+                        return Err(ConfigError::UnknownKey {
+                            profile: profile_name.to_string(),
+                            name: s.to_string(),
+                        });
+                    }
+                    Ok(Action::Key(key))
+                }
             }
         };
 
@@ -310,6 +331,13 @@ pub fn compile(toml_str: &str) -> Result<CompiledConfig, ConfigError> {
                 profile: name.to_string(),
                 name: key_name.clone(),
             })?;
+            // Bounds check for input key
+            if key.0 as usize >= KEY_TABLE_SIZE {
+                return Err(ConfigError::UnknownKey {
+                    profile: name.to_string(),
+                    name: key_name.clone(),
+                });
+            }
             let action = match raw_action {
                 RawAction::Str(s) => parse_action_str(s, name)?,
                 RawAction::TapHold { tap, hold, timeout_ms } => {
@@ -317,6 +345,13 @@ pub fn compile(toml_str: &str) -> Result<CompiledConfig, ConfigError> {
                         profile: name.to_string(),
                         name: tap.clone(),
                     })?;
+                    // Bounds check for output key (tap)
+                    if tap_key.0 as usize >= KEY_TABLE_SIZE {
+                        return Err(ConfigError::UnknownKey {
+                            profile: name.to_string(),
+                            name: tap.clone(),
+                        });
+                    }
                     let hold_action = if hold.starts_with("layer:") {
                         let lname = &hold[6..];
                         let idx = layer_index(lname).ok_or_else(|| ConfigError::UnknownLayer {
@@ -329,6 +364,13 @@ pub fn compile(toml_str: &str) -> Result<CompiledConfig, ConfigError> {
                             profile: name.to_string(),
                             name: hold.clone(),
                         })?;
+                        // Bounds check for output key (hold)
+                        if hold_key.0 as usize >= KEY_TABLE_SIZE {
+                            return Err(ConfigError::UnknownKey {
+                                profile: name.to_string(),
+                                name: hold.clone(),
+                            });
+                        }
                         HoldAction::Key(hold_key)
                     };
                     let timeout_us = timeout_ms.unwrap_or(settings_timeout_us / 1000) * 1000;
@@ -350,6 +392,13 @@ pub fn compile(toml_str: &str) -> Result<CompiledConfig, ConfigError> {
                     profile: name.to_string(),
                     name: key_name.clone(),
                 })?;
+                // Bounds check for input key
+                if key.0 as usize >= KEY_TABLE_SIZE {
+                    return Err(ConfigError::UnknownKey {
+                        profile: name.to_string(),
+                        name: key_name.clone(),
+                    });
+                }
                 let action = match raw_action {
                     RawAction::Str(s) => parse_action_str(s, name)?,
                     RawAction::TapHold { tap, hold, timeout_ms } => {
@@ -357,6 +406,13 @@ pub fn compile(toml_str: &str) -> Result<CompiledConfig, ConfigError> {
                             profile: name.to_string(),
                             name: tap.clone(),
                         })?;
+                        // Bounds check for output key (tap)
+                        if tap_key.0 as usize >= KEY_TABLE_SIZE {
+                            return Err(ConfigError::UnknownKey {
+                                profile: name.to_string(),
+                                name: tap.clone(),
+                            });
+                        }
                         let hold_action = if hold.starts_with("layer:") {
                             let lname = &hold[6..];
                             let idx = layer_index(lname).ok_or_else(|| ConfigError::UnknownLayer {
@@ -369,6 +425,13 @@ pub fn compile(toml_str: &str) -> Result<CompiledConfig, ConfigError> {
                                 profile: name.to_string(),
                                 name: hold.clone(),
                             })?;
+                            // Bounds check for output key (hold)
+                            if hold_key.0 as usize >= KEY_TABLE_SIZE {
+                                return Err(ConfigError::UnknownKey {
+                                    profile: name.to_string(),
+                                    name: hold.clone(),
+                                });
+                            }
                             HoldAction::Key(hold_key)
                         };
                         let timeout_us = timeout_ms.unwrap_or(settings_timeout_us / 1000) * 1000;
@@ -408,7 +471,11 @@ pub fn compile(toml_str: &str) -> Result<CompiledConfig, ConfigError> {
             continue;
         }
         let raw_profile = profiles.get(pname).unwrap();
-        let matcher = build_matcher(raw_profile)?;
+        // Non-default profiles must have a match block
+        if raw_profile.r#match.is_none() {
+            return Err(ConfigError::NoMatcher(pname.clone()));
+        }
+        let matcher = build_matcher(raw_profile, pname)?;
         let (layers, layer_names) = compiled_map.shift_remove(pname).unwrap();
         compiled_profiles.push(CompiledProfile {
             name: pname.clone(),
@@ -421,7 +488,7 @@ pub fn compile(toml_str: &str) -> Result<CompiledConfig, ConfigError> {
     // Append default last
     {
         let raw_default = profiles.get("default").unwrap();
-        let matcher = build_matcher(raw_default)?;
+        let matcher = build_matcher(raw_default, "default")?;
         let (layers, layer_names) = compiled_map.shift_remove("default").unwrap();
         compiled_profiles.push(CompiledProfile {
             name: "default".to_string(),
@@ -436,6 +503,11 @@ pub fn compile(toml_str: &str) -> Result<CompiledConfig, ConfigError> {
     // Step 6: Panic-chord validation
     for cp in &compiled_profiles {
         let all_blocked = panic_chord.iter().all(|chord_key| {
+            // Bounds check: should never happen here since panic_chord was already checked,
+            // but be defensive
+            if chord_key.0 as usize >= KEY_TABLE_SIZE {
+                return false;
+            }
             match cp.layers[0][chord_key.0 as usize] {
                 Some(Action::Passthrough) | None => false,
                 Some(_) => true,
@@ -455,7 +527,7 @@ pub fn compile(toml_str: &str) -> Result<CompiledConfig, ConfigError> {
     })
 }
 
-fn build_matcher(raw_profile: &RawProfile) -> Result<Option<Matcher>, ConfigError> {
+fn build_matcher(raw_profile: &RawProfile, profile_name: &str) -> Result<Option<Matcher>, ConfigError> {
     match &raw_profile.r#match {
         None => Ok(None),
         Some(rm) => {
@@ -464,7 +536,10 @@ fn build_matcher(raw_profile: &RawProfile) -> Result<Option<Matcher>, ConfigErro
                 .as_ref()
                 .map(|t| regex::Regex::new(t))
                 .transpose()
-                .map_err(|e| ConfigError::Toml(format!("invalid regex in match.title: {e}")))?;
+                .map_err(|e| ConfigError::InvalidRegex {
+                    profile: profile_name.to_string(),
+                    message: e.to_string(),
+                })?;
             Ok(Some(Matcher {
                 process: rm.process.clone(),
                 class: rm.class.clone(),
@@ -566,5 +641,42 @@ mod tests {
     fn empty_config_gets_default_profile() {
         let c = compile("").unwrap();
         assert_eq!(c.profiles[c.default_idx].name, "default");
+    }
+
+    #[test]
+    fn oob_key_code_768_rejected_as_input() {
+        let err = compile("[profile.default.keys]\n\"key:768\" = \"esc\"").unwrap_err();
+        assert!(matches!(err, ConfigError::UnknownKey { .. }));
+    }
+
+    #[test]
+    fn oob_key_code_900_rejected_as_output() {
+        let err = compile("[profile.default.keys]\na = \"key:900\"").unwrap_err();
+        assert!(matches!(err, ConfigError::UnknownKey { .. }));
+    }
+
+    #[test]
+    fn oob_panic_chord_rejected() {
+        let err = compile("[settings]\npanic_chord = [\"key:800\"]").unwrap_err();
+        assert!(matches!(err, ConfigError::UnknownKey { .. }));
+    }
+
+    #[test]
+    fn invalid_regex_in_match_title() {
+        let err = compile("[profile.test]\nmatch = { title = \"(\" }\n[profile.test.keys]\na = \"esc\"").unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidRegex { .. }));
+    }
+
+    #[test]
+    fn non_default_profile_without_match_rejected() {
+        let err = compile("[profile.foo]\n[profile.foo.keys]\na = \"esc\"").unwrap_err();
+        assert!(matches!(err, ConfigError::NoMatcher(_)));
+    }
+
+    #[test]
+    fn default_profile_without_match_allowed() {
+        let c = compile("[profile.default.keys]\na = \"esc\"").unwrap();
+        assert_eq!(c.profiles[c.default_idx].name, "default");
+        assert!(c.profiles[c.default_idx].matcher.is_none());
     }
 }
