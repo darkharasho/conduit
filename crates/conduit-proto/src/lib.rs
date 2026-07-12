@@ -54,6 +54,15 @@ pub struct DeviceInfo {
     pub is_keyboard: bool,
     pub is_mouse: bool,
     pub grabbed: bool,
+    /// Canonical selector: `vid:pid/name`.
+    #[serde(default)]
+    pub id: String,
+    /// Device class: keyboard | mouse | touchpad | gamepad | media | other.
+    #[serde(default)]
+    pub class: String,
+    /// Physical topology path (e.g. `usb-0000:00:14.0-1/input0`), often empty.
+    #[serde(default)]
+    pub phys: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -124,6 +133,24 @@ mod tests {
             serde_json::to_string(&devs).unwrap(),
             r#"{"type":"devices","devices":[]}"#
         );
+        let one = Response::Devices {
+            devices: vec![DeviceInfo {
+                path: "/dev/input/event0".into(),
+                name: "G600".into(),
+                vendor: 0x046d,
+                product: 0xc24a,
+                is_keyboard: false,
+                is_mouse: true,
+                grabbed: true,
+                id: "046d:c24a/G600".into(),
+                class: "mouse".into(),
+                phys: "usb-0000:00:14.0-1/input0".into(),
+            }],
+        };
+        let json = serde_json::to_string(&one).unwrap();
+        assert!(json.contains("\"id\":\"046d:c24a/G600\""));
+        assert!(json.contains("\"class\":\"mouse\""));
+        assert!(json.contains("\"phys\":\"usb-0000:00:14.0-1/input0\""));
         let wins = Response::Windows {
             windows: vec![],
         };

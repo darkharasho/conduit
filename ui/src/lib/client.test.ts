@@ -77,6 +77,9 @@ describe("listDevices", () => {
         is_keyboard: true,
         is_mouse: false,
         grabbed: true,
+        id: "1234:5678/Keyboard",
+        class: "keyboard",
+        phys: "",
       },
     ];
     mockInvoke.mockResolvedValueOnce(devices);

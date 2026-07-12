@@ -26,6 +26,11 @@ export interface DeviceInfo {
   is_keyboard: boolean;
   is_mouse: boolean;
   grabbed: boolean;
+  /** Canonical selector: `vid:pid/name` */
+  id: string;
+  /** keyboard | mouse | touchpad | gamepad | media | other */
+  class: string;
+  phys: string;
 }
 
 export interface WireEvent {

@@ -249,6 +249,9 @@ pub fn run(
                                     is_keyboard: d.is_keyboard(),
                                     is_mouse: d.is_mouse(),
                                     grabbed: true,
+                                    id: d.id(),
+                                    class: d.class.as_str().to_string(),
+                                    phys: d.phys.clone(),
                                 })
                             })
                             .collect();
