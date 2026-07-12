@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Rust workspace
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # conduit-ui (Tauri) is a workspace member, so the workspace build needs
+      # the Tauri Linux system deps; libudev-dev is for the daemon.
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev libwebkit2gtk-4.1-dev \
+            build-essential libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test --workspace
+      - name: Deny warnings
+        run: |
+          count=$(cargo build --workspace 2>&1 | grep -c "^warning" || true)
+          echo "warnings: $count"
+          test "$count" -eq 0
+
+  ui:
+    name: UI tests + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci
+      - run: npx vitest run --maxWorkers=2
+      - run: npm run build
+
+  integration:
+    name: Daemon integration (uinput, best effort)
+    runs-on: ubuntu-latest
+    # Timing-sensitive real-device tests; informative, not gating.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev libwebkit2gtk-4.1-dev \
+            build-essential libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev
+      - uses: Swatinem/rust-cache@v2
+      - name: Enable uinput
+        run: |
+          sudo modprobe uinput
+          sudo chmod 666 /dev/uinput
+          sudo chmod -R a+r /dev/input || true
+      - name: Run ignored integration tests
+        run: sudo -E env "PATH=$PATH" cargo test -p conduit-daemon --test integration -- --ignored
