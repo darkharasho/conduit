@@ -2,6 +2,7 @@ import { useState } from "react";
 import { StatusScreen } from "./screens/Status";
 import { MappingsScreen } from "./screens/Mappings";
 import { KeyTesterScreen } from "./screens/KeyTester";
+import { DevicesScreen } from "./screens/Devices";
 
 type Screen = "mappings" | "key-tester" | "devices" | "status";
 
@@ -11,15 +12,6 @@ const NAV_ITEMS: { id: Screen; label: string }[] = [
   { id: "devices", label: "Devices" },
   { id: "status", label: "Status" },
 ];
-
-function PlaceholderScreen({ title }: { title: string }) {
-  return (
-    <div className="screen placeholder-screen">
-      <h2 className="screen__title">{title}</h2>
-      <p className="muted">Coming soon.</p>
-    </div>
-  );
-}
 
 function App() {
   const [activeScreen, setActiveScreen] = useState<Screen>("status");
@@ -33,7 +25,7 @@ function App() {
       case "key-tester":
         return <KeyTesterScreen />;
       case "devices":
-        return <PlaceholderScreen title="Devices" />;
+        return <DevicesScreen />;
     }
   }
 

@@ -8,6 +8,9 @@ import {
   listLayers,
   addProfile,
   addLayer,
+  getDeviceGrabs,
+  setKeyboardGrab,
+  setMouseGrab,
 } from "./config-model";
 
 // The spec example TOML from crates/conduit-core/src/config.rs tests.
@@ -258,5 +261,175 @@ describe("serializeConfigToml", () => {
     // Check if the layer exists
     const layers = listLayers(m3, "default");
     expect(layers).toContain("nav2");
+  });
+});
+
+// TOML with grab_all_keyboards = true to test conversion
+const GRAB_ALL_TOML = `
+[settings]
+tap_hold_timeout = 200
+
+[devices]
+grab_all_keyboards = true
+grab_mice = ["Logitech G502"]
+
+[profile.default.keys]
+capslock = "esc"
+`;
+
+// TOML with explicit keyboard list
+const EXPLICIT_KEYBOARDS_TOML = `
+[settings]
+tap_hold_timeout = 200
+
+[devices]
+grab_all_keyboards = false
+grab_keyboards = ["kbd-a", "kbd-b"]
+grab_mice = ["mouse-x"]
+
+[profile.default.keys]
+capslock = "esc"
+`;
+
+// TOML with no [devices] section
+const NO_DEVICES_TOML = `
+[settings]
+tap_hold_timeout = 200
+
+[profile.default.keys]
+capslock = "esc"
+`;
+
+describe("getDeviceGrabs", () => {
+  it("reads grab_all_keyboards=true from TOML", () => {
+    const m = parseConfigToml(GRAB_ALL_TOML);
+    const grabs = getDeviceGrabs(m);
+    expect(grabs.grabAllKeyboards).toBe(true);
+    expect(grabs.grabKeyboards).toEqual([]);
+    expect(grabs.grabMice).toEqual(["Logitech G502"]);
+  });
+
+  it("reads explicit grab_keyboards from TOML", () => {
+    const m = parseConfigToml(EXPLICIT_KEYBOARDS_TOML);
+    const grabs = getDeviceGrabs(m);
+    expect(grabs.grabAllKeyboards).toBe(false);
+    expect(grabs.grabKeyboards).toEqual(["kbd-a", "kbd-b"]);
+    expect(grabs.grabMice).toEqual(["mouse-x"]);
+  });
+
+  it("returns safe defaults when [devices] section is absent", () => {
+    const m = parseConfigToml(NO_DEVICES_TOML);
+    const grabs = getDeviceGrabs(m);
+    expect(grabs.grabAllKeyboards).toBe(false);
+    expect(grabs.grabKeyboards).toEqual([]);
+    expect(grabs.grabMice).toEqual([]);
+  });
+});
+
+describe("setKeyboardGrab", () => {
+  it("grab_all=false: adds a keyboard to grab_keyboards", () => {
+    const m = parseConfigToml(EXPLICIT_KEYBOARDS_TOML);
+    const m2 = setKeyboardGrab(m, "kbd-c", true, ["kbd-a", "kbd-b"]);
+    const grabs = getDeviceGrabs(m2);
+    expect(grabs.grabKeyboards).toContain("kbd-c");
+    expect(grabs.grabKeyboards).toContain("kbd-a");
+    // Original unchanged
+    expect(getDeviceGrabs(m).grabKeyboards).toEqual(["kbd-a", "kbd-b"]);
+  });
+
+  it("grab_all=false: removes a keyboard from grab_keyboards", () => {
+    const m = parseConfigToml(EXPLICIT_KEYBOARDS_TOML);
+    const m2 = setKeyboardGrab(m, "kbd-a", false, ["kbd-a", "kbd-b"]);
+    const grabs = getDeviceGrabs(m2);
+    expect(grabs.grabKeyboards).not.toContain("kbd-a");
+    expect(grabs.grabKeyboards).toContain("kbd-b");
+  });
+
+  it("grab_all=false: add is idempotent", () => {
+    const m = parseConfigToml(EXPLICIT_KEYBOARDS_TOML);
+    const m2 = setKeyboardGrab(m, "kbd-a", true, ["kbd-a", "kbd-b"]);
+    const grabs = getDeviceGrabs(m2);
+    expect(grabs.grabKeyboards.filter((k) => k === "kbd-a")).toHaveLength(1);
+  });
+
+  it("grab_all=false: remove non-existent is idempotent", () => {
+    const m = parseConfigToml(EXPLICIT_KEYBOARDS_TOML);
+    const m2 = setKeyboardGrab(m, "kbd-z", false, ["kbd-a", "kbd-b"]);
+    expect(getDeviceGrabs(m2).grabKeyboards).toEqual(["kbd-a", "kbd-b"]);
+  });
+
+  it("grab_all=true: toggling OFF converts to explicit list minus the device", () => {
+    const m = parseConfigToml(GRAB_ALL_TOML);
+    // Currently grabbed keyboards: kbd-a, kbd-b, kbd-c — we toggle kbd-b off
+    const currentlyGrabbed = ["kbd-a", "kbd-b", "kbd-c"];
+    const m2 = setKeyboardGrab(m, "kbd-b", false, currentlyGrabbed);
+    const grabs = getDeviceGrabs(m2);
+    expect(grabs.grabAllKeyboards).toBe(false);
+    expect(grabs.grabKeyboards).toContain("kbd-a");
+    expect(grabs.grabKeyboards).toContain("kbd-c");
+    expect(grabs.grabKeyboards).not.toContain("kbd-b");
+  });
+
+  it("grab_all=true: toggling ON (adding) when grab_all already true keeps grab_all", () => {
+    const m = parseConfigToml(GRAB_ALL_TOML);
+    // Adding a device when grab_all is already true should not change grab_all
+    const m2 = setKeyboardGrab(m, "kbd-new", true, ["kbd-a"]);
+    const grabs = getDeviceGrabs(m2);
+    // grab_all stays true (adding to grab_all is a no-op conceptually, but
+    // implementation may keep grab_all=true)
+    expect(grabs.grabAllKeyboards).toBe(true);
+  });
+
+  it("creates [devices] section if absent", () => {
+    const m = parseConfigToml(NO_DEVICES_TOML);
+    const m2 = setKeyboardGrab(m, "kbd-new", true, []);
+    const grabs = getDeviceGrabs(m2);
+    expect(grabs.grabKeyboards).toContain("kbd-new");
+  });
+
+  it("is immutable — original model unchanged", () => {
+    const m = parseConfigToml(EXPLICIT_KEYBOARDS_TOML);
+    setKeyboardGrab(m, "kbd-a", false, ["kbd-a", "kbd-b"]);
+    expect(getDeviceGrabs(m).grabKeyboards).toEqual(["kbd-a", "kbd-b"]);
+  });
+});
+
+describe("setMouseGrab", () => {
+  it("adds a mouse to grab_mice", () => {
+    const m = parseConfigToml(EXPLICIT_KEYBOARDS_TOML);
+    const m2 = setMouseGrab(m, "mouse-y", true);
+    const grabs = getDeviceGrabs(m2);
+    expect(grabs.grabMice).toContain("mouse-y");
+    expect(grabs.grabMice).toContain("mouse-x");
+  });
+
+  it("removes a mouse from grab_mice", () => {
+    const m = parseConfigToml(EXPLICIT_KEYBOARDS_TOML);
+    const m2 = setMouseGrab(m, "mouse-x", false);
+    expect(getDeviceGrabs(m2).grabMice).not.toContain("mouse-x");
+  });
+
+  it("add is idempotent", () => {
+    const m = parseConfigToml(EXPLICIT_KEYBOARDS_TOML);
+    const m2 = setMouseGrab(m, "mouse-x", true);
+    expect(getDeviceGrabs(m2).grabMice.filter((n) => n === "mouse-x")).toHaveLength(1);
+  });
+
+  it("remove non-existent is idempotent", () => {
+    const m = parseConfigToml(EXPLICIT_KEYBOARDS_TOML);
+    const m2 = setMouseGrab(m, "ghost-mouse", false);
+    expect(getDeviceGrabs(m2).grabMice).toEqual(["mouse-x"]);
+  });
+
+  it("creates [devices] section if absent", () => {
+    const m = parseConfigToml(NO_DEVICES_TOML);
+    const m2 = setMouseGrab(m, "mouse-new", true);
+    expect(getDeviceGrabs(m2).grabMice).toContain("mouse-new");
+  });
+
+  it("is immutable — original model unchanged", () => {
+    const m = parseConfigToml(EXPLICIT_KEYBOARDS_TOML);
+    setMouseGrab(m, "mouse-x", false);
+    expect(getDeviceGrabs(m).grabMice).toEqual(["mouse-x"]);
   });
 });

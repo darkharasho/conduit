@@ -7,6 +7,7 @@ import {
   onConnection,
 } from "../lib/client";
 import type { Status as StatusData } from "../lib/client";
+import { SetupCheck } from "../components/SetupCheck";
 
 export function StatusScreen() {
   const [status, setStatus] = useState<StatusData | null>(null);
@@ -87,6 +88,8 @@ export function StatusScreen() {
       )}
 
       <h2 className="screen__title">Status</h2>
+
+      {connected === false && <SetupCheck />}
 
       {status ? (
         <div className="status-grid">

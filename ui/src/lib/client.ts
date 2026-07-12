@@ -75,8 +75,15 @@ export async function captureNextKey(): Promise<CapturedKey> {
   return invoke<CapturedKey>("capture_next_key");
 }
 
-export async function checkSetup(): Promise<{ daemon: boolean }> {
-  return invoke<{ daemon: boolean }>("check_setup");
+export interface SetupResult {
+  daemon: boolean;
+  uinput: boolean;
+  input_group: boolean;
+  config_ok: boolean;
+}
+
+export async function checkSetup(): Promise<SetupResult> {
+  return invoke<SetupResult>("check_setup");
 }
 
 // ---- Subscription event listeners ----

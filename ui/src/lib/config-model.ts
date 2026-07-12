@@ -273,3 +273,90 @@ export function addLayer(
 
   return { ...m, profiles };
 }
+
+// ── Device grab accessors ─────────────────────────────────────────────────────
+
+export interface DeviceGrabs {
+  grabAllKeyboards: boolean;
+  grabKeyboards: string[];
+  grabMice: string[];
+}
+
+/** Read the device grab settings from the model. */
+export function getDeviceGrabs(m: ConfigModel): DeviceGrabs {
+  const d = m.devices;
+  const grabAllKeyboards = (d["grab_all_keyboards"] as boolean | undefined) ?? false;
+  const grabKeyboards = (d["grab_keyboards"] as string[] | undefined) ?? [];
+  const grabMice = (d["grab_mice"] as string[] | undefined) ?? [];
+  return { grabAllKeyboards, grabKeyboards, grabMice };
+}
+
+/**
+ * Toggle a keyboard's grab state.
+ *
+ * If `grab_all_keyboards` is true and `grabbed=false`:
+ *   - set grab_all_keyboards = false
+ *   - set grab_keyboards = currentlyGrabbedKeyboards minus name
+ *
+ * If `grab_all_keyboards` is true and `grabbed=true`:
+ *   - no change (already grabbing all)
+ *
+ * If `grab_all_keyboards` is false:
+ *   - add/remove name from grab_keyboards (idempotent)
+ */
+export function setKeyboardGrab(
+  m: ConfigModel,
+  name: string,
+  grabbed: boolean,
+  currentlyGrabbedKeyboards: string[]
+): ConfigModel {
+  const d = { ...m.devices };
+  const grabAll = (d["grab_all_keyboards"] as boolean | undefined) ?? false;
+
+  if (grabAll) {
+    if (!grabbed) {
+      // Convert grab_all → explicit list, minus this device
+      const explicit = currentlyGrabbedKeyboards.filter((k) => k !== name);
+      d["grab_all_keyboards"] = false;
+      d["grab_keyboards"] = explicit;
+    }
+    // grabbed=true when grab_all=true: no-op (all keyboards already grabbed)
+  } else {
+    // Explicit list mode
+    const current = (d["grab_keyboards"] as string[] | undefined) ?? [];
+    if (grabbed) {
+      // Add idempotently
+      if (!current.includes(name)) {
+        d["grab_keyboards"] = [...current, name];
+      } else {
+        d["grab_keyboards"] = [...current];
+      }
+    } else {
+      // Remove
+      d["grab_keyboards"] = current.filter((k) => k !== name);
+    }
+  }
+
+  return { ...m, devices: d };
+}
+
+/**
+ * Toggle a mouse's grab state.
+ * Adds/removes name from grab_mice (idempotent).
+ */
+export function setMouseGrab(
+  m: ConfigModel,
+  name: string,
+  grabbed: boolean
+): ConfigModel {
+  const d = { ...m.devices };
+  const current = (d["grab_mice"] as string[] | undefined) ?? [];
+
+  if (grabbed) {
+    d["grab_mice"] = current.includes(name) ? [...current] : [...current, name];
+  } else {
+    d["grab_mice"] = current.filter((n) => n !== name);
+  }
+
+  return { ...m, devices: d };
+}
