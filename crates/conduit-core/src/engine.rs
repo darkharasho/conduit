@@ -51,7 +51,7 @@ impl Engine {
 
     pub fn tick(&mut self, now_us: u64) -> &[Event] {
         self.out.clear();
-        if self.pending.as_ref().map_or(false, |p| p.deadline_us <= now_us) {
+        while self.pending.as_ref().map_or(false, |p| p.deadline_us <= now_us) {
             self.resolve(Resolution::Hold);
         }
         &self.out
@@ -99,7 +99,9 @@ impl Engine {
         // Handle pending tap-hold state: buffer events or resolve
         if let Some(pending_phys) = self.pending.as_ref().map(|p| p.phys) {
             if ev.key == pending_phys && ev.state == KeyState::Release {
-                // pending key released before deadline → tap
+                // Pending key released: resolve as tap. First-arrival-wins policy:
+                // if release arrives before any tick() call (even if timestamp is past the
+                // deadline), we treat it as tap. This is intentional QMK-style behavior.
                 self.resolve(Resolution::Tap { release_time_us: ev.time_us });
                 return;
             }
@@ -280,4 +282,26 @@ mod tests {
         e.handle(release("f", 300_000)); // pops layer
         assert_eq!(e.handle(press("h", 350_000)), &[press("h", 350_000)]);
     }
+
+    #[test]
+    fn chained_expired_tap_holds_resolve_in_one_tick() {
+        // d and f are both tap-holds; both deadlines are past at tick time.
+        let toml = "[profile.default.keys]\nd = { tap = \"d\", hold = \"leftshift\" }\nf = { tap = \"f\", hold = \"leftctrl\" }";
+        let mut e = engine(toml);
+        e.handle(press("d", 0));
+        e.handle(press("f", 10_000)); // buffered behind d's pending
+        // one tick well past both deadlines must resolve BOTH holds
+        assert_eq!(e.tick(300_000), &[press("leftshift", 0), press("leftctrl", 10_000)]);
+        assert_eq!(e.next_deadline_us(), None);
+    }
+
+    #[test]
+    fn late_release_before_tick_still_resolves_tap() {
+        let mut e = engine(TH); // TH const already exists (capslock tap esc / hold leftctrl)
+        e.handle(press("capslock", 0));
+        // release timestamp is past the 200ms deadline, but no tick() has fired:
+        assert_eq!(e.handle(release("capslock", 250_000)),
+                   &[press("esc", 0), release("esc", 250_000)]);
+    }
+
 }
