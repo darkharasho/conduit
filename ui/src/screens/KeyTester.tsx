@@ -61,9 +61,9 @@ function RowItem({ row }: RowItemProps) {
             .map((p, i) => <KeyChip key={i} name={p.name} state={p.state} />)
         ) : row._open ? (
           <span className="muted tester-pending">…</span>
-        ) : (
+        ) : row.resolution === undefined ? (
           <span className="muted">—</span>
-        )}
+        ) : null}
         {row.resolution !== undefined && (
           <ResolutionBadge text={row.resolution} />
         )}

@@ -120,37 +120,71 @@ export function reduceEvents(rows: TesterRow[], ev: WireEvent): TesterRow[] {
     return rows;
   }
 
-  // --- POST event: attach to the most recent open row ---
+  // --- POST event: attach using rule hierarchy ---
   if (ev.phase === "post") {
-    const openIdx = lastOpenIndex(rows);
+    if (rows.length === 0) return rows; // nothing to attach to
 
-    if (openIdx !== -1) {
-      // Attach to the most recent open row
-      return rows.map((r, i) => {
-        if (i !== openIdx) return r;
-        return {
-          ...r,
-          post: [
-            ...r.post,
-            { name: ev.key_name, state: ev.state, timeUs: ev.time_us },
-          ],
-        };
-      });
+    const postEntry = { name: ev.key_name, state: ev.state, timeUs: ev.time_us };
+
+    // Rule 1: newest OPEN row whose pre.name === post.name, else newest CLOSED row
+    // whose pre.name === post.name (covers passthrough / interleaved typing).
+    let targetIdx = -1;
+    for (let i = rows.length - 1; i >= 0; i--) {
+      if (rows[i].pre.name === ev.key_name && rows[i]._open) {
+        targetIdx = i;
+        break;
+      }
+    }
+    if (targetIdx === -1) {
+      for (let i = rows.length - 1; i >= 0; i--) {
+        if (rows[i].pre.name === ev.key_name) {
+          targetIdx = i;
+          break;
+        }
+      }
     }
 
-    // No open row: attach to the newest row (replay burst after resolution)
-    if (rows.length === 0) return rows; // nothing to attach to
-    const newestIdx = rows.length - 1;
+    // Rule 2 (only for RELEASE posts): newest row (open or closed) that has an
+    // unbalanced post PRESS of the same key name (i.e. press count > release count).
+    if (targetIdx === -1 && ev.state === "release") {
+      for (let i = rows.length - 1; i >= 0; i--) {
+        const r = rows[i];
+        const pressCount = r.post.filter(
+          (p) => p.name === ev.key_name && p.state === "press"
+        ).length;
+        const releaseCount = r.post.filter(
+          (p) => p.name === ev.key_name && p.state === "release"
+        ).length;
+        if (pressCount > releaseCount) {
+          targetIdx = i;
+          break;
+        }
+      }
+    }
+
+    // Rule 3: oldest open row with no posts yet (covers remaps — the first
+    // unserved press gets the output).
+    if (targetIdx === -1) {
+      for (let i = 0; i < rows.length; i++) {
+        if (rows[i]._open && rows[i].post.length === 0) {
+          targetIdx = i;
+          break;
+        }
+      }
+    }
+
+    // Rule 4: newest row overall (last resort — never drop a post).
+    if (targetIdx === -1) {
+      targetIdx = rows.length - 1;
+    }
+
     return rows.map((r, i) => {
-      if (i !== newestIdx) return r;
+      if (i !== targetIdx) return r;
       const updated = {
         ...r,
-        post: [
-          ...r.post,
-          { name: ev.key_name, state: ev.state, timeUs: ev.time_us },
-        ],
+        post: [...r.post, postEntry],
       };
-      // Recompute resolution since we now have post data (row was closed as swallowed)
+      // Recompute resolution for closed rows that now have post data
       if (!r._open) {
         updated.resolution = computeResolution(updated);
       }
