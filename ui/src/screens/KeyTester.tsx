@@ -100,7 +100,7 @@ export function KeyTesterScreen() {
   const displayRows = [...rows].reverse();
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+    <div className="screen-shell">
       <Toolbar
         title="Key Tester"
         sub={profile ? ` — ${profile}` : undefined}

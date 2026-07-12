@@ -27,7 +27,7 @@ export function StatusScreen() {
   }, []);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+    <div className="screen-shell">
       <Toolbar title="Status" />
 
       <div className="screen-content">

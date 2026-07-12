@@ -315,6 +315,15 @@ button {
   border-color: var(--amber);
 }
 
+/* ── Screen shell (shared wrapper for all four screens) ── */
+
+.screen-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
 /* ── Screen content area ── */
 
 .screen-content {

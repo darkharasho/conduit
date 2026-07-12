@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
-import { onConnection, onStatus, getConfig } from "./lib/client";
-import type { Status } from "./lib/client";
+import { useCallback, useEffect, useState } from "react";
+import { onConnection, onStatus, getConfig, setConfig, listWindows } from "./lib/client";
+import type { Status, FocusInfo } from "./lib/client";
 import {
   parseConfigToml,
+  serializeConfigToml,
   listProfiles,
   getProfileMatchLabel,
+  addProfile,
 } from "./lib/config-model";
 import type { ConfigModel } from "./lib/config-model";
 import { StatusScreen } from "./screens/Status";
@@ -30,7 +32,13 @@ function App() {
   const [configModel, setConfigModel] = useState<ConfigModel | null>(null);
   const [activeProfile, setActiveProfile] = useState("default");
 
-  const loadConfig = async () => {
+  // Profile add modal state (lifted from MappingsScreen to break CustomEvent bus)
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [modalWindows, setModalWindows] = useState<FocusInfo[]>([]);
+  const [loadingWindows, setLoadingWindows] = useState(false);
+  const [windowError, setWindowError] = useState<string | null>(null);
+
+  const loadConfig = useCallback(async () => {
     try {
       const toml = await getConfig();
       const m = parseConfigToml(toml);
@@ -38,7 +46,44 @@ function App() {
     } catch {
       // Non-fatal
     }
-  };
+  }, []);
+
+  // Stable callback: re-fetch model when profiles change, keep activeProfile valid
+  const handleProfilesChange = useCallback((names: string[]) => {
+    loadConfig();
+    setActiveProfile((prev) => {
+      if (!names.includes(prev) && names.length > 0) return names[0];
+      return prev;
+    });
+  }, [loadConfig]);
+
+  // Stable callback: open the "new profile" window picker modal
+  const handleOpenAddProfile = useCallback(async () => {
+    setShowProfileModal(true);
+    setLoadingWindows(true);
+    setWindowError(null);
+    try {
+      const wins = await listWindows();
+      setModalWindows(wins);
+    } catch (err) {
+      setWindowError(String(err));
+    } finally {
+      setLoadingWindows(false);
+    }
+  }, []);
+
+  const handleSelectWindow = useCallback((win: FocusInfo) => {
+    const name = win.class.toLowerCase().replace(/\s+/g, "_");
+    setConfigModel((prev) => {
+      if (!prev) return prev;
+      const updated = addProfile(prev, name, win.class);
+      // Persist to daemon asynchronously (fire-and-forget; loadConfig will sync)
+      setConfig(serializeConfigToml(updated)).catch(() => {});
+      return updated;
+    });
+    setActiveProfile(name);
+    setShowProfileModal(false);
+  }, []);
 
   useEffect(() => {
     loadConfig();
@@ -57,13 +102,17 @@ function App() {
       unlistenConn.then(([f1, f2]) => { f1(); f2(); });
       unlistenStatus.then((f) => f());
     };
-  }, []);
+  }, [loadConfig]);
 
-  // Keyboard shortcuts 1-4 to switch screens (skip when typing in an input)
+  // Keyboard shortcuts 1-4 to switch screens
+  // Skip when modifier keys are held or when focus is in an editable element
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const target = e.target as HTMLElement;
+      const tag = target?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (target?.isContentEditable) return;
       const item = NAV_ITEMS.find((n) => n.key === e.key);
       if (item) setActiveScreen(item.id);
     };
@@ -79,15 +128,7 @@ function App() {
         return (
           <MappingsScreen
             railActiveProfile={activeProfile}
-            onRailProfileChange={setActiveProfile}
-            onProfilesChange={(names) => {
-              // Re-fetch model when profiles change so rail shows fresh data
-              loadConfig();
-              // Ensure activeProfile is still valid
-              if (!names.includes(activeProfile) && names.length > 0) {
-                setActiveProfile(names[0]);
-              }
-            }}
+            onProfilesChange={handleProfilesChange}
           />
         );
       case "key-tester":
@@ -134,7 +175,7 @@ function App() {
           </nav>
 
           {/* Profiles section — only on Mappings screen */}
-          {activeScreen === "mappings" && profiles.length > 0 && (
+          {activeScreen === "mappings" && (
             <>
               <div className="rail__section-label">Profiles</div>
               {profiles.map((name) => {
@@ -164,11 +205,7 @@ function App() {
               })}
               <button
                 className="rail__add-profile"
-                onClick={() => {
-                  document.dispatchEvent(
-                    new CustomEvent("conduit:add-profile")
-                  );
-                }}
+                onClick={handleOpenAddProfile}
               >
                 + new profile
               </button>
@@ -179,6 +216,50 @@ function App() {
         {/* Main content */}
         <div className="main-area">{renderScreen()}</div>
       </div>
+
+      {/* Profile add modal (lifted from MappingsScreen) */}
+      {showProfileModal && (
+        <div className="modal-backdrop" onClick={() => setShowProfileModal(false)}>
+          <div
+            className="modal"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Select window for new profile"
+          >
+            <div className="modal__header">
+              <span>Select window class</span>
+              <button
+                className="modal__close"
+                onClick={() => setShowProfileModal(false)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal__body">
+              {loadingWindows && <div className="muted">Loading windows…</div>}
+              {windowError && <div className="banner--error">{windowError}</div>}
+              {!loadingWindows && modalWindows.length === 0 && !windowError && (
+                <div className="muted">No windows found.</div>
+              )}
+              <ul className="window-list">
+                {modalWindows.map((win, idx) => (
+                  <li key={idx}>
+                    <button
+                      className="window-list__item"
+                      onClick={() => handleSelectWindow(win)}
+                    >
+                      <span className="window-list__class">{win.class}</span>
+                      <span className="window-list__title muted"> — {win.title}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Bottom status bar (26px, mono 11px) */}
       <div className="status-bar" role="status" aria-label="Daemon status">

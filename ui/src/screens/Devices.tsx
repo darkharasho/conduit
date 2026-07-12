@@ -135,7 +135,7 @@ export function DevicesScreen() {
   const grabs = config ? getDeviceGrabs(config) : null;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+    <div className="screen-shell">
       <Toolbar title="Devices" />
 
       <div className="screen-content">

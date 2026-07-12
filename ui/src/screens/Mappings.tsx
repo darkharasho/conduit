@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { getConfig, setConfig, onConnection } from "../lib/client";
 import {
   parseConfigToml,
@@ -14,22 +14,16 @@ import type { ConfigModel, ActionModel } from "../lib/config-model";
 import { KeyboardViz } from "../components/KeyboardViz";
 import { Toolbar } from "../components/Toolbar";
 import { InspectorPanel } from "../components/InspectorPanel";
-import { listWindows } from "../lib/client";
-import { addProfile } from "../lib/config-model";
-import type { FocusInfo } from "../lib/client";
 
 interface Props {
   /** Rail-selected profile (controlled by App.tsx rail) */
   railActiveProfile: string;
-  /** Notify App.tsx when profile selection changes */
-  onRailProfileChange: (name: string) => void;
   /** Notify App.tsx when profile list changes */
   onProfilesChange: (names: string[]) => void;
 }
 
 export function MappingsScreen({
   railActiveProfile,
-  onRailProfileChange,
   onProfilesChange,
 }: Props) {
   const [model, setModel] = useState<ConfigModel | null>(null);
@@ -39,11 +33,11 @@ export function MappingsScreen({
   const [newLayerPrompt, setNewLayerPrompt] = useState(false);
   const [newLayerName, setNewLayerName] = useState("");
 
-  // Profile add modal state
-  const [showProfileModal, setShowProfileModal] = useState(false);
-  const [modalWindows, setModalWindows] = useState<FocusInfo[]>([]);
-  const [loadingWindows, setLoadingWindows] = useState(false);
-  const [windowError, setWindowError] = useState<string | null>(null);
+  // Hold onProfilesChange in a ref so loadConfig's deps stay stable
+  const onProfilesChangeRef = useRef(onProfilesChange);
+  useEffect(() => {
+    onProfilesChangeRef.current = onProfilesChange;
+  }, [onProfilesChange]);
 
   const loadConfig = useCallback(async () => {
     try {
@@ -51,11 +45,11 @@ export function MappingsScreen({
       const m = parseConfigToml(toml);
       setModel(m);
       setLoadError(null);
-      onProfilesChange(listProfiles(m));
+      onProfilesChangeRef.current(listProfiles(m));
     } catch (err) {
       setLoadError(String(err));
     }
-  }, [onProfilesChange]);
+  }, []); // stable — no external deps
 
   useEffect(() => {
     loadConfig();
@@ -64,13 +58,8 @@ export function MappingsScreen({
       if (connected) loadConfig();
     });
 
-    // Listen for rail "add profile" trigger from App.tsx
-    const handleAddProfile = () => openProfileModal();
-    document.addEventListener("conduit:add-profile", handleAddProfile);
-
     return () => {
       unlistenConn.then(([fn1, fn2]) => { fn1(); fn2(); });
-      document.removeEventListener("conduit:add-profile", handleAddProfile);
     };
   }, [loadConfig]);
 
@@ -80,23 +69,13 @@ export function MappingsScreen({
     setEditingKey(null);
   }, [railActiveProfile]);
 
-  const handleModelChange = async (updated: ConfigModel) => {
-    setModel(updated);
-    onProfilesChange(listProfiles(updated));
-    try {
-      await setConfig(serializeConfigToml(updated));
-    } catch {
-      // Non-fatal: model is updated locally even if save fails
-    }
-  };
-
   const handleSaveAction = async (action: ActionModel): Promise<void> => {
     if (!model || !editingKey) return;
     const updated = setAction(model, railActiveProfile, activeLayer, editingKey, action);
     const toml = serializeConfigToml(updated);
     await setConfig(toml);
     setModel(updated);
-    onProfilesChange(listProfiles(updated));
+    onProfilesChangeRef.current(listProfiles(updated));
   };
 
   const handleAddLayer = () => {
@@ -122,30 +101,6 @@ export function MappingsScreen({
     setNewLayerPrompt(false);
   };
 
-  // Profile modal handlers
-  const openProfileModal = async () => {
-    setShowProfileModal(true);
-    setLoadingWindows(true);
-    setWindowError(null);
-    try {
-      const wins = await listWindows();
-      setModalWindows(wins);
-    } catch (err) {
-      setWindowError(String(err));
-    } finally {
-      setLoadingWindows(false);
-    }
-  };
-
-  const handleSelectWindow = (win: FocusInfo) => {
-    if (!model) return;
-    const name = win.class.toLowerCase().replace(/\s+/g, "_");
-    const updated = addProfile(model, name, win.class);
-    handleModelChange(updated);
-    onRailProfileChange(name);
-    setShowProfileModal(false);
-  };
-
   const layers = model ? listLayers(model, railActiveProfile) : ["base"];
   const currentAction = model && editingKey
     ? getAction(model, railActiveProfile, activeLayer, editingKey)
@@ -157,7 +112,7 @@ export function MappingsScreen({
     : null;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+    <div className="screen-shell">
       {/* Toolbar */}
       <Toolbar title="Mappings" sub={` — ${railActiveProfile}`}>
         {/* Layer segment control */}
@@ -257,50 +212,6 @@ export function MappingsScreen({
           <span className="muted">Loading config…</span>
         ) : null}
       </div>
-
-      {/* Profile add modal */}
-      {showProfileModal && (
-        <div className="modal-backdrop" onClick={() => setShowProfileModal(false)}>
-          <div
-            className="modal"
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-label="Select window for new profile"
-          >
-            <div className="modal__header">
-              <span>Select window class</span>
-              <button
-                className="modal__close"
-                onClick={() => setShowProfileModal(false)}
-                aria-label="Close"
-              >
-                ×
-              </button>
-            </div>
-            <div className="modal__body">
-              {loadingWindows && <div className="muted">Loading windows…</div>}
-              {windowError && <div className="banner--error">{windowError}</div>}
-              {!loadingWindows && modalWindows.length === 0 && !windowError && (
-                <div className="muted">No windows found.</div>
-              )}
-              <ul className="window-list">
-                {modalWindows.map((win, idx) => (
-                  <li key={idx}>
-                    <button
-                      className="window-list__item"
-                      onClick={() => handleSelectWindow(win)}
-                    >
-                      <span className="window-list__class">{win.class}</span>
-                      <span className="window-list__title muted"> — {win.title}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
