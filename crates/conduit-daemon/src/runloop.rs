@@ -17,13 +17,13 @@
 //! reconciliation is attempted in v1.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, Sender, TrySendError};
 
-use conduit_core::config::{CompiledConfig, FocusFields};
+use conduit_core::config::{CompiledConfig, FocusFields, Settings};
 use conduit_core::engine::Engine;
 use conduit_core::event::{Event, KeyState};
 use conduit_proto::{EventPhase, FocusInfo, Push, Response, Status, WireEvent};
@@ -113,14 +113,22 @@ pub fn drive(engine: &mut Engine, msg: Option<Msg>, now_us: u64) -> Vec<Event> {
 /// The engine thread: receives `Msg`, drives the `Engine`, emits translated
 /// events to `out`, and pushes pre/post wire events to subscribers.
 ///
-/// Owns the reader registry: on `DeviceRemoved` the corresponding
-/// `GrabHandle` is dropped (the reader thread has already exited; dropping
-/// joins it). Returns when every `Sender<Msg>` has been dropped.
+/// Owns the reader registry: on `DeviceAdded` the engine probes the path and
+/// (if it should be grabbed) spawns a reader thread; on `DeviceRemoved` the
+/// corresponding `GrabHandle` is dropped (the reader thread has already
+/// exited; dropping joins it). Returns when every `Sender<Msg>` has been
+/// dropped.
+///
+/// `tx` is a clone used to give to newly spawned reader threads so they can
+/// send `Msg::DeviceRemoved` on unplug.  `settings` is kept up-to-date via
+/// `Msg::Reload`.
 pub fn run(
     mut engine: Engine,
     out: Arc<Mutex<VirtualOutput>>,
     rx: Receiver<Msg>,
+    tx: Sender<Msg>,
     mut readers: HashMap<PathBuf, GrabHandle>,
+    mut settings: Settings,
 ) {
     // Subscriber senders must come from bounded channels (cap 256, created by
     // the IPC task); a slow consumer is dropped on the first failed try_send.
@@ -173,6 +181,7 @@ pub fn run(
                 // swap_config needs the current focus so buffered events
                 // replay under the right profile — handled here, not in
                 // drive(), because only run() knows the focus.
+                let new_settings = cfg.settings.clone();
                 let evs = {
                     let (process, class, title) = current_focus
                         .as_ref()
@@ -182,15 +191,12 @@ pub fn run(
                         .swap_config(cfg, &FocusFields { process, class, title })
                         .to_vec()
                 };
+                settings = new_settings;
                 push_status(&engine, &current_focus, &grabbed_devices, &mut status_subs);
                 evs
             }
             Some(Msg::DeviceAdded(p)) => {
-                let s = p.display().to_string();
-                if !grabbed_devices.contains(&s) {
-                    grabbed_devices.push(s);
-                    grabbed_devices.sort();
-                }
+                try_grab_device(&p, &settings, &tx, &out, &mut readers, &mut grabbed_devices);
                 push_status(&engine, &current_focus, &grabbed_devices, &mut status_subs);
                 Vec::new()
             }
@@ -260,6 +266,72 @@ pub fn run(
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// Attempt to probe and grab a newly-added device.
+///
+/// - Probes `path` via `devices::probe`.
+/// - If `should_grab` passes and the path is not already in `readers`:
+///   - On `EACCES` (permissions not yet applied by udev) → wait 500 ms and
+///     retry once.
+///   - On success → spawn a reader thread, insert into `readers` and
+///     `grabbed_devices`.
+fn try_grab_device(
+    path: &Path,
+    settings: &Settings,
+    tx: &Sender<Msg>,
+    out: &Arc<Mutex<VirtualOutput>>,
+    readers: &mut HashMap<PathBuf, GrabHandle>,
+    grabbed_devices: &mut Vec<String>,
+) {
+    if readers.contains_key(path) {
+        return;
+    }
+
+    // Inner closure: probe + decide; returns None when the device doesn't
+    // warrant grabbing (wrong type, Conduit Virtual, etc.).
+    let probe_and_check = |p: &Path| -> Option<crate::devices::Discovered> {
+        let d = crate::devices::probe(p.to_path_buf())?;
+        if crate::devices::should_grab(&d, settings) {
+            Some(d)
+        } else {
+            None
+        }
+    };
+
+    let discovered = match probe_and_check(path) {
+        Some(d) => d,
+        None => {
+            // Check if it's an EACCES that we should retry.
+            let eacces = std::fs::File::open(path)
+                .err()
+                .and_then(|e| e.raw_os_error())
+                == Some(nix::libc::EACCES);
+            if !eacces {
+                return; // Not our concern (not a grabbable device).
+            }
+            // Retry once after 500 ms for permission propagation.
+            std::thread::sleep(Duration::from_millis(500));
+            match probe_and_check(path) {
+                Some(d) => d,
+                None => return,
+            }
+        }
+    };
+
+    let is_mouse = discovered.is_mouse;
+    let handle = crate::devices::spawn_reader(
+        path.to_path_buf(),
+        is_mouse,
+        tx.clone(),
+        Arc::clone(out),
+    );
+    readers.insert(path.to_path_buf(), handle);
+    let s = path.display().to_string();
+    if !grabbed_devices.contains(&s) {
+        grabbed_devices.push(s);
+        grabbed_devices.sort();
+    }
+}
 
 /// Emit events to the virtual output and post-phase-push them to subscribers.
 fn emit_all(out: &Arc<Mutex<VirtualOutput>>, events: &[Event], subs: &mut Vec<Sender<Push>>) {

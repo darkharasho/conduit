@@ -60,7 +60,7 @@ impl std::fmt::Debug for CompiledProfile {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Settings {
     pub tap_hold_timeout_us: u64,
     pub panic_chord: Vec<Key>,

@@ -1,4 +1,5 @@
 mod devices;
+mod hotplug;
 mod output;
 mod paths;
 mod runloop;
@@ -76,7 +77,7 @@ fn main() -> anyhow::Result<()> {
 
     let compiled = config::compile(&toml_str)
         .with_context(|| format!("parsing config at {}", config_path.display()))?;
-    let settings = &compiled.settings;
+    let settings = compiled.settings.clone();
 
     // ── Discover devices ──────────────────────────────────────────────────────
     let discovered = devices::discover()
@@ -115,7 +116,7 @@ fn main() -> anyhow::Result<()> {
     // ── Permission check: try opening any device we would grab ────────────────
     let mut perm_error = false;
     for d in &discovered {
-        if devices::should_grab(d, settings) {
+        if devices::should_grab(d, &settings) {
             match fs::OpenOptions::new()
                 .read(true)
                 .custom_flags(nix::libc::O_NONBLOCK)
@@ -177,7 +178,7 @@ fn main() -> anyhow::Result<()> {
         println!("  (no input devices found under /dev/input/)");
     } else {
         for d in &discovered {
-            let grab = devices::should_grab(d, settings);
+            let grab = devices::should_grab(d, &settings);
             println!(
                 "{:<6}  {:04x}:{:04x}  {:<4}  {:<5}  {:<10}  {}",
                 if grab { "YES" } else { "no" },
@@ -202,23 +203,36 @@ fn main() -> anyhow::Result<()> {
     let (tx, rx) = crossbeam_channel::unbounded::<runloop::Msg>();
     let mut readers: HashMap<PathBuf, devices::GrabHandle> = HashMap::new();
     for d in &discovered {
-        if devices::should_grab(d, settings) {
+        if devices::should_grab(d, &settings) {
             let handle =
                 devices::spawn_reader(d.path.clone(), d.is_mouse, tx.clone(), Arc::clone(&out));
             readers.insert(d.path.clone(), handle);
         }
     }
     if readers.is_empty() {
-        eprintln!("conduit: no devices matched the grab rules; nothing grabbed");
+        eprintln!("conduit: no devices matched the grab rules; waiting for hotplug");
     }
-    // Drop our sender: the run loop exits once every reader thread has exited.
-    // (The IPC and focus threads of Tasks 12-14 will hold their own clones.)
+
+    // ── Hotplug monitor thread ─────────────────────────────────────────────────
+    // The hotplug thread holds a tx clone which keeps the run loop alive even
+    // when no devices are currently grabbed.  Spawn it BEFORE dropping our own
+    // tx so the run loop is never left with zero senders.
+    let _hotplug_thread = hotplug::spawn(tx.clone());
+
+    // Clone a sender for the run loop (used to give newly-spawned reader
+    // threads a way to send DeviceRemoved back to the engine).
+    let run_tx = tx.clone();
+
+    // Drop our (main-thread) sender now that both the hotplug thread and the
+    // run loop thread hold their own clones.
     drop(tx);
 
     // ── Engine thread ──────────────────────────────────────────────────────────
     let engine = conduit_core::engine::Engine::new(compiled);
     let run_out = Arc::clone(&out);
-    let run_thread = std::thread::spawn(move || runloop::run(engine, run_out, rx, readers));
+    let run_thread = std::thread::spawn(move || {
+        runloop::run(engine, run_out, rx, run_tx, readers, settings)
+    });
 
     run_thread
         .join()
