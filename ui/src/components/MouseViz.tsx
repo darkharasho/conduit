@@ -1,7 +1,9 @@
 import type { ConfigModel, DeviceIdent } from "../lib/config-model";
 import { getEffectiveAction } from "../lib/config-model";
 import { codeForKeyName } from "../lib/keyboard-layout";
+import { layoutFor } from "../lib/mouse-layouts";
 import { actionHint } from "./KeyboardViz";
+import { CuratedLayout } from "./CuratedLayout";
 import { ExtraKeys } from "./ExtraKeys";
 
 interface Props {
@@ -38,6 +40,7 @@ export function MouseViz({
   onSelectKey,
   dev = null,
 }: Props) {
+  const curated = dev ? layoutFor(dev as { vendor: number; product: number; class?: string }) : null;
   const declared = dev?.keys && dev.keys.length > 0 ? new Set(dev.keys) : null;
   const has = (key: string) => {
     if (!declared) return true; // no capability data → show everything
@@ -51,8 +54,15 @@ export function MouseViz({
     ...(hasHWheel ? ["wheelleft", "wheelright"] : []),
   ];
   const extraBtnKeys = EXTRA_BTN_KEYS.filter(has);
+  const curatedCodes = new Set(
+    (curated?.groups ?? [])
+      .flatMap((g) => g.buttons)
+      .map((b) => (b.key ? codeForKeyName(b.key) : null))
+      .filter((c): c is number => c !== null)
+  );
+  const shownCodes = curated ? curatedCodes : DIAGRAM_CODES;
   const extraCodes = declared
-    ? [...declared].filter((c) => !DIAGRAM_CODES.has(c)).sort((a, b) => a - b)
+    ? [...declared].filter((c) => !shownCodes.has(c)).sort((a, b) => a - b)
     : [];
   // Real mouse controls live in the BTN ranges; KEY_* codes on a mouse node
   // are almost always firmware over-declaration.
@@ -88,6 +98,32 @@ export function MouseViz({
   };
 
   const sideKeys = SIDE_KEYS.filter(has);
+
+  if (curated) {
+    return (
+      <div className="mouse-viz-wrap">
+        <CuratedLayout
+          layout={curated}
+          model={model}
+          activeProfile={activeProfile}
+          activeLayer={activeLayer}
+          selectedKey={selectedKey}
+          onSelectKey={onSelectKey}
+          dev={dev}
+        />
+        <ExtraKeys
+          model={model}
+          activeProfile={activeProfile}
+          activeLayer={activeLayer}
+          selectedKey={selectedKey}
+          onSelectKey={onSelectKey}
+          dev={dev}
+          codes={extraCodes}
+          primary={(c) => (c >= 0x100 && c <= 0x15f) || (c >= 0x2c0 && c <= 0x2e7)}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="mouse-viz-wrap">

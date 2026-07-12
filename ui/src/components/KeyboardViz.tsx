@@ -1,6 +1,8 @@
 import type { ConfigModel, ActionModel, DeviceIdent } from "../lib/config-model";
 import { getEffectiveAction } from "../lib/config-model";
 import { ANSI_LAYOUT, codeForKeyName, keyNameForCode } from "../lib/keyboard-layout";
+import { layoutFor } from "../lib/mouse-layouts";
+import { CuratedLayout } from "./CuratedLayout";
 import { ExtraKeys } from "./ExtraKeys";
 
 interface Props {
@@ -53,18 +55,36 @@ export function KeyboardViz({
 
   // Capability filtering: when the device reports its key codes, dim board
   // keys it doesn't declare and list declared codes the board doesn't show.
+  const curated = dev ? layoutFor(dev as { vendor: number; product: number; class?: string }) : null;
   const declared = dev?.keys && dev.keys.length > 0 ? new Set(dev.keys) : null;
   const boardCodes = new Set(
     ANSI_LAYOUT.flat()
       .map((cap) => codeForKeyName(cap.name))
       .filter((c): c is number => c !== null)
   );
+  for (const g of curated?.groups ?? []) {
+    for (const b of g.buttons) {
+      const c = b.key ? codeForKeyName(b.key) : null;
+      if (c !== null) boardCodes.add(c);
+    }
+  }
   const extraCodes = declared
     ? [...declared].filter((c) => !boardCodes.has(c)).sort((a, b) => a - b)
     : [];
 
   return (
     <div className="keyboard-wrap" aria-label="Keyboard layout">
+      {curated && (
+        <CuratedLayout
+          layout={curated}
+          model={model}
+          activeProfile={activeProfile}
+          activeLayer={activeLayer}
+          selectedKey={selectedKey}
+          onSelectKey={onSelectKey}
+          dev={dev}
+        />
+      )}
       {ANSI_LAYOUT.map((row, rowIdx) => {
         let colStart = 1;
         return (

@@ -53,3 +53,30 @@ describe("KeyboardViz capability filtering", () => {
     expect(container.textContent).not.toContain("Also on this device");
   });
 });
+
+describe("KeyboardViz curated layouts", () => {
+  it("G600 keyboard node shows the labeled thumb grid with numpad defaults", () => {
+    const g600kbd = {
+      name: "Logitech Gaming Mouse G600 Keyboard",
+      vendor: 0x046d,
+      product: 0xc24a,
+      class: "keyboard",
+      keys: [79, 80, 81], // subset is fine — grid renders from research, not caps
+    };
+    const { container, getByText } = render(
+      <KeyboardViz
+        model={model}
+        activeProfile="default"
+        activeLayer="base"
+        selectedKey={null}
+        onSelectKey={() => {}}
+        dev={g600kbd}
+      />
+    );
+    expect(getByText("Logitech G600 — thumb grid (G9–G20)")).toBeTruthy();
+    expect(getByText("G9")).toBeTruthy();
+    expect(getByText("G20")).toBeTruthy();
+    // G9 chip maps the factory-default numpad key.
+    expect(container.querySelector('[data-key="kp1"]')).not.toBeNull();
+  });
+});

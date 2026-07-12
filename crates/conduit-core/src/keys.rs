@@ -15,6 +15,11 @@ static KEYS: &[(&str, u16)] = &[
     ("space", 57), ("capslock", 58),
     ("f1", 59), ("f2", 60), ("f3", 61), ("f4", 62), ("f5", 63), ("f6", 64),
     ("f7", 65), ("f8", 66), ("f9", 67), ("f10", 68), ("f11", 87), ("f12", 88),
+    // Numpad — G600-style MMO mice emit these from their keyboard node.
+    ("numlock", 69), ("kp7", 71), ("kp8", 72), ("kp9", 73), ("kpminus", 74),
+    ("kp4", 75), ("kp5", 76), ("kp6", 77), ("kpplus", 78), ("kp1", 79),
+    ("kp2", 80), ("kp3", 81), ("kp0", 82), ("kpdot", 83), ("kpenter", 96),
+    ("kpslash", 98),
     ("rightctrl", 97), ("rightalt", 100), ("home", 102), ("up", 103),
     ("pageup", 104), ("left", 105), ("right", 106), ("end", 107), ("down", 108),
     ("pagedown", 109), ("insert", 110), ("delete", 111), ("mute", 113),

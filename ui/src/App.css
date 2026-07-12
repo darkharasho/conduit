@@ -1083,6 +1083,34 @@ button {
   margin-top: 8px;
 }
 
+/* ── Curated device layouts ── */
+
+.curated__title {
+  font-size: 11px;
+  color: var(--text-lo);
+  margin-bottom: 8px;
+}
+
+.curated__groups {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.mousekey--onboard {
+  opacity: 0.55;
+  cursor: help;
+  border-style: dashed;
+  padding: 6px 10px;
+  min-width: 64px;
+  min-height: 40px;
+}
+
+.mousekey--onboard .mousekey__action {
+  color: var(--amber);
+}
+
 .devtabs__detect {
   margin-left: auto;
   align-self: center;
