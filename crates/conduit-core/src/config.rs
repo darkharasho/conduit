@@ -50,6 +50,10 @@ pub struct CompiledProfile {
     pub matcher: Option<Matcher>,
     pub layers: Vec<LayerMap>,
     pub layer_names: Vec<String>,
+    /// Per-device shadow tables, outer-indexed by the global device slot
+    /// (`CompiledConfig::device_selectors`); `None` = this profile has no
+    /// section for that selector. Inner Vec is indexed like `layers`.
+    pub device_layers: Vec<Option<Vec<LayerMap>>>,
 }
 
 impl std::fmt::Debug for CompiledProfile {
@@ -75,6 +79,10 @@ pub struct CompiledConfig {
     pub settings: Settings,
     pub profiles: Vec<CompiledProfile>,
     pub default_idx: usize,
+    /// Union of device selector strings across all profiles, first-seen
+    /// order. The index of a selector here is its **device slot** — the
+    /// daemon resolves each grabbed device to a slot and stamps its events.
+    pub device_selectors: Vec<String>,
 }
 
 // ── Error type ────────────────────────────────────────────────────────────────
@@ -137,6 +145,17 @@ struct RawProfile {
     #[serde(rename = "match")]
     r#match: Option<RawMatch>,
     inherit: Option<String>,
+    #[serde(default)]
+    keys: IndexMap<String, RawAction>,
+    #[serde(default)]
+    layers: IndexMap<String, IndexMap<String, RawAction>>,
+    /// Per-device override sections, keyed by device selector string.
+    #[serde(default)]
+    device: IndexMap<String, RawDeviceOverride>,
+}
+
+#[derive(Deserialize, Default)]
+struct RawDeviceOverride {
     #[serde(default)]
     keys: IndexMap<String, RawAction>,
     #[serde(default)]
@@ -292,160 +311,21 @@ pub fn compile(toml_str: &str) -> Result<CompiledConfig, ConfigError> {
             }
         }
 
-        // Helper: resolve a layer name to index
-        let layer_index = |lname: &str| -> Option<usize> {
-            layer_names.iter().position(|n| n == lname)
-        };
-
-        // Helper: parse an action string
-        let parse_action_str = |s: &str, profile_name: &str| -> Result<Action, ConfigError> {
-            match s {
-                "disabled" => Ok(Action::Disabled),
-                "passthrough" => Ok(Action::Passthrough),
-                s if s.starts_with("layer:") => {
-                    let lname = &s[6..];
-                    layer_index(lname)
-                        .map(|i| Action::LayerToggle(i as u8))
-                        .ok_or_else(|| ConfigError::UnknownLayer {
-                            profile: profile_name.to_string(),
-                            name: lname.to_string(),
-                        })
-                }
-                s => {
-                    let key = keys::from_name(s)
-                        .ok_or_else(|| ConfigError::UnknownKey {
-                            profile: profile_name.to_string(),
-                            name: s.to_string(),
-                        })?;
-                    // Bounds check for output keys
-                    if key.0 as usize >= KEY_TABLE_SIZE {
-                        return Err(ConfigError::UnknownKey {
-                            profile: profile_name.to_string(),
-                            name: s.to_string(),
-                        });
-                    }
-                    Ok(Action::Key(key))
-                }
-            }
-        };
-
         // Compile base-layer keys
         for (key_name, raw_action) in &raw_profile.keys {
-            let key = keys::from_name(key_name).ok_or_else(|| ConfigError::UnknownKey {
-                profile: name.to_string(),
-                name: key_name.clone(),
-            })?;
-            // Bounds check for input key
-            if key.0 as usize >= KEY_TABLE_SIZE {
-                return Err(ConfigError::UnknownKey {
-                    profile: name.to_string(),
-                    name: key_name.clone(),
-                });
-            }
-            let action = match raw_action {
-                RawAction::Str(s) => parse_action_str(s, name)?,
-                RawAction::TapHold { tap, hold, timeout_ms } => {
-                    let tap_key = keys::from_name(tap).ok_or_else(|| ConfigError::UnknownKey {
-                        profile: name.to_string(),
-                        name: tap.clone(),
-                    })?;
-                    // Bounds check for output key (tap)
-                    if tap_key.0 as usize >= KEY_TABLE_SIZE {
-                        return Err(ConfigError::UnknownKey {
-                            profile: name.to_string(),
-                            name: tap.clone(),
-                        });
-                    }
-                    let hold_action = if hold.starts_with("layer:") {
-                        let lname = &hold[6..];
-                        let idx = layer_index(lname).ok_or_else(|| ConfigError::UnknownLayer {
-                            profile: name.to_string(),
-                            name: lname.to_string(),
-                        })?;
-                        HoldAction::Layer(idx as u8)
-                    } else {
-                        let hold_key = keys::from_name(hold).ok_or_else(|| ConfigError::UnknownKey {
-                            profile: name.to_string(),
-                            name: hold.clone(),
-                        })?;
-                        // Bounds check for output key (hold)
-                        if hold_key.0 as usize >= KEY_TABLE_SIZE {
-                            return Err(ConfigError::UnknownKey {
-                                profile: name.to_string(),
-                                name: hold.clone(),
-                            });
-                        }
-                        HoldAction::Key(hold_key)
-                    };
-                    let timeout_us = timeout_ms.unwrap_or(settings_timeout_us / 1000) * 1000;
-                    Action::TapHold {
-                        tap: tap_key,
-                        hold: hold_action,
-                        timeout_us,
-                    }
-                }
-            };
+            let key = parse_key_checked(key_name, name)?;
+            let action = compile_raw_action(raw_action, name, &layer_names, settings_timeout_us)?;
             layers[0][key.0 as usize] = Some(action);
         }
 
         // Compile named layers
         for (layer_name, layer_keys) in &raw_profile.layers {
-            let layer_idx = layer_index(layer_name).unwrap(); // guaranteed to exist (registered above)
+            // guaranteed to exist (registered above)
+            let layer_idx = layer_names.iter().position(|n| n == layer_name).unwrap();
             for (key_name, raw_action) in layer_keys {
-                let key = keys::from_name(key_name).ok_or_else(|| ConfigError::UnknownKey {
-                    profile: name.to_string(),
-                    name: key_name.clone(),
-                })?;
-                // Bounds check for input key
-                if key.0 as usize >= KEY_TABLE_SIZE {
-                    return Err(ConfigError::UnknownKey {
-                        profile: name.to_string(),
-                        name: key_name.clone(),
-                    });
-                }
-                let action = match raw_action {
-                    RawAction::Str(s) => parse_action_str(s, name)?,
-                    RawAction::TapHold { tap, hold, timeout_ms } => {
-                        let tap_key = keys::from_name(tap).ok_or_else(|| ConfigError::UnknownKey {
-                            profile: name.to_string(),
-                            name: tap.clone(),
-                        })?;
-                        // Bounds check for output key (tap)
-                        if tap_key.0 as usize >= KEY_TABLE_SIZE {
-                            return Err(ConfigError::UnknownKey {
-                                profile: name.to_string(),
-                                name: tap.clone(),
-                            });
-                        }
-                        let hold_action = if hold.starts_with("layer:") {
-                            let lname = &hold[6..];
-                            let idx = layer_index(lname).ok_or_else(|| ConfigError::UnknownLayer {
-                                profile: name.to_string(),
-                                name: lname.to_string(),
-                            })?;
-                            HoldAction::Layer(idx as u8)
-                        } else {
-                            let hold_key = keys::from_name(hold).ok_or_else(|| ConfigError::UnknownKey {
-                                profile: name.to_string(),
-                                name: hold.clone(),
-                            })?;
-                            // Bounds check for output key (hold)
-                            if hold_key.0 as usize >= KEY_TABLE_SIZE {
-                                return Err(ConfigError::UnknownKey {
-                                    profile: name.to_string(),
-                                    name: hold.clone(),
-                                });
-                            }
-                            HoldAction::Key(hold_key)
-                        };
-                        let timeout_us = timeout_ms.unwrap_or(settings_timeout_us / 1000) * 1000;
-                        Action::TapHold {
-                            tap: tap_key,
-                            hold: hold_action,
-                            timeout_us,
-                        }
-                    }
-                };
+                let key = parse_key_checked(key_name, name)?;
+                let action =
+                    compile_raw_action(raw_action, name, &layer_names, settings_timeout_us)?;
                 layers[layer_idx][key.0 as usize] = Some(action);
             }
         }
@@ -486,6 +366,7 @@ pub fn compile(toml_str: &str) -> Result<CompiledConfig, ConfigError> {
             matcher,
             layers,
             layer_names,
+            device_layers: Vec::new(),
         });
     }
 
@@ -499,10 +380,60 @@ pub fn compile(toml_str: &str) -> Result<CompiledConfig, ConfigError> {
             matcher,
             layers,
             layer_names,
+            device_layers: Vec::new(),
         });
     }
 
     let default_idx = compiled_profiles.len() - 1;
+
+    // Step 5b: compile device override sections.
+    // Slot indices are global: the union of selector strings across profiles.
+    let mut device_selectors: Vec<String> = Vec::new();
+    for raw_profile in profiles.values() {
+        for sel in raw_profile.device.keys() {
+            if !device_selectors.iter().any(|s| s == sel) {
+                device_selectors.push(sel.clone());
+            }
+        }
+    }
+    for compiled in compiled_profiles.iter_mut() {
+        let raw_profile = profiles.get(compiled.name.as_str()).unwrap();
+        let mut dev_layers: Vec<Option<Vec<LayerMap>>> = vec![None; device_selectors.len()];
+        for (sel, ovr) in &raw_profile.device {
+            let slot = device_selectors.iter().position(|s| s == sel).unwrap();
+            let mut tables: Vec<LayerMap> =
+                (0..compiled.layer_names.len()).map(|_| new_layer_map()).collect();
+            let ctx = format!("{}.device.{}", compiled.name, sel);
+            for (key_name, raw_action) in &ovr.keys {
+                let key = parse_key_checked(key_name, &ctx)?;
+                let action =
+                    compile_raw_action(raw_action, &ctx, &compiled.layer_names, tap_hold_timeout_us)?;
+                tables[0][key.0 as usize] = Some(action);
+            }
+            for (layer_name, layer_keys) in &ovr.layers {
+                let li = compiled
+                    .layer_names
+                    .iter()
+                    .position(|n| n == layer_name)
+                    .ok_or_else(|| ConfigError::UnknownLayer {
+                        profile: ctx.clone(),
+                        name: layer_name.clone(),
+                    })?;
+                for (key_name, raw_action) in layer_keys {
+                    let key = parse_key_checked(key_name, &ctx)?;
+                    let action = compile_raw_action(
+                        raw_action,
+                        &ctx,
+                        &compiled.layer_names,
+                        tap_hold_timeout_us,
+                    )?;
+                    tables[li][key.0 as usize] = Some(action);
+                }
+            }
+            dev_layers[slot] = Some(tables);
+        }
+        compiled.device_layers = dev_layers;
+    }
 
     // Step 6: Panic-chord validation
     for cp in &compiled_profiles {
@@ -528,7 +459,69 @@ pub fn compile(toml_str: &str) -> Result<CompiledConfig, ConfigError> {
         settings,
         profiles: compiled_profiles,
         default_idx,
+        device_selectors,
     })
+}
+
+fn new_layer_map() -> LayerMap {
+    Box::new([None; KEY_TABLE_SIZE])
+}
+
+/// Parse a key name and bounds-check it against `KEY_TABLE_SIZE`.
+/// `ctx` is the profile (or `profile.device.selector`) name used in errors.
+fn parse_key_checked(name: &str, ctx: &str) -> Result<Key, ConfigError> {
+    let key = keys::from_name(name).ok_or_else(|| ConfigError::UnknownKey {
+        profile: ctx.to_string(),
+        name: name.to_string(),
+    })?;
+    if key.0 as usize >= KEY_TABLE_SIZE {
+        return Err(ConfigError::UnknownKey {
+            profile: ctx.to_string(),
+            name: name.to_string(),
+        });
+    }
+    Ok(key)
+}
+
+/// Compile one raw action (string or tap-hold) with `layer:X` references
+/// resolved against `layer_names`. Shared by global and device sections.
+fn compile_raw_action(
+    raw: &RawAction,
+    ctx: &str,
+    layer_names: &[String],
+    default_timeout_us: u64,
+) -> Result<Action, ConfigError> {
+    let layer_index = |lname: &str| layer_names.iter().position(|n| n == lname);
+    match raw {
+        RawAction::Str(s) => match s.as_str() {
+            "disabled" => Ok(Action::Disabled),
+            "passthrough" => Ok(Action::Passthrough),
+            s if s.starts_with("layer:") => {
+                let lname = &s[6..];
+                layer_index(lname)
+                    .map(|i| Action::LayerToggle(i as u8))
+                    .ok_or_else(|| ConfigError::UnknownLayer {
+                        profile: ctx.to_string(),
+                        name: lname.to_string(),
+                    })
+            }
+            s => Ok(Action::Key(parse_key_checked(s, ctx)?)),
+        },
+        RawAction::TapHold { tap, hold, timeout_ms } => {
+            let tap_key = parse_key_checked(tap, ctx)?;
+            let hold_action = if let Some(lname) = hold.strip_prefix("layer:") {
+                let idx = layer_index(lname).ok_or_else(|| ConfigError::UnknownLayer {
+                    profile: ctx.to_string(),
+                    name: lname.to_string(),
+                })?;
+                HoldAction::Layer(idx as u8)
+            } else {
+                HoldAction::Key(parse_key_checked(hold, ctx)?)
+            };
+            let timeout_us = timeout_ms.unwrap_or(default_timeout_us / 1000) * 1000;
+            Ok(Action::TapHold { tap: tap_key, hold: hold_action, timeout_us })
+        }
+    }
 }
 
 fn build_matcher(raw_profile: &RawProfile, profile_name: &str) -> Result<Option<Matcher>, ConfigError> {
@@ -690,5 +683,86 @@ mod tests {
         assert!(s.grab_all_mice);
         let s = compile("[profile.default.keys]\na = \"b\"").unwrap().settings;
         assert!(!s.grab_all_mice);
+    }
+
+    // ── Device override sections ───────────────────────────────────────────────
+
+    const DEV_TOML: &str = r#"
+        [profile.default.keys]
+        a = "b"
+        [profile.default.layers.nav]
+        h = "left"
+        [profile.default.device."046d:c24a/G600".keys]
+        btn_left = "enter"
+        [profile.default.device."046d:c24a/G600".layers.nav]
+        mouse4 = "volumeup"
+        [profile.game]
+        match = { class = "steam" }
+        [profile.game.device."My Kbd".keys]
+        a = "passthrough"
+    "#;
+
+    #[test]
+    fn device_sections_compile_with_global_slots() {
+        let c = compile(DEV_TOML).unwrap();
+        assert_eq!(
+            c.device_selectors,
+            vec!["046d:c24a/G600".to_string(), "My Kbd".to_string()]
+        );
+        let def = &c.profiles[c.default_idx];
+        let g600 = def.device_layers[0].as_ref().expect("default has G600 section");
+        assert_eq!(g600.len(), def.layer_names.len());
+        let btn_left = keys::from_name("btn_left").unwrap();
+        assert_eq!(
+            g600[0][btn_left.0 as usize],
+            Some(Action::Key(keys::from_name("enter").unwrap()))
+        );
+        let nav_idx = def.layer_names.iter().position(|n| n == "nav").unwrap();
+        let mouse4 = keys::from_name("mouse4").unwrap();
+        assert_eq!(
+            g600[nav_idx][mouse4.0 as usize],
+            Some(Action::Key(keys::from_name("volumeup").unwrap()))
+        );
+        assert!(def.device_layers[1].is_none()); // default has no "My Kbd" section
+        let game = c.profiles.iter().find(|p| p.name == "game").unwrap();
+        assert!(game.device_layers[0].is_none());
+        assert!(game.device_layers[1].is_some());
+    }
+
+    #[test]
+    fn device_section_unknown_layer_rejected() {
+        let err = compile("[profile.default.device.\"X\".layers.nope]\na = \"b\"").unwrap_err();
+        assert!(matches!(err, ConfigError::UnknownLayer { .. }));
+    }
+
+    #[test]
+    fn device_section_unknown_key_rejected() {
+        let err = compile("[profile.default.device.\"X\".keys]\nnotakey = \"b\"").unwrap_err();
+        assert!(matches!(err, ConfigError::UnknownKey { .. }));
+    }
+
+    #[test]
+    fn device_section_taphold_and_layer_refs_compile() {
+        let toml = r#"
+            [profile.default.layers.nav]
+            h = "left"
+            [profile.default.device."g".keys]
+            f = { tap = "f", hold = "layer:nav" }
+            space = "layer:nav"
+        "#;
+        let c = compile(toml).unwrap();
+        let def = &c.profiles[c.default_idx];
+        let dev = def.device_layers[0].as_ref().unwrap();
+        let f = keys::from_name("f").unwrap();
+        assert!(matches!(dev[0][f.0 as usize], Some(Action::TapHold { .. })));
+        let space = keys::from_name("space").unwrap();
+        assert!(matches!(dev[0][space.0 as usize], Some(Action::LayerToggle(_))));
+    }
+
+    #[test]
+    fn no_device_sections_yields_empty_selectors() {
+        let c = compile("[profile.default.keys]\na = \"b\"").unwrap();
+        assert!(c.device_selectors.is_empty());
+        assert!(c.profiles[c.default_idx].device_layers.is_empty());
     }
 }
