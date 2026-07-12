@@ -244,11 +244,10 @@ impl Engine {
 
     /// Flush held keys, clear engine state, and enter suspended mode.
     /// Returns the emitted flush events.
-    /// If already suspended, returns the previous out buffer without clearing
-    /// (the held/state was already flushed on the first call).
+    /// Idempotent: calling again while already suspended returns an empty slice.
     pub fn suspend(&mut self) -> &[Event] {
+        self.out.clear();
         if !self.suspended {
-            self.out.clear();
             self.do_suspend();
         }
         &self.out
@@ -539,9 +538,8 @@ mod tests {
     fn suspend_releases_held_outputs() {
         let mut e = engine("[profile.default.keys]\na = \"b\"");
         e.handle(press("a", 0)); // b held
-        e.suspend();
-        // flush emitted b-release so nothing sticks
         assert!(e.suspend().contains(&release("b", 0)));
+        assert!(e.suspend().is_empty()); // idempotent: second call flushes nothing
     }
 
 }
