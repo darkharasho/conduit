@@ -1,20 +1,38 @@
-//! Full-loop integration tests: a fake uinput keyboard drives the real daemon,
-//! and assertions read the daemon's virtual output device.
+//! Integration tests for conduit-daemon.
 //!
-//! All tests are `#[ignore]` — they require `/dev/uinput` write access and
+//! # Strategy
+//!
+//! All tests tagged `#[ignore]` require `/dev/uinput` write access and
 //! `/dev/input` read access (i.e. membership in the `input` group).
 //!
-//! **Event injection strategy**: key events are injected directly into the
-//! daemon's run-loop channel via `DaemonHandle::msg_tx()` rather than emitting
-//! physical events through the uinput event node.  This avoids any interaction
-//! with the compositor's input grab on the fake keyboard device.  The fake
-//! uinput keyboard ("Conduit Test Source") is created to satisfy the fixture
-//! requirement and its path is pre-announced to the daemon as a "grabbed"
-//! device so IPC status assertions pass.
+//! ## Full-loop test (`full_loop_key_remap_and_ipc`)
+//!
+//! Creates a real uinput keyboard, starts the daemon, waits for the daemon's
+//! reader thread to **actually grab** the device via `EVIOCGRAB` (confirmed by
+//! polling IPC `get_status` until the device appears in `grabbed_devices`), then
+//! emits real kernel events and reads the daemon's virtual output device to
+//! assert correct remapping.
+//!
+//! ## Safety: harmless key codes
+//!
+//! The fake keyboard advertises only KEY_A (code 30, required for the device to
+//! be classified as a keyboard) and KEY_F13..KEY_F18 (codes 183–188).  The
+//! config maps only the F13-range codes; KEY_A is never emitted by the test.
+//! F13–F18 are not assigned to any visible action in KDE/X11 by default, so
+//! even the brief window before the daemon grabs the device cannot produce
+//! visible output in the user's session.  Under no circumstances does the test
+//! emit letter keys, Escape, CapsLock, or modifier keys.
+//!
+//! ## Smoke test (`engine_via_channel_smoke`)
+//!
+//! Bypasses the device/reader path entirely: injects `Msg::Input` events
+//! directly into the run-loop channel via `DaemonHandle::msg_tx()`.  This is
+//! intentionally NOT a full-loop test — it covers only the engine-translate →
+//! emit path.  Kept because it is fast and hermetic.
 //!
 //! Run with:
 //! ```sh
-//! PKG_CONFIG_PATH=/usr/lib64/pkgconfig cargo test -p conduit-daemon --test integration -- --ignored
+//! PKG_CONFIG_PATH=/usr/lib64/pkgconfig cargo test -p conduit-daemon --test integration -- --ignored --nocapture
 //! ```
 
 use std::collections::HashSet;
@@ -28,25 +46,35 @@ use conduit_daemon::DaemonConfig;
 use evdev::{AttributeSet, EventType, InputEvent, Key};
 
 // ── Key codes ─────────────────────────────────────────────────────────────────
+
+/// KEY_A (code 30): only used to make the device classify as a keyboard.
+/// Never emitted by this test.
 const KEY_A: u16 = 30;
-const KEY_B: u16 = 48;
-const KEY_CAPSLOCK: u16 = 58;
-const KEY_LEFTCTRL: u16 = 29;
-const KEY_ESC: u16 = 1;
+
+/// KEY_F13–KEY_F18 (codes 183–188): harmless function keys not assigned to
+/// visible actions in KDE/KWin.  The test uses only these for remapping.
+const KEY_F13: u16 = 183;
+const KEY_F14: u16 = 184;
+const KEY_F15: u16 = 185;
+const KEY_F16: u16 = 186;
+const KEY_F17: u16 = 187;
+// KEY_F18 = 188 is reserved for future use in this fixture.
 
 // ── Fake keyboard fixture ─────────────────────────────────────────────────────
 
-/// Create a fake uinput keyboard named "Conduit Test Source" with full alpha + modifier keys.
+/// Create a fake uinput keyboard named "Conduit Test Source".
+///
+/// Advertises KEY_A (code 30) so `devices::probe` classifies it as a keyboard
+/// and `should_grab` picks it up.  Also advertises KEY_F13..KEY_F18 (183–188)
+/// as the codes actually used in remapping tests.  No letter keys, no modifier
+/// keys, no CapsLock — even transient leaks before grab cannot produce visible
+/// compositor input.
 fn create_fake_keyboard() -> evdev::uinput::VirtualDevice {
     let mut keys = AttributeSet::<Key>::new();
-    for code in [
-        16u16, 17, 18, 19, 20, 21, 22, 23, 24, 25, // q..p (top row)
-        30, 31, 32, 33, 34, 35, 36, 37, 38,         // a..l (home row)
-        44, 45, 46, 47, 48, 49, 50,                 // z..m (bottom row)
-        KEY_CAPSLOCK,
-        KEY_LEFTCTRL,
-        KEY_ESC,
-    ] {
+    // KEY_A: required for keyboard classification — NEVER emitted by the test.
+    keys.insert(Key::new(KEY_A));
+    // Harmless F-row codes used for remap assertions.
+    for code in [KEY_F13, KEY_F14, KEY_F15, KEY_F16, KEY_F17, 188u16] {
         keys.insert(Key::new(code));
     }
 
@@ -59,8 +87,7 @@ fn create_fake_keyboard() -> evdev::uinput::VirtualDevice {
         .expect("build fake keyboard")
 }
 
-/// Emit a key event (press=1, release=0, repeat=2) on the fake keyboard.
-#[allow(dead_code)]
+/// Emit a key event (press=1, release=0) on the fake keyboard.
 fn emit_key(dev: &mut evdev::uinput::VirtualDevice, code: u16, value: i32) {
     dev.emit(&[InputEvent::new(EventType::KEY, code, value)])
         .expect("emit key event");
@@ -68,8 +95,7 @@ fn emit_key(dev: &mut evdev::uinput::VirtualDevice, code: u16, value: i32) {
 
 // ── Device snapshot ───────────────────────────────────────────────────────────
 
-/// Collect all current `/dev/input/event*` paths.  Used to snapshot the set
-/// of pre-existing devices so we can identify newly created ones.
+/// Collect all current `/dev/input/event*` paths.
 fn snapshot_event_devices() -> HashSet<PathBuf> {
     let mut set = HashSet::new();
     if let Ok(rd) = std::fs::read_dir("/dev/input") {
@@ -100,7 +126,7 @@ fn find_new_device_by_name(
                     continue;
                 }
                 if exclude.contains(&path) {
-                    continue; // pre-existing — skip
+                    continue;
                 }
                 if let Ok(dev) = evdev::Device::open(&path) {
                     if dev.name().unwrap_or("") == name {
@@ -122,10 +148,7 @@ fn find_new_device_by_name(
 // ── Event reading helper ──────────────────────────────────────────────────────
 
 /// Spin-read EV_KEY events from `dev` (opened O_NONBLOCK) until at least
-/// `count` events arrive or `timeout` expires.  Returns the (code, value)
-/// pairs.  Panics on deadline.
-///
-/// Filters out EV_SYN, EV_MSC, and any non-EV_KEY events.
+/// `count` events arrive or `timeout` expires.  Returns the (code, value) pairs.
 fn poll_read_key_events(
     dev: &mut evdev::Device,
     count: usize,
@@ -179,36 +202,39 @@ fn ipc_send_get_status(sock_path: &PathBuf) -> conduit_proto::Response {
 
 // ── Integration tests ─────────────────────────────────────────────────────────
 
-/// Full-loop integration test.
+/// Full-loop integration test: real kernel event path, real EVIOCGRAB.
 ///
-/// (a) KEY_A press+release → virtual device emits KEY_B press+release.
-/// (b) CAPSLOCK hold (>200 ms tap-hold timeout) → LEFTCTRL press; release → LEFTCTRL release.
-/// (c) IPC `get_status` → `grabbed_devices` is non-empty (daemon is monitoring the fake device).
+/// # Fixture
 ///
-/// ## Event injection strategy
+/// - "Conduit Test Source": uinput keyboard with KEY_A + KEY_F13..KEY_F18.
+/// - Config: `grab_keyboards = ["Conduit Test Source"]`;
+///   `"key:183" = "key:184"` (remap F13→F14);
+///   `"key:185" = { tap = "key:186", hold = "key:187" }` (tap-hold F15).
 ///
-/// In a running desktop session, the compositor (KWin/Hyprland) grabs new
-/// keyboard devices via libinput within milliseconds of udev processing the
-/// add event.  `EVIOCGRAB` returns `EBUSY` when someone else holds the grab,
-/// so the daemon cannot take exclusive ownership of the fake keyboard.
+/// # Test sequence
 ///
-/// Without an exclusive grab, the kernel event device returns `ENODEV` on a
-/// blocking read and `EPOLLERR|POLLHUP` on `poll()`.  To keep the test hermetic
-/// and fast, we inject key events directly into the daemon's run-loop channel
-/// via `DaemonHandle::msg_tx()` rather than emitting through the uinput event
-/// node.  The fake uinput keyboard ("Conduit Test Source") is still created to
-/// satisfy the fixture requirement and its path is pre-announced to the daemon
-/// as a "grabbed" device so assertion (c) passes.
+/// 1. Create fixture → start daemon with `no_grab` absent (real grab path).
+/// 2. Poll `get_status` until `grabbed_devices` contains the device path
+///    (10 s deadline — honest: device only appears after reader thread grabs it).
+/// 3. Emit real kernel events on the fixture (KEY_F13 press/release).
+/// 4. Read "Conduit Virtual Keyboard": assert KEY_F14 press/release.
+/// 5. Emit KEY_F15 press; hold 250 ms; emit release.
+/// 6. Read virtual device: assert KEY_F17 (hold action) press then release.
+/// 7. IPC `get_status`: `grabbed_devices` non-empty, `active_profile == "default"`.
+///
+/// # Safety
+///
+/// Only KEY_F13..KEY_F18 events are emitted. Even if the daemon has not yet
+/// grabbed the device, F-key events routed to KWin produce no visible effect.
 #[test]
 #[ignore]
 fn full_loop_key_remap_and_ipc() {
     // ── Create the fake keyboard ──────────────────────────────────────────────
-    // This is the "Conduit Test Source" uinput device the task specification
-    // requires.  We wait until the kernel dev node appears in /dev/input so we
-    // can record its path for the IPC "grabbed_devices" announcement.
     let mut fake_kbd = create_fake_keyboard();
 
-    // Get the event device path immediately (sysfs is ready before devtmpfs).
+    // Get the /dev/input/eventN path. enumerate_dev_nodes_blocking() waits for
+    // the sysfs node; we then additionally wait for the devtmpfs node to appear
+    // in /dev/input (udev may have a brief lag between sysfs and devtmpfs).
     let kbd_path = fake_kbd
         .enumerate_dev_nodes_blocking()
         .expect("enumerate_dev_nodes_blocking")
@@ -217,51 +243,67 @@ fn full_loop_key_remap_and_ipc() {
         .expect("dev node error");
     eprintln!("Fake keyboard at {:?}", kbd_path);
 
+    // Wait until the device is accessible via read_dir("/dev/input") and can
+    // be opened. This ensures discover() will find it when start() runs.
+    {
+        let settle_deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            if evdev::Device::open(&kbd_path).is_ok() {
+                eprintln!("Fake keyboard is accessible");
+                break;
+            }
+            if Instant::now() >= settle_deadline {
+                panic!("fake keyboard {:?} never became accessible via evdev::Device::open", kbd_path);
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
     // Snapshot BEFORE the daemon creates its virtual output device.
     let pre_existing = snapshot_event_devices();
 
-    // ── Write temp config (safety: ONLY touches "Conduit Test Source") ────────
+    // ── Write temp config ─────────────────────────────────────────────────────
     let tmp = tempfile::tempdir().expect("tempdir");
     let config_path = tmp.path().join("conduit.toml");
     let socket_path = tmp.path().join("conduit-test.sock");
 
     std::fs::write(
         &config_path,
+        // KEY_F13 (183) → KEY_F14 (184): simple remap
+        // KEY_F15 (185) → tap KEY_F16 (186) / hold KEY_F17 (187)
         r#"
 [devices]
 grab_all_keyboards = false
 grab_keyboards = ["Conduit Test Source"]
 
 [profile.default.keys]
-a = "b"
-capslock = { tap = "esc", hold = "leftctrl" }
+"key:183" = "key:184"
+"key:185" = { tap = "key:186", hold = "key:187" }
 "#,
     )
     .expect("write config");
 
     // ── Start the daemon ──────────────────────────────────────────────────────
-    // extra_grabbed_devices pre-announces kbd_path as "grabbed" in the IPC
-    // status so assertion (c) passes even when EVIOCGRAB is unavailable
-    // (because the compositor already holds the grab on a running desktop).
+    // No extra_grabbed_devices, no no_grab: the daemon must actually grab the
+    // device via EVIOCGRAB before it appears in grabbed_devices.
     let handle = conduit_daemon::start(DaemonConfig {
         config_path: config_path.clone(),
         socket_path: Some(socket_path.clone()),
         enable_focus: false,
         enable_hotplug: false,
         enable_watch: false,
-        no_grab: false,
-        extra_grabbed_devices: vec![kbd_path.display().to_string()],
     })
     .expect("daemon start");
 
-    // ── Wait for the daemon to create its virtual output device ──────────────
+    // ── Wait for the daemon's virtual output device ───────────────────────────
     let virt_path = find_new_device_by_name(
         "Conduit Virtual Keyboard",
         &pre_existing,
         Duration::from_secs(5),
     );
+    eprintln!("Virtual keyboard at {:?}", virt_path);
 
-    // Open WITHOUT grabbing — we only want to observe the daemon's output.
+    // Open WITHOUT grabbing — we only observe the daemon's output.
     let mut virt_dev = evdev::Device::open(&virt_path)
         .expect("open Conduit Virtual Keyboard");
 
@@ -272,145 +314,127 @@ capslock = { tap = "esc", hold = "leftctrl" }
         libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
     }
 
-    // Get a Sender to inject events directly into the daemon's run loop.
-    // This bypasses the Linux evdev input stack entirely, which is necessary
-    // because the compositor holds an exclusive grab on the fake keyboard.
-    let msg_tx = handle.msg_tx();
-
-    // ── Grab-confirmation gate ────────────────────────────────────────────────
-    // Poll the IPC socket until grabbed_devices contains the fake keyboard
-    // path. This confirms the daemon has registered the device before we
-    // inject any events.  The device is pre-announced via extra_grabbed_devices
-    // so this succeeds as soon as the IPC server is ready (no real grab race).
+    // ── Honest grab-confirmation gate ─────────────────────────────────────────
+    // Poll IPC get_status until grabbed_devices contains the fake keyboard path.
+    // This confirms the reader thread actually called EVIOCGRAB and succeeded.
+    // The device only appears here after the real grab lands.
     //
-    // SAFETY: Do NOT emit any events (via msg_tx or any other mechanism) until
-    // this gate passes. On a running desktop, the fake uinput keyboard is a
-    // real kernel input device; any events emitted before the daemon holds the
-    // exclusive grab flow straight to the compositor and the focused window.
-    // Although we use msg_tx (not physical emit), the gate also ensures the IPC
-    // server is ready for assertion (c) and documents the required invariant.
+    // Safety: DO NOT emit any events before this gate passes.  Until the daemon
+    // holds the exclusive grab, events on fake_kbd flow to the compositor.
+    // (F13-F18 are benign, but discipline matters.)
     {
         let kbd_str = kbd_path.display().to_string();
-        let gate_deadline = Instant::now() + Duration::from_secs(2);
+        let gate_deadline = Instant::now() + Duration::from_secs(10);
+        let mut last_resp = None;
         loop {
             if socket_path.exists() {
                 let resp = ipc_send_get_status(&socket_path);
-                if let conduit_proto::Response::Status(ref status) = resp {
-                    if status.grabbed_devices.contains(&kbd_str) {
-                        break; // daemon has registered the fake keyboard
+                match &resp {
+                    conduit_proto::Response::Status(status) => {
+                        if status.grabbed_devices.contains(&kbd_str) {
+                            eprintln!("conduit: grab confirmed — {} in grabbed_devices", kbd_str);
+                            break;
+                        }
                     }
+                    _ => {}
                 }
+                last_resp = Some(resp);
             }
             if Instant::now() >= gate_deadline {
                 panic!(
-                    "grab-confirmation gate timed out: fake keyboard {:?} not in grabbed_devices",
-                    kbd_str
+                    "grab-confirmation gate timed out (10 s): fake keyboard {:?} not in grabbed_devices\nlast IPC response: {:?}",
+                    kbd_str, last_resp
                 );
             }
-            std::thread::sleep(Duration::from_millis(50));
+            std::thread::sleep(Duration::from_millis(100));
         }
     }
 
-    // ── Test (a): KEY_A → KEY_B ───────────────────────────────────────────────
-    {
-        use conduit_daemon::runloop::Msg;
-        use conduit_core::event::{Event, Key, KeyState};
+    // Drain any stale events that arrived before we opened the virtual device.
+    { let _ = virt_dev.fetch_events(); }
 
-        { let _ = virt_dev.fetch_events(); } // drain stale events
-        let now = conduit_daemon::runloop::now_us();
-        msg_tx.send(Msg::Input(Event { key: Key(KEY_A), state: KeyState::Press,   time_us: now })).expect("send press A");
-        msg_tx.send(Msg::Input(Event { key: Key(KEY_A), state: KeyState::Release, time_us: now + 10_000 })).expect("send release A");
+    // ── Test (a): KEY_F13 → KEY_F14 (simple remap) ───────────────────────────
+    {
+        emit_key(&mut fake_kbd, KEY_F13, 1); // press F13
+        emit_key(&mut fake_kbd, KEY_F13, 0); // release F13
 
         let got = poll_read_key_events(
             &mut virt_dev,
             2,
-            Duration::from_secs(2),
-            "a→b remap",
+            Duration::from_secs(3),
+            "F13→F14 remap",
         );
-        assert_eq!(got[0], (KEY_B, 1), "(a) expected KEY_B press, got {:?}", got);
-        assert_eq!(got[1], (KEY_B, 0), "(a) expected KEY_B release, got {:?}", got);
+        assert_eq!(got[0], (KEY_F14, 1), "(a) expected KEY_F14 press, got {:?}", got);
+        assert_eq!(got[1], (KEY_F14, 0), "(a) expected KEY_F14 release, got {:?}", got);
+        eprintln!("(a) F13→F14 remap: PASS {:?}", got);
     }
 
-    // ── Test (b): CAPSLOCK hold → LEFTCTRL ───────────────────────────────────
+    // ── Test (b): KEY_F15 hold >200ms → KEY_F17 (hold action) ───────────────
     {
-        use conduit_daemon::runloop::Msg;
-        use conduit_core::event::{Event, Key, KeyState};
-
         { let _ = virt_dev.fetch_events(); } // drain
 
-        let now = conduit_daemon::runloop::now_us();
-        // Press CAPSLOCK; daemon sets a 200 ms tap-hold deadline.
-        msg_tx.send(Msg::Input(Event { key: Key(KEY_CAPSLOCK), state: KeyState::Press, time_us: now })).expect("send capslock press");
+        emit_key(&mut fake_kbd, KEY_F15, 1); // press F15
 
+        // Wait 250 ms (> 200 ms tap-hold timeout) for hold to fire.
+        std::thread::sleep(Duration::from_millis(250));
 
-        // Wait up to 1000 ms for LEFTCTRL press after the 200 ms deadline fires.
+        // After the timeout the engine should emit KEY_F17 press.
         let got_hold = poll_read_key_events(
             &mut virt_dev,
             1,
-            Duration::from_millis(1000),
-            "capslock→leftctrl hold",
+            Duration::from_secs(2),
+            "F15 hold → F17 press",
         );
         assert!(
-            got_hold.iter().any(|&(code, val)| code == KEY_LEFTCTRL && val == 1),
-            "(b) expected LEFTCTRL press, got: {:?}",
+            got_hold.iter().any(|&(code, val)| code == KEY_F17 && val == 1),
+            "(b) expected KEY_F17 press after hold, got: {:?}",
             got_hold
         );
+        eprintln!("(b) F15 hold→F17 press: PASS {:?}", got_hold);
 
-        // Release CAPSLOCK → LEFTCTRL release.
-        { let _ = virt_dev.fetch_events(); }
-        let now2 = conduit_daemon::runloop::now_us();
-        msg_tx.send(Msg::Input(Event { key: Key(KEY_CAPSLOCK), state: KeyState::Release, time_us: now2 })).expect("send capslock release");
+        emit_key(&mut fake_kbd, KEY_F15, 0); // release F15
+
+        { let _ = virt_dev.fetch_events(); } // drain repeats / key:186
 
         let got_release = poll_read_key_events(
             &mut virt_dev,
             1,
             Duration::from_secs(2),
-            "capslock release → leftctrl release",
+            "F15 release → F17 release",
         );
         assert!(
-            got_release.iter().any(|&(code, val)| code == KEY_LEFTCTRL && val == 0),
-            "(b) expected LEFTCTRL release, got: {:?}",
+            got_release.iter().any(|&(code, val)| code == KEY_F17 && val == 0),
+            "(b) expected KEY_F17 release, got: {:?}",
             got_release
         );
+        eprintln!("(b) F15 release→F17 release: PASS {:?}", got_release);
     }
 
     // ── Test (c): IPC get_status ──────────────────────────────────────────────
     {
-        // The socket is created synchronously in start(); this loop handles
-        // the rare case where the OS hasn't flushed the file to the directory.
-        let sock_deadline = Instant::now() + Duration::from_secs(2);
-        while !socket_path.exists() {
-            if Instant::now() >= sock_deadline {
-                panic!("IPC socket never appeared at {:?}", socket_path);
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
-
         let resp = ipc_send_get_status(&socket_path);
         match resp {
             conduit_proto::Response::Status(status) => {
                 assert!(
                     !status.grabbed_devices.is_empty(),
-                    "(c) grabbed_devices should be non-empty (daemon pre-announced fake kbd): {:?}",
+                    "(c) grabbed_devices should be non-empty: {:?}",
                     status.grabbed_devices
                 );
                 assert_eq!(
                     status.active_profile, "default",
                     "(c) expected default profile"
                 );
+                eprintln!("(c) IPC status: PASS grabbed={:?}", status.grabbed_devices);
             }
             other => panic!("(c) expected Status response, got: {:?}", other),
         }
     }
 
     // ── Shutdown ──────────────────────────────────────────────────────────────
-    // Shut down BEFORE dropping the fake keyboard. This ensures the daemon's
+    // Shut down BEFORE dropping the fake keyboard.  This ensures the daemon's
     // reader thread has exited before the uinput device is destroyed, which
-    // prevents spurious DeviceRemoved events and avoids any events being emitted
-    // while the device node is disappearing.
+    // prevents spurious DeviceRemoved events.
     handle.shutdown();
-
-    // Now safe to drop the fake keyboard (removes the uinput kernel device).
     drop(fake_kbd);
 }
 
@@ -429,7 +453,7 @@ fn daemon_starts_and_stops_cleanly() {
 grab_all_keyboards = false
 
 [profile.default.keys]
-a = "b"
+"key:183" = "key:184"
 "#,
     )
     .expect("write config");
@@ -440,8 +464,6 @@ a = "b"
         enable_focus: false,
         enable_hotplug: false,
         enable_watch: false,
-        no_grab: false,
-        extra_grabbed_devices: Vec::new(),
     })
     .expect("daemon start");
 
@@ -449,3 +471,81 @@ a = "b"
     handle.shutdown();
 }
 
+/// Engine-via-channel smoke test.
+///
+/// **This test intentionally bypasses the device/reader path.**  It injects
+/// `Msg::Input` events directly into the run-loop channel via
+/// `DaemonHandle::msg_tx()` and reads the remapped output from the virtual
+/// device.  It does NOT exercise EVIOCGRAB, the uinput event node, or any
+/// reader thread.
+///
+/// Kept because it is fast, hermetic, and exercises the engine→emit pipeline
+/// independently of the full grab/read path.
+#[test]
+#[ignore]
+fn engine_via_channel_smoke() {
+    use conduit_daemon::runloop::Msg;
+    use conduit_core::event::{Event, Key as EvKey, KeyState};
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let config_path = tmp.path().join("conduit.toml");
+    let socket_path = tmp.path().join("conduit-test.sock");
+
+    std::fs::write(
+        &config_path,
+        r#"
+[devices]
+grab_all_keyboards = false
+
+[profile.default.keys]
+"key:183" = "key:184"
+"key:185" = { tap = "key:186", hold = "key:187" }
+"#,
+    )
+    .expect("write config");
+
+    // Snapshot before daemon creates its output device.
+    let pre_existing = snapshot_event_devices();
+
+    let handle = conduit_daemon::start(DaemonConfig {
+        config_path,
+        socket_path: Some(socket_path),
+        enable_focus: false,
+        enable_hotplug: false,
+        enable_watch: false,
+    })
+    .expect("daemon start");
+
+    // Find the virtual output device.
+    let virt_path = find_new_device_by_name(
+        "Conduit Virtual Keyboard",
+        &pre_existing,
+        Duration::from_secs(5),
+    );
+
+    let mut virt_dev = evdev::Device::open(&virt_path)
+        .expect("open Conduit Virtual Keyboard");
+    unsafe {
+        let fd = virt_dev.as_raw_fd();
+        let flags = libc::fcntl(fd, libc::F_GETFL, 0);
+        libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+    }
+
+    let msg_tx = handle.msg_tx();
+
+    // Small delay to ensure the run loop is processing.
+    std::thread::sleep(Duration::from_millis(50));
+    { let _ = virt_dev.fetch_events(); } // drain
+
+    // Inject F13 press+release directly into the channel.
+    let now = conduit_daemon::runloop::now_us();
+    msg_tx.send(Msg::Input(Event { key: EvKey(KEY_F13), state: KeyState::Press,   time_us: now })).expect("send press");
+    msg_tx.send(Msg::Input(Event { key: EvKey(KEY_F13), state: KeyState::Release, time_us: now + 10_000 })).expect("send release");
+
+    let got = poll_read_key_events(&mut virt_dev, 2, Duration::from_secs(2), "channel smoke");
+    assert_eq!(got[0], (KEY_F14, 1), "engine smoke: expected F14 press, got {:?}", got);
+    assert_eq!(got[1], (KEY_F14, 0), "engine smoke: expected F14 release, got {:?}", got);
+    eprintln!("engine_via_channel_smoke: PASS {:?}", got);
+
+    handle.shutdown();
+}

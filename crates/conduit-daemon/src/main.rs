@@ -200,8 +200,6 @@ fn main() -> anyhow::Result<()> {
         enable_focus: true,
         enable_hotplug: true,
         enable_watch: true,
-        no_grab: false,
-        extra_grabbed_devices: Vec::new(),
     })?;
 
     // Wait for the run loop to exit (blocks until daemon shuts down).

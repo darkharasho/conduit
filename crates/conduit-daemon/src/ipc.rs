@@ -475,7 +475,6 @@ a = "d"
                         tx,
                         HashMap::new(),
                         settings,
-                        Vec::new(),
                     )
                 })
                 .expect("spawn runloop");

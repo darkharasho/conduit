@@ -37,20 +37,6 @@ pub struct DaemonConfig {
     pub enable_hotplug: bool,
     /// Enable config file watch. Disable in tests.
     pub enable_watch: bool,
-    /// Skip `EVIOCGRAB` (exclusive grab) on matched devices.
-    ///
-    /// Set `true` in integration tests that use `evdev::uinput::VirtualDevice`
-    /// as the fake "physical" keyboard: uinput-created devices return `EBUSY`
-    /// on `EVIOCGRAB`, but events still flow through the device fd without the
-    /// grab.  In production this field must be `false` to prevent raw key events
-    /// from leaking to the Wayland/X11 compositor while the daemon is running.
-    pub no_grab: bool,
-    /// Pre-announce these paths as "grabbed" in the daemon's IPC status.
-    ///
-    /// Integration tests that inject events directly (via `DaemonHandle::msg_tx()`)
-    /// rather than through the Linux evdev input stack can use this to simulate
-    /// grabbed devices for IPC status assertions.  Empty in production.
-    pub extra_grabbed_devices: Vec<String>,
 }
 
 /// Handle to a running daemon instance.
@@ -134,15 +120,14 @@ pub fn start(config: DaemonConfig) -> anyhow::Result<DaemonHandle> {
     // Channel for all daemon messages.
     let (tx, rx) = crossbeam_channel::unbounded::<runloop::Msg>();
 
-    // Grab (or monitor without grab) matching devices and spawn reader threads.
-    let do_grab = !config.no_grab;
+    // Grab matching devices and spawn reader threads.
     let mut readers: HashMap<PathBuf, devices::GrabHandle> = HashMap::new();
     for d in &discovered {
         if devices::should_grab(d, &settings) {
             let handle = devices::spawn_reader(
                 d.path.clone(),
                 d.is_mouse,
-                do_grab,
+                true, // always grab in production
                 tx.clone(),
                 Arc::clone(&out),
             );
@@ -198,7 +183,6 @@ pub fn start(config: DaemonConfig) -> anyhow::Result<DaemonHandle> {
     // other senders are also gone the run loop exits.
     let shutdown_tx = tx;
 
-    let extra_grabbed = config.extra_grabbed_devices;
     let run_out = Arc::clone(&out);
     let run_thread = std::thread::Builder::new()
         .name("conduit-runloop".into())
@@ -210,7 +194,6 @@ pub fn start(config: DaemonConfig) -> anyhow::Result<DaemonHandle> {
                 run_tx,
                 readers,
                 settings,
-                extra_grabbed,
             )
         })
         .context("spawning run loop thread")?;

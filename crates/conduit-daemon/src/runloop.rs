@@ -139,7 +139,6 @@ pub fn run(
     tx: Sender<Msg>,
     mut readers: HashMap<PathBuf, GrabHandle>,
     mut settings: Settings,
-    extra_grabbed: Vec<String>,
 ) {
     // Subscriber senders must come from bounded channels (cap 256, created by
     // the IPC task); a slow consumer is dropped on the first failed try_send.
@@ -149,7 +148,6 @@ pub fn run(
     let mut capture_reply: Option<Sender<Response>> = None;
     let mut grabbed_devices: Vec<String> =
         readers.keys().map(|p| p.display().to_string()).collect();
-    grabbed_devices.extend(extra_grabbed);
     grabbed_devices.sort();
 
     loop {
