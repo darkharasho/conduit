@@ -141,15 +141,28 @@ impl Engine {
                         deadline_us: ev.time_us + timeout_us,
                     });
                 }
-                _ => { /* Layer*: Task 5. */ }
+                Action::LayerWhileHeld(n) => {
+                    self.active_layers.push(n);
+                    self.held.insert(ev.key, HeldEntry::LayerHeld(n));
+                }
+                Action::LayerToggle(n) => {
+                    if let Some(pos) = self.active_layers.iter().rposition(|&l| l == n) {
+                        self.active_layers.remove(pos);
+                    } else {
+                        self.active_layers.push(n);
+                    }
+                    self.held.insert(ev.key, HeldEntry::Swallowed);
+                }
             },
             KeyState::Release => match self.held.remove(&ev.key) {
                 Some(HeldEntry::OutKey(out)) => self.out.push(Event { key: out, ..ev }),
                 Some(HeldEntry::Swallowed) => {}
                 Some(HeldEntry::LayerHeld(l)) => {
-                    // Pop the layer from active_layers (last occurrence)
+                    // Pop the layer from active_layers (last occurrence); never pop pos 0 (base layer)
                     if let Some(pos) = self.active_layers.iter().rposition(|&x| x == l) {
-                        self.active_layers.remove(pos);
+                        if pos != 0 {
+                            self.active_layers.remove(pos);
+                        }
                     }
                 }
                 None => self.out.push(ev),
@@ -302,6 +315,30 @@ mod tests {
         // release timestamp is past the 200ms deadline, but no tick() has fired:
         assert_eq!(e.handle(release("capslock", 250_000)),
                    &[press("esc", 0), release("esc", 250_000)]);
+    }
+
+    const LAYERS: &str = "[profile.default.keys]\nspace = \"layer:sym\"\ntab = \"disabled\"\n[profile.default.layers.sym]\nj = \"1\"\nk = \"2\"";
+
+    #[test]
+    fn layer_toggle_switches_and_back() {
+        let mut e = engine(LAYERS);
+        e.handle(press("space", 0));  // toggle sym on (swallowed)
+        e.handle(release("space", 10));
+        assert_eq!(e.handle(press("j", 20)), &[press("1", 20)]);
+        e.handle(release("j", 30));
+        e.handle(press("space", 40)); // toggle off
+        e.handle(release("space", 50));
+        assert_eq!(e.handle(press("j", 60)), &[press("j", 60)]);
+    }
+
+    #[test]
+    fn layer_miss_falls_through_to_base() {
+        let mut e = engine(LAYERS);
+        e.handle(press("space", 0)); e.handle(release("space", 10)); // sym on
+        // 'a' not in sym layer → falls through to base → passthrough
+        assert_eq!(e.handle(press("a", 20)), &[press("a", 20)]);
+        // but base 'tab = disabled' still applies through the layer
+        assert!(e.handle(press("tab", 30)).is_empty());
     }
 
 }
