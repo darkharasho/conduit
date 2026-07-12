@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { StatusScreen } from "./screens/Status";
+import { MappingsScreen } from "./screens/Mappings";
 
 type Screen = "mappings" | "key-tester" | "devices" | "status";
 
@@ -27,7 +28,7 @@ function App() {
       case "status":
         return <StatusScreen />;
       case "mappings":
-        return <PlaceholderScreen title="Mappings" />;
+        return <MappingsScreen />;
       case "key-tester":
         return <PlaceholderScreen title="Key Tester" />;
       case "devices":
