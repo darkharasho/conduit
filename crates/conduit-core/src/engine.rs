@@ -26,7 +26,9 @@ pub struct Engine {
     held: HashMap<Key, HeldEntry>,
     out: Vec<Event>,            // reused output buffer
     pending: Option<Pending>,
-    buffer: Vec<Event>,
+    /// Events buffered behind a pending tap-hold, with their device slot so
+    /// replay resolves through the same tables as original delivery.
+    buffer: Vec<(Event, Option<u16>)>,
     // Panic chord / suspend state
     suspended: bool,
     chord_down: HashSet<Key>,
@@ -51,8 +53,15 @@ impl Engine {
     }
 
     pub fn handle(&mut self, ev: Event) -> &[Event] {
+        self.handle_on(ev, None)
+    }
+
+    /// Handle an event from a specific device slot (see
+    /// `CompiledConfig::device_selectors`). `None` = no device section
+    /// matches the source; only global tables apply.
+    pub fn handle_on(&mut self, ev: Event, slot: Option<u16>) -> &[Event] {
         self.out.clear();
-        self.process(ev);
+        self.process(ev, slot);
         &self.out
     }
 
@@ -68,10 +77,20 @@ impl Engine {
         self.pending.as_ref().map(|p| p.deadline_us)
     }
 
-    fn lookup(&self, key: Key) -> Action {
+    fn lookup(&self, key: Key, slot: Option<u16>) -> Action {
         let profile = &self.cfg.profiles[self.profile_idx];
         for &layer in self.active_layers.iter().rev() {
-            if let Some(a) = profile.layers[layer as usize][key.0 as usize] { return a; }
+            // Device shadow table first (out-of-range slots fall through).
+            if let Some(s) = slot {
+                if let Some(Some(dev)) = profile.device_layers.get(s as usize) {
+                    if let Some(a) = dev[layer as usize][key.0 as usize] {
+                        return a;
+                    }
+                }
+            }
+            if let Some(a) = profile.layers[layer as usize][key.0 as usize] {
+                return a;
+            }
         }
         Action::Passthrough
     }
@@ -97,12 +116,12 @@ impl Engine {
         // Drain buffered events through normal processing.
         // A buffered TapHold press will re-establish pending; subsequent events
         // re-buffer behind it via the pending check at the top of process().
-        for ev in std::mem::take(&mut self.buffer) {
-            self.process(ev);
+        for (ev, slot) in std::mem::take(&mut self.buffer) {
+            self.process(ev, slot);
         }
     }
 
-    fn process(&mut self, ev: Event) {
+    fn process(&mut self, ev: Event, slot: Option<u16>) {
         // ── Panic chord tracking (always active, even while suspended) ──────────
         let chord_keys = self.cfg.settings.panic_chord.clone();
         if !chord_keys.is_empty() {
@@ -152,11 +171,14 @@ impl Engine {
                 // swallow repeats of the pending key
                 return;
             }
-            self.buffer.push(ev);
+            self.buffer.push((ev, slot));
             // permissive hold: same key pressed AND released inside the buffer?
-            let hold_now = self.buffer.iter().any(|b| {
+            let hold_now = self.buffer.iter().any(|(b, _)| {
                 b.state == KeyState::Release
-                    && self.buffer.iter().any(|b2| b2.key == b.key && b2.state == KeyState::Press)
+                    && self
+                        .buffer
+                        .iter()
+                        .any(|(b2, _)| b2.key == b.key && b2.state == KeyState::Press)
             });
             if hold_now {
                 self.resolve(Resolution::Hold);
@@ -165,7 +187,7 @@ impl Engine {
         }
 
         match ev.state {
-            KeyState::Press => match self.lookup(ev.key) {
+            KeyState::Press => match self.lookup(ev.key, slot) {
                 Action::Key(out) => {
                     self.held.insert(ev.key, HeldEntry::OutKey(out));
                     self.out.push(Event { key: out, ..ev });
@@ -286,8 +308,10 @@ impl Engine {
         self.active_layers.clear();
         self.active_layers.push(0);
         self.set_focus(f);
-        for ev in replay {
-            self.process(ev);
+        // Replay without slots: slot indices are defined by the config being
+        // replaced, so they may point at the wrong (or no) section now.
+        for (ev, _old_slot) in replay {
+            self.process(ev, None);
         }
         &self.out
     }
@@ -542,4 +566,72 @@ mod tests {
         assert!(e.suspend().is_empty()); // idempotent: second call flushes nothing
     }
 
+    // ── Per-device slots ───────────────────────────────────────────────────────
+
+    const DEV_ENGINE: &str = r#"
+        [profile.default.keys]
+        a = "b"
+        mouse4 = "back"
+        [profile.default.layers.nav]
+        h = "left"
+        [profile.default.device."g600".keys]
+        a = "c"
+        f = { tap = "f", hold = "layer:nav" }
+        [profile.default.device."g600".layers.nav]
+        h = "home"
+    "#;
+
+    #[test]
+    fn device_slot_shadows_global() {
+        let mut e = engine(DEV_ENGINE);
+        // slot 0 = "g600": device table wins
+        assert_eq!(e.handle_on(press("a", 0), Some(0)), &[press("c", 0)]);
+        e.handle_on(release("a", 1), Some(0));
+        // no slot: global table
+        assert_eq!(e.handle_on(press("a", 10), None), &[press("b", 10)]);
+        e.handle_on(release("a", 11), None);
+        // key absent from device table falls through to global
+        assert_eq!(e.handle_on(press("mouse4", 20), Some(0)), &[press("back", 20)]);
+    }
+
+    #[test]
+    fn device_layer_override_shadows_global_layer() {
+        let mut e = engine(DEV_ENGINE);
+        e.handle_on(press("f", 0), Some(0));
+        e.tick(300_000); // hold → nav layer
+        // device nav table says home; global nav says left
+        assert_eq!(e.handle_on(press("h", 400_000), Some(0)), &[press("home", 400_000)]);
+        e.handle_on(release("h", 410_000), Some(0));
+        // same layer, event without a slot → global nav mapping
+        assert_eq!(e.handle_on(press("h", 420_000), None), &[press("left", 420_000)]);
+    }
+
+    #[test]
+    fn buffered_events_replay_with_their_slot() {
+        // tap-hold pending on the device; a device-mapped key buffered behind it
+        // must resolve through the DEVICE table when replayed.
+        let mut e = engine(DEV_ENGINE);
+        e.handle_on(press("f", 0), Some(0)); // pending tap-hold (device table)
+        e.handle_on(press("a", 50_000), Some(0)); // buffered with slot 0
+        // release f before timeout → tap; buffered 'a' replays as device-mapped 'c'
+        assert_eq!(
+            e.handle_on(release("f", 100_000), Some(0)),
+            &[press("f", 0), release("f", 100_000), press("c", 50_000)]
+        );
+    }
+
+    #[test]
+    fn out_of_range_slot_is_global() {
+        let mut e = engine(DEV_ENGINE);
+        assert_eq!(e.handle_on(press("a", 0), Some(99)), &[press("b", 0)]);
+    }
+
+    #[test]
+    fn release_pairs_across_slot_loss() {
+        // Press resolved via device table; release without a slot still pairs
+        // via the held map (release never re-consults the tables).
+        let mut e = engine(DEV_ENGINE);
+        e.handle_on(press("a", 0), Some(0)); // emits c
+        assert_eq!(e.handle_on(release("a", 10), None), &[release("c", 10)]);
+    }
 }
