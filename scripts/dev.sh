@@ -5,6 +5,8 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-/usr/lib64/pkgconfig:/usr/share/pkgconfig}"
+# WebKitGTK's DMA-BUF renderer produces a blank window on NVIDIA + Wayland.
+export WEBKIT_DISABLE_DMABUF_RENDERER="${WEBKIT_DISABLE_DMABUF_RENDERER:-1}"
 
 SOCK="${CONDUIT_SOCKET:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/conduit.sock}"
 
