@@ -78,14 +78,18 @@ const KEY_F17: u16 = 187;
 
 /// Create a fake uinput keyboard named "Conduit Test Source".
 ///
-/// Advertises KEY_A (code 30) so `devices::probe` classifies it as a keyboard
-/// and `should_grab` picks it up.  Also advertises KEY_F13..KEY_F18 (183–188)
-/// as the codes actually used in remapping tests.  No letter keys, no modifier
-/// keys, no CapsLock — even transient leaks before grab cannot produce visible
-/// compositor input.
+/// Advertises 24 typing-block codes (2..=25: digit and top letter rows) so the
+/// capability classifier (`classify`: ≥ 20 typing keys) labels the device a
+/// keyboard and `should_grab` picks it up.  **Declaring** codes is inert —
+/// only *emitted* events reach the compositor — and the test emits nothing but
+/// KEY_F13..KEY_F18 (183–188), which are unassigned in KDE/X11 by default.
+/// No letter, modifier, or CapsLock events are ever emitted.
 fn create_fake_keyboard() -> evdev::uinput::VirtualDevice {
     let mut keys = AttributeSet::<Key>::new();
-    // KEY_A: required for keyboard classification — NEVER emitted by the test.
+    // Typing-block codes for keyboard classification — NEVER emitted.
+    for code in 2u16..=25 {
+        keys.insert(Key::new(code));
+    }
     keys.insert(Key::new(KEY_A));
     // Harmless F-row codes used for remap assertions.
     for code in [KEY_F13, KEY_F14, KEY_F15, KEY_F16, KEY_F17, 188u16] {

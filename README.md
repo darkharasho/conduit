@@ -11,7 +11,13 @@ space with no kernel patch required.
 - **Tap-vs-hold** remapping per key (e.g. CapsLock → tap Escape, hold Ctrl)
 - **Named layers** with toggle and while-held activation
 - **Per-application profiles** matched by window class, process name, or title
-  regex (Hyprland and X11 supported)
+  regex (Hyprland, KDE Plasma Wayland, and X11 supported)
+- **Mouse remapping** — buttons (`btn_left`…`btn_task`, `mouse4`/`mouse5`) and
+  scroll wheel (`wheelup`, `wheeldown`, `wheelleft`, `wheelright`) map like any
+  key; pointer motion passes through with zero added latency
+- **Hardware classification** — devices are classified by capabilities
+  (keyboard / mouse / touchpad / gamepad / media), so a gaming mouse's hidden
+  keyboard node is grabbable and your speakers' volume keys are not
 - **Panic chord** — a configurable key combo that instantly suspends remapping
   to recover from a misconfigured keymap
 - **Hot-reload** — hand-edit `conduit.toml` and changes take effect within
@@ -19,6 +25,31 @@ space with no kernel patch required.
 - **IPC socket** — a newline-delimited JSON Unix socket for programmatic
   control (used by the companion UI)
 - **Hotplug** — new keyboards and mice are grabbed automatically as they appear
+
+## Device selectors
+
+Entries in `devices.grab_keyboards` / `devices.grab_mice` accept three forms:
+
+```toml
+[devices]
+grab_all_keyboards = true
+grab_all_mice = false          # never includes touchpads
+grab_mice = [
+  "Logitech Gaming Mouse G600",        # exact device name
+  "046d:c24a",                         # vendor:product (hex)
+  "046d:c24a/Logitech Gaming Mouse G600 Keyboard",  # vendor:product/name
+]
+```
+
+The `vendor:product/name` form disambiguates receivers and gaming devices that
+expose several event nodes under one vendor/product pair.
+
+## Focus tracking (per-app profiles)
+
+The daemon picks a focus backend automatically, in priority order: Hyprland
+(IPC socket) → KDE Plasma Wayland (a KWin script injected over D-Bus reports
+window activations) → X11 (`_NET_ACTIVE_WINDOW`). On KDE the script is
+re-injected automatically if KWin restarts; no configuration is needed.
 
 ## Quickstart (dev)
 
