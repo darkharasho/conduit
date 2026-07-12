@@ -11,7 +11,6 @@
 //! On socket error: sleep 1 s (doubling up to max 30 s), then reconnect.
 //! Backoff resets on successful connect.
 
-use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
@@ -21,14 +20,7 @@ use crossbeam_channel::Sender;
 use conduit_proto::FocusInfo;
 
 use crate::runloop::Msg;
-use super::FocusBackend;
-
-// ── Backoff helper ─────────────────────────────────────────────────────────────
-
-/// Double the current backoff, capped at 30 seconds.
-pub fn next_backoff(cur: Duration) -> Duration {
-    Duration::from_secs(cur.as_secs().saturating_mul(2).min(30))
-}
+use super::{next_backoff, read_comm, FocusBackend};
 
 // ── Pure parsing ───────────────────────────────────────────────────────────────
 
@@ -92,13 +84,6 @@ fn query_active_window() -> Option<(u32, String, String)> {
     let class = val["class"].as_str().unwrap_or("").to_string();
     let title = val["title"].as_str().unwrap_or("").to_string();
     Some((pid, class, title))
-}
-
-/// Read process name from `/proc/<pid>/comm`, trimming whitespace.
-fn read_comm(pid: u32) -> String {
-    fs::read_to_string(format!("/proc/{}/comm", pid))
-        .map(|s| s.trim().to_string())
-        .unwrap_or_default()
 }
 
 // ── list_windows ───────────────────────────────────────────────────────────────
@@ -259,25 +244,6 @@ mod tests {
         assert!(parse_event_line("focusedmon>>DP-1,default").is_none());
         assert!(parse_event_line("movewindow>>address,workspace").is_none());
         assert!(parse_event_line("fullscreen>>0").is_none());
-    }
-
-    // ── next_backoff ──────────────────────────────────────────────────────────
-
-    #[test]
-    fn backoff_doubles_up_to_30s() {
-        let d1 = Duration::from_secs(1);
-        let d2 = next_backoff(d1);
-        assert_eq!(d2, Duration::from_secs(2));
-        let d3 = next_backoff(d2);
-        assert_eq!(d3, Duration::from_secs(4));
-        let d4 = next_backoff(d3);
-        assert_eq!(d4, Duration::from_secs(8));
-        let d5 = next_backoff(d4);
-        assert_eq!(d5, Duration::from_secs(16));
-        let d6 = next_backoff(d5);
-        assert_eq!(d6, Duration::from_secs(30)); // capped
-        let d7 = next_backoff(d6);
-        assert_eq!(d7, Duration::from_secs(30)); // stays at cap
     }
 
     // ── Live verification test (requires Hyprland) ─────────────────────────────
