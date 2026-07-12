@@ -247,4 +247,16 @@ describe("serializeConfigToml", () => {
       timeoutMs: 150,
     });
   });
+
+  it("addLayer with empty table survives round-trip", () => {
+    const m = parseConfigToml(SPEC_TOML);
+    const m2 = addLayer(m, "default", "nav2");
+    // Serialize the model with the empty layer
+    const out = serializeConfigToml(m2);
+    // Parse it back
+    const m3 = parseConfigToml(out);
+    // Check if the layer exists
+    const layers = listLayers(m3, "default");
+    expect(layers).toContain("nav2");
+  });
 });

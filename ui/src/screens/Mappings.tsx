@@ -78,7 +78,7 @@ export function MappingsScreen() {
     setNewLayerName("");
   };
 
-  const handleConfirmAddLayer = () => {
+  const handleConfirmAddLayer = async () => {
     const name = newLayerName.trim();
     if (!name || !model) {
       setNewLayerPrompt(false);
@@ -86,6 +86,12 @@ export function MappingsScreen() {
     }
     const updated = addLayer(model, activeProfile, name);
     setModel(updated);
+    try {
+      await setConfig(serializeConfigToml(updated));
+    } catch (err) {
+      setLoadError(String(err));
+      return;
+    }
     setActiveLayer(name);
     setNewLayerPrompt(false);
   };
@@ -188,6 +194,7 @@ export function MappingsScreen() {
             {editingKey && (
               <div className="action-editor-container">
                 <ActionEditor
+                  key={`${editingKey}:${activeProfile}:${activeLayer}`}
                   keyName={editingKey}
                   model={model}
                   activeProfile={activeProfile}
