@@ -154,7 +154,7 @@ pub fn start(config: DaemonConfig) -> anyhow::Result<DaemonHandle> {
         if devices::should_grab(d, &settings) {
             let handle = devices::spawn_reader(
                 d.path.clone(),
-                d.is_mouse,
+                d.is_pointer(),
                 true, // always grab in production
                 tx.clone(),
                 Arc::clone(&out),

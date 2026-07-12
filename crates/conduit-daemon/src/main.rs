@@ -170,8 +170,8 @@ fn main() -> anyhow::Result<()> {
     // ── Print device table ────────────────────────────────────────────────────
     println!("Socket: {}", paths::socket_path().display());
     println!(
-        "{:<6}  {:<12}  {:<4}  {:<5}  {:<10}  {}",
-        "GRAB", "vendor:prod", "KBD?", "MOUSE", "path", "name"
+        "{:<6}  {:<12}  {:<9}  {:<10}  {}",
+        "GRAB", "vendor:prod", "CLASS", "path", "name"
     );
     println!("{}", "─".repeat(70));
 
@@ -181,12 +181,11 @@ fn main() -> anyhow::Result<()> {
         for d in &discovered {
             let grab = devices::should_grab(d, &settings);
             println!(
-                "{:<6}  {:04x}:{:04x}  {:<4}  {:<5}  {:<10}  {}",
+                "{:<6}  {:04x}:{:04x}  {:<9}  {:<10}  {}",
                 if grab { "YES" } else { "no" },
                 d.vendor,
                 d.product,
-                if d.is_keyboard { "yes" } else { "no" },
-                if d.is_mouse { "yes" } else { "no" },
+                d.class.as_str(),
                 d.path.display(),
                 d.name,
             );

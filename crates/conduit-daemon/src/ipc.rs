@@ -329,11 +329,11 @@ fn list_devices_response(tx: &Sender<Msg>) -> Response {
             let grabbed = grabbed_paths.contains(&path_str);
             DeviceInfo {
                 path: path_str,
-                name: d.name,
+                name: d.name.clone(),
                 vendor: d.vendor,
                 product: d.product,
-                is_keyboard: d.is_keyboard,
-                is_mouse: d.is_mouse,
+                is_keyboard: d.is_keyboard(),
+                is_mouse: d.is_mouse(),
                 grabbed,
             }
         })

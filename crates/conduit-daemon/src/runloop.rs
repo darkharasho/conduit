@@ -243,11 +243,11 @@ pub fn run(
                             .filter_map(|p| {
                                 crate::devices::probe(std::path::PathBuf::from(p)).map(|d| DeviceInfo {
                                     path: d.path.display().to_string(),
-                                    name: d.name,
+                                    name: d.name.clone(),
                                     vendor: d.vendor,
                                     product: d.product,
-                                    is_keyboard: d.is_keyboard,
-                                    is_mouse: d.is_mouse,
+                                    is_keyboard: d.is_keyboard(),
+                                    is_mouse: d.is_mouse(),
                                     grabbed: true,
                                 })
                             })
@@ -326,10 +326,10 @@ fn try_grab_device(
     // Cannot spawn a reader without a virtual output to forward events to.
     let Some(out) = out else { return };
 
-    let is_mouse = discovered.is_mouse;
+    let is_pointer = discovered.is_pointer();
     let handle = crate::devices::spawn_reader(
         path.to_path_buf(),
-        is_mouse,
+        is_pointer,
         true, // always grab in production (hotplug path)
         tx.clone(),
         Arc::clone(out),

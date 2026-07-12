@@ -8,6 +8,7 @@ use crossbeam_channel::Sender;
 use conduit_core::config::Settings;
 use conduit_core::event::{Event, Key, KeyState};
 
+use crate::classify::{classify, Caps, DeviceClass, DeviceSelector};
 use crate::output::VirtualOutput;
 use crate::runloop::{now_us, Msg};
 
@@ -18,8 +19,25 @@ pub struct Discovered {
     pub name: String,
     pub vendor: u16,
     pub product: u16,
-    pub is_keyboard: bool,
-    pub is_mouse: bool,
+    pub phys: String,
+    pub class: DeviceClass,
+}
+
+impl Discovered {
+    /// Canonical selector: `vid:pid/name`.
+    pub fn id(&self) -> String {
+        format!("{:04x}:{:04x}/{}", self.vendor, self.product, self.name)
+    }
+    pub fn is_keyboard(&self) -> bool {
+        self.class == DeviceClass::Keyboard
+    }
+    pub fn is_mouse(&self) -> bool {
+        self.class == DeviceClass::Mouse
+    }
+    /// Pointer-ish devices get their EV_REL/EV_MSC events forwarded raw.
+    pub fn is_pointer(&self) -> bool {
+        matches!(self.class, DeviceClass::Mouse | DeviceClass::Touchpad)
+    }
 }
 
 /// Probe a single device path and return a `Discovered` entry, or `None` if the
@@ -36,34 +54,27 @@ pub fn probe(path: PathBuf) -> Option<Discovered> {
     }
 
     let id = dev.input_id();
-    let vendor = id.vendor();
-    let product = id.product();
 
-    // Classification:
-    //   keyboard = supports EV_KEY and has KEY_A
-    //   mouse    = supports EV_KEY with BTN_LEFT and EV_REL
-    let supported_keys = dev.supported_keys();
-    let has_ev_key = supported_keys.is_some();
-    let has_key_a = supported_keys
-        .as_ref()
-        .map_or(false, |keys| keys.contains(evdev::Key::KEY_A));
-    let has_btn_left = supported_keys
-        .as_ref()
-        .map_or(false, |keys| keys.contains(evdev::Key::BTN_LEFT));
-    let has_ev_rel = dev
-        .supported_relative_axes()
-        .is_some();
-
-    let is_keyboard = has_ev_key && has_key_a;
-    let is_mouse = has_ev_key && has_btn_left && has_ev_rel;
+    let keys: Vec<u16> = dev
+        .supported_keys()
+        .map(|set| set.iter().map(|k| k.code()).collect())
+        .unwrap_or_default();
+    let rel_x_y = dev.supported_relative_axes().map_or(false, |r| {
+        r.contains(evdev::RelativeAxisType::REL_X) && r.contains(evdev::RelativeAxisType::REL_Y)
+    });
+    let abs_x_y = dev.supported_absolute_axes().map_or(false, |a| {
+        a.contains(evdev::AbsoluteAxisType::ABS_X) && a.contains(evdev::AbsoluteAxisType::ABS_Y)
+    });
+    let prop_pointer = dev.properties().contains(evdev::PropType::POINTER);
+    let caps = Caps { keys, rel_x_y, abs_x_y, prop_pointer };
 
     Some(Discovered {
         path,
         name,
-        vendor,
-        product,
-        is_keyboard,
-        is_mouse,
+        vendor: id.vendor(),
+        product: id.product(),
+        phys: dev.physical_path().unwrap_or("").to_owned(),
+        class: classify(&caps),
     })
 }
 
@@ -126,31 +137,27 @@ pub fn should_fail_eacces(discovered_count: usize, eacces_count: usize) -> bool 
 ///
 /// Rules:
 /// - Any device whose name starts with `"Conduit Virtual"` → `false` (defense in depth).
-/// - Keyboards: grabbed if `grab_all_keyboards` is set, or if the device name
-///   appears in `grab_keyboards`.
-/// - Mice: grabbed if the device name appears in `grab_mice` (exact match).
-/// - Devices that are neither keyboard nor mouse → `false`.
+/// - Keyboards: `grab_all_keyboards` or a `grab_keyboards` selector match.
+/// - Mice: `grab_all_mice` or a `grab_mice` selector match.
+/// - Touchpads: a `grab_mice` selector match ONLY — grabbing a touchpad kills
+///   compositor gestures, so `grab_all_mice` never includes them.
+/// - Gamepads, media-key nodes, and everything else → `false`.
 pub fn should_grab(d: &Discovered, s: &Settings) -> bool {
     // Defense in depth: never grab Conduit Virtual devices.
     if d.name.starts_with("Conduit Virtual") {
         return false;
     }
 
-    let mut grab = false;
+    let matched = |list: &[String]| {
+        list.iter().any(|e| DeviceSelector::parse(e).matches(&d.name, d.vendor, d.product))
+    };
 
-    if d.is_keyboard {
-        if s.grab_all_keyboards || s.grab_keyboards.iter().any(|k| k == &d.name) {
-            grab = true;
-        }
+    match d.class {
+        DeviceClass::Keyboard => s.grab_all_keyboards || matched(&s.grab_keyboards),
+        DeviceClass::Mouse => s.grab_all_mice || matched(&s.grab_mice),
+        DeviceClass::Touchpad => matched(&s.grab_mice),
+        _ => false,
     }
-
-    if d.is_mouse {
-        if s.grab_mice.iter().any(|m| m == &d.name) {
-            grab = true;
-        }
-    }
-
-    grab
 }
 
 // ── Reader threads ────────────────────────────────────────────────────────────
@@ -186,10 +193,10 @@ impl Drop for GrabHandle {
 /// then loops `fetch_events()`:
 /// - EV_KEY events become core `Event`s (value 1 = Press, 0 = Release,
 ///   2 = Repeat), stamped with `now_us()` at read time, sent as `Msg::Input`.
-/// - For mice (`is_mouse`): EV_REL and EV_MSC events are forwarded directly
-///   to the virtual mouse via `out` — motion latency must not pay a channel
-///   hop. EV_SYN is NOT forwarded: `VirtualDevice::emit` auto-appends
-///   SYN_REPORT and forwarding SYN would double it.
+/// - For pointer devices (`is_pointer`): EV_REL motion and EV_MSC events are
+///   forwarded directly to the virtual mouse via `out` — motion latency must
+///   not pay a channel hop. EV_SYN is NOT forwarded: `VirtualDevice::emit`
+///   auto-appends SYN_REPORT and forwarding SYN would double it.
 /// - On a read error (device unplugged) the thread sends
 ///   `Msg::DeviceRemoved(path)` and exits.
 ///
@@ -204,7 +211,7 @@ impl Drop for GrabHandle {
 /// uinput fd into the event device and are visible via the non-blocking read.
 pub fn spawn_reader(
     path: PathBuf,
-    is_mouse: bool,
+    is_pointer: bool,
     do_grab: bool,
     tx: Sender<Msg>,
     out: Arc<Mutex<VirtualOutput>>,
@@ -310,7 +317,7 @@ pub fn spawn_reader(
                     if tx.send(Msg::Input(ev)).is_err() {
                         return; // engine thread gone; shut down
                     }
-                } else if is_mouse
+                } else if is_pointer
                     && (ev_type == evdev::EventType::RELATIVE
                         || ev_type == evdev::EventType::MISC)
                 {
@@ -335,43 +342,29 @@ pub fn spawn_reader(
 mod tests {
     use super::*;
 
-    fn kbd(name: &str) -> Discovered {
+    fn dev(name: &str, class: DeviceClass) -> Discovered {
         Discovered {
             path: "/dev/input/event0".into(),
             name: name.into(),
-            vendor: 0,
-            product: 0,
-            is_keyboard: true,
-            is_mouse: false,
+            vendor: 0x046d,
+            product: 0xc24a,
+            phys: String::new(),
+            class,
         }
-    }
-
-    fn mouse(name: &str) -> Discovered {
-        Discovered {
-            path: "/dev/input/event1".into(),
-            name: name.into(),
-            vendor: 0,
-            product: 0,
-            is_keyboard: false,
-            is_mouse: true,
-        }
-    }
-
-    fn test_settings() -> conduit_core::config::Settings {
-        conduit_core::config::compile(
-            "[devices]\ngrab_all_keyboards = true\ngrab_mice = [\"Logitech G502\"]",
-        )
-        .unwrap()
-        .settings
     }
 
     #[test]
-    fn grab_selection_rules() {
-        let s = test_settings();
-        assert!(should_grab(&kbd("AT Translated Set 2 keyboard"), &s));
-        assert!(!should_grab(&mouse("Some Mouse"), &s));
-        assert!(should_grab(&mouse("Logitech G502"), &s));
-        assert!(!should_grab(&kbd("Conduit Virtual Keyboard"), &s)); // never
+    fn grab_rules_by_class_and_selector() {
+        let s = conduit_core::config::compile(
+            "[devices]\ngrab_all_keyboards = true\ngrab_mice = [\"046d:c24a\"]",
+        )
+        .unwrap()
+        .settings;
+        assert!(should_grab(&dev("Any Kbd", DeviceClass::Keyboard), &s));
+        assert!(should_grab(&dev("G600", DeviceClass::Mouse), &s)); // vid:pid selector
+        assert!(!should_grab(&dev("Consumer Ctl", DeviceClass::MediaKeys), &s));
+        assert!(!should_grab(&dev("Pad", DeviceClass::Other), &s));
+        assert!(!should_grab(&dev("Controller", DeviceClass::Gamepad), &s));
     }
 
     #[test]
@@ -381,33 +374,43 @@ mod tests {
         )
         .unwrap()
         .settings;
-        assert!(should_grab(&kbd("My Keyboard"), &s));
-        assert!(!should_grab(&kbd("Other Keyboard"), &s));
+        assert!(should_grab(&dev("My Keyboard", DeviceClass::Keyboard), &s));
+        assert!(!should_grab(&dev("Other Keyboard", DeviceClass::Keyboard), &s));
+    }
+
+    #[test]
+    fn grab_all_mice_excludes_touchpads() {
+        let s = conduit_core::config::compile("[devices]\ngrab_all_mice = true")
+            .unwrap()
+            .settings;
+        assert!(should_grab(&dev("G600", DeviceClass::Mouse), &s));
+        assert!(!should_grab(&dev("Synaptics", DeviceClass::Touchpad), &s));
+    }
+
+    #[test]
+    fn touchpad_grabbed_only_by_explicit_selector() {
+        let s = conduit_core::config::compile(
+            "[devices]\ngrab_all_mice = true\ngrab_mice = [\"Synaptics\"]",
+        )
+        .unwrap()
+        .settings;
+        assert!(should_grab(&dev("Synaptics", DeviceClass::Touchpad), &s));
     }
 
     #[test]
     fn conduit_virtual_devices_never_grabbed() {
         let s = conduit_core::config::compile(
-            "[devices]\ngrab_all_keyboards = true\ngrab_mice = [\"Conduit Virtual Mouse\"]",
+            "[devices]\ngrab_all_keyboards = true\ngrab_all_mice = true",
         )
         .unwrap()
         .settings;
-        assert!(!should_grab(&kbd("Conduit Virtual Keyboard"), &s));
-        assert!(!should_grab(&mouse("Conduit Virtual Mouse"), &s));
+        assert!(!should_grab(&dev("Conduit Virtual Keyboard", DeviceClass::Keyboard), &s));
+        assert!(!should_grab(&dev("Conduit Virtual Mouse", DeviceClass::Mouse), &s));
     }
 
     #[test]
-    fn non_keyboard_non_mouse_not_grabbed() {
-        let s = test_settings();
-        let other = Discovered {
-            path: "/dev/input/event2".into(),
-            name: "Generic HID device".into(),
-            vendor: 0,
-            product: 0,
-            is_keyboard: false,
-            is_mouse: false,
-        };
-        assert!(!should_grab(&other, &s));
+    fn discovered_id_format() {
+        assert_eq!(dev("G600", DeviceClass::Mouse).id(), "046d:c24a/G600");
     }
 
     // ── EACCES detection — pure decision logic ────────────────────────────────
