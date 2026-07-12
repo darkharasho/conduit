@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
-import { onConnection, onStatus, getConfig, setConfig, listWindows } from "./lib/client";
+import {
+  onConnection,
+  onStatus,
+  getConfig,
+  setConfig,
+  getStatus,
+  listWindows,
+} from "./lib/client";
 import type { Status, FocusInfo } from "./lib/client";
+import { Titlebar } from "./components/Titlebar";
 import {
   parseConfigToml,
   serializeConfigToml,
@@ -48,6 +56,20 @@ function App() {
     }
   }, []);
 
+  // Seed status with a one-shot query. The Tauri process emits
+  // conduit://connected when ITS subscription connects — often before this
+  // webview has registered listeners — so without this seed the shell shows
+  // a red daemon dot and 0 grabbed devices until the next status push.
+  const refreshStatus = useCallback(async () => {
+    try {
+      const s = await getStatus();
+      setStatus(s);
+      setConnected(true);
+    } catch {
+      setConnected(false);
+    }
+  }, []);
+
   // Stable callback: re-fetch model when profiles change, keep activeProfile valid
   const handleProfilesChange = useCallback((names: string[]) => {
     loadConfig();
@@ -87,10 +109,14 @@ function App() {
 
   useEffect(() => {
     loadConfig();
+    refreshStatus();
 
     const unlistenConn = onConnection((c) => {
       setConnected(c);
-      if (c) loadConfig();
+      if (c) {
+        loadConfig();
+        refreshStatus();
+      }
     });
 
     const unlistenStatus = onStatus((s) => {
@@ -102,7 +128,7 @@ function App() {
       unlistenConn.then(([f1, f2]) => { f1(); f2(); });
       unlistenStatus.then((f) => f());
     };
-  }, [loadConfig]);
+  }, [loadConfig, refreshStatus]);
 
   // Keyboard shortcuts 1-4 to switch screens
   // Skip when modifier keys are held or when focus is in an editable element
@@ -150,15 +176,10 @@ function App() {
 
   return (
     <div className="app-shell">
+      <Titlebar connected={connected} />
       <div className="app-cols">
         {/* Left rail */}
         <aside className="rail" aria-label="Navigation">
-          {/* Logo */}
-          <div className="rail__logo">
-            Conduit
-            <span className="rail__logo-version">v0.1</span>
-          </div>
-
           {/* Nav */}
           <nav className="rail__nav">
             {NAV_ITEMS.map((item) => (
@@ -174,43 +195,43 @@ function App() {
             ))}
           </nav>
 
-          {/* Profiles section — only on Mappings screen */}
-          {activeScreen === "mappings" && (
-            <>
-              <div className="rail__section-label">Profiles</div>
-              {profiles.map((name) => {
-                const isActive = name === activeProfile;
-                const isLive = name === status?.active_profile;
-                const matchLabel = configModel
-                  ? getProfileMatchLabel(configModel, name)
-                  : null;
+          {/* Profiles section — on every screen; clicking a profile jumps
+              to Mappings with it selected. */}
+          <div className="rail__section-label">Profiles</div>
+          {profiles.map((name) => {
+            const isActive = name === activeProfile && activeScreen === "mappings";
+            const isLive = name === status?.active_profile;
+            const matchLabel = configModel
+              ? getProfileMatchLabel(configModel, name)
+              : null;
 
-                return (
-                  <button
-                    key={name}
-                    className={`rail__profile${isActive ? " rail__profile--active" : ""}`}
-                    onClick={() => setActiveProfile(name)}
-                  >
-                    <span>
-                      {name}
-                      {isLive && (
-                        <span className="rail__profile-live"> ● active</span>
-                      )}
-                    </span>
-                    {matchLabel && (
-                      <span className="rail__profile-match">{matchLabel}</span>
-                    )}
-                  </button>
-                );
-              })}
+            return (
               <button
-                className="rail__add-profile"
-                onClick={handleOpenAddProfile}
+                key={name}
+                className={`rail__profile${isActive ? " rail__profile--active" : ""}`}
+                onClick={() => {
+                  setActiveProfile(name);
+                  setActiveScreen("mappings");
+                }}
               >
-                + new profile
+                <span>
+                  {name}
+                  {isLive && (
+                    <span className="rail__profile-live"> ● active</span>
+                  )}
+                </span>
+                {matchLabel && (
+                  <span className="rail__profile-match">{matchLabel}</span>
+                )}
               </button>
-            </>
-          )}
+            );
+          })}
+          <button
+            className="rail__add-profile"
+            onClick={handleOpenAddProfile}
+          >
+            + new profile
+          </button>
         </aside>
 
         {/* Main content */}

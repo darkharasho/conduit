@@ -70,9 +70,75 @@ button {
 
 .app-shell {
   display: grid;
-  grid-template-rows: 1fr 26px;
+  grid-template-rows: 34px 1fr 26px;
   height: 100vh;
   overflow: hidden;
+}
+
+/* ── Custom titlebar (frameless window) ── */
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  background: var(--bg-rail);
+  border-bottom: 1px solid var(--border-structural);
+  padding-left: 14px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.titlebar__logo {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-hi);
+}
+
+.titlebar__version {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-left: 6px;
+  font-family: var(--font-mono);
+}
+
+.titlebar__daemon {
+  margin-left: 14px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+}
+
+.titlebar__daemon--ok {
+  color: var(--teal);
+}
+
+.titlebar__daemon--err {
+  color: var(--red);
+}
+
+.titlebar__spacer {
+  flex: 1;
+}
+
+.titlebar__btn {
+  width: 40px;
+  height: 34px;
+  border: none;
+  background: transparent;
+  color: var(--text-lo);
+  font-size: 12px;
+  line-height: 1;
+  border-radius: 0;
+}
+
+.titlebar__btn:hover {
+  background: var(--bg-key);
+  color: var(--text-hi);
+}
+
+.titlebar__btn--close:hover {
+  background: #3a1a1a;
+  color: var(--red);
 }
 
 .app-cols {
