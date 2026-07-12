@@ -74,17 +74,27 @@ pub fn classify(c: &Caps) -> DeviceClass {
     DeviceClass::Other
 }
 
-/// One entry in `grab_keyboards` / `grab_mice`.
+/// One entry in `grab_keyboards` / `grab_mice` or a `profile.*.device` key.
 ///
 /// Grammar (back-compat: anything unparseable is a plain name):
 /// - `"AT Translated Set 2 keyboard"` — exact name
 /// - `"046d:c24a"` — vendor:product hex
 /// - `"046d:c24a/Logitech Gaming Mouse G600 Keyboard"` — vendor:product/name
+/// - `"046d:c24a/G600@usb-0000:00:14.0-1/input0"` — plus physical port path,
+///   for telling identical devices apart. The `@phys` suffix is recognized
+///   only when the prefix parses as `vid:pid` or `vid:pid/name`; plain names
+///   containing `@` stay plain names.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DeviceSelector {
+pub enum SelectorBase {
     Name(String),
     VidPid(u16, u16),
     VidPidName(u16, u16, String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceSelector {
+    pub base: SelectorBase,
+    pub phys: Option<String>,
 }
 
 fn parse_vid_pid(s: &str) -> Option<(u16, u16)> {
@@ -95,26 +105,68 @@ fn parse_vid_pid(s: &str) -> Option<(u16, u16)> {
     Some((u16::from_str_radix(v, 16).ok()?, u16::from_str_radix(p, 16).ok()?))
 }
 
+fn parse_base(s: &str) -> SelectorBase {
+    if let Some((vp, name)) = s.split_once('/') {
+        if let Some((v, p)) = parse_vid_pid(vp) {
+            return SelectorBase::VidPidName(v, p, name.to_string());
+        }
+    }
+    if let Some((v, p)) = parse_vid_pid(s) {
+        return SelectorBase::VidPid(v, p);
+    }
+    SelectorBase::Name(s.to_string())
+}
+
 impl DeviceSelector {
     pub fn parse(s: &str) -> DeviceSelector {
-        if let Some((vp, name)) = s.split_once('/') {
-            if let Some((v, p)) = parse_vid_pid(vp) {
-                return DeviceSelector::VidPidName(v, p, name.to_string());
+        if let Some((prefix, phys)) = s.rsplit_once('@') {
+            let base = parse_base(prefix);
+            if !matches!(base, SelectorBase::Name(_)) {
+                return DeviceSelector { base, phys: Some(phys.to_string()) };
             }
         }
-        if let Some((v, p)) = parse_vid_pid(s) {
-            return DeviceSelector::VidPid(v, p);
-        }
-        DeviceSelector::Name(s.to_string())
+        DeviceSelector { base: parse_base(s), phys: None }
     }
 
-    pub fn matches(&self, name: &str, vendor: u16, product: u16) -> bool {
-        match self {
-            DeviceSelector::Name(n) => n == name,
-            DeviceSelector::VidPid(v, p) => *v == vendor && *p == product,
-            DeviceSelector::VidPidName(v, p, n) => *v == vendor && *p == product && n == name,
+    pub fn matches(&self, name: &str, vendor: u16, product: u16, phys: &str) -> bool {
+        let base_ok = match &self.base {
+            SelectorBase::Name(n) => n == name,
+            SelectorBase::VidPid(v, p) => *v == vendor && *p == product,
+            SelectorBase::VidPidName(v, p, n) => *v == vendor && *p == product && n == name,
+        };
+        base_ok && self.phys.as_ref().map_or(true, |ph| ph == phys)
+    }
+
+    /// Match strength for picking the best section when several apply:
+    /// `vid:pid/name@phys` (4) > `vid:pid/name` (3) > name (2) > `vid:pid` (1).
+    pub fn specificity(&self) -> u8 {
+        match (&self.base, &self.phys) {
+            (SelectorBase::VidPidName(..), Some(_)) | (SelectorBase::VidPid(..), Some(_)) => 4,
+            (SelectorBase::VidPidName(..), None) => 3,
+            (SelectorBase::Name(_), _) => 2,
+            (SelectorBase::VidPid(..), None) => 1,
         }
     }
+}
+
+/// Most specific matching selector's index (= device slot); ties → first in
+/// config order. `None` when nothing matches.
+pub fn resolve_slot(
+    name: &str,
+    vendor: u16,
+    product: u16,
+    phys: &str,
+    selectors: &[String],
+) -> Option<u16> {
+    selectors
+        .iter()
+        .enumerate()
+        .filter_map(|(i, s)| {
+            let sel = DeviceSelector::parse(s);
+            sel.matches(name, vendor, product, phys).then(|| (i, sel.specificity()))
+        })
+        .max_by_key(|&(i, spec)| (spec, std::cmp::Reverse(i)))
+        .map(|(i, _)| i as u16)
 }
 
 #[cfg(test)]
@@ -162,26 +214,82 @@ mod tests {
         assert_eq!(classify(&caps(vec![], false, false, false)), DeviceClass::Other);
     }
 
+    fn name_sel(s: &str) -> DeviceSelector {
+        DeviceSelector { base: SelectorBase::Name(s.into()), phys: None }
+    }
+
     #[test]
     fn selector_parse_forms() {
-        assert_eq!(DeviceSelector::parse("My Kbd"), DeviceSelector::Name("My Kbd".into()));
-        assert_eq!(DeviceSelector::parse("046d:c24a"), DeviceSelector::VidPid(0x046d, 0xc24a));
+        assert_eq!(DeviceSelector::parse("My Kbd"), name_sel("My Kbd"));
+        assert_eq!(
+            DeviceSelector::parse("046d:c24a"),
+            DeviceSelector { base: SelectorBase::VidPid(0x046d, 0xc24a), phys: None }
+        );
         assert_eq!(
             DeviceSelector::parse("046d:c24a/G600 Keyboard"),
-            DeviceSelector::VidPidName(0x046d, 0xc24a, "G600 Keyboard".into())
+            DeviceSelector {
+                base: SelectorBase::VidPidName(0x046d, 0xc24a, "G600 Keyboard".into()),
+                phys: None
+            }
         );
         // Not hex / wrong width → plain name (back-compat).
-        assert_eq!(DeviceSelector::parse("46d:c24a"), DeviceSelector::Name("46d:c24a".into()));
-        assert_eq!(DeviceSelector::parse("zzzz:c24a"), DeviceSelector::Name("zzzz:c24a".into()));
+        assert_eq!(DeviceSelector::parse("46d:c24a"), name_sel("46d:c24a"));
+        assert_eq!(DeviceSelector::parse("zzzz:c24a"), name_sel("zzzz:c24a"));
         // Name containing '/' without a vid:pid prefix stays a name.
-        assert_eq!(DeviceSelector::parse("Foo/Bar"), DeviceSelector::Name("Foo/Bar".into()));
+        assert_eq!(DeviceSelector::parse("Foo/Bar"), name_sel("Foo/Bar"));
     }
+
     #[test]
     fn selector_matching() {
-        assert!(DeviceSelector::parse("046d:c24a").matches("anything", 0x046d, 0xc24a));
-        assert!(!DeviceSelector::parse("046d:c24a").matches("anything", 0x046d, 0xc24b));
-        assert!(DeviceSelector::parse("046d:c24a/G600").matches("G600", 0x046d, 0xc24a));
-        assert!(!DeviceSelector::parse("046d:c24a/G600").matches("Other", 0x046d, 0xc24a));
-        assert!(DeviceSelector::parse("G600").matches("G600", 0, 0));
+        assert!(DeviceSelector::parse("046d:c24a").matches("anything", 0x046d, 0xc24a, ""));
+        assert!(!DeviceSelector::parse("046d:c24a").matches("anything", 0x046d, 0xc24b, ""));
+        assert!(DeviceSelector::parse("046d:c24a/G600").matches("G600", 0x046d, 0xc24a, ""));
+        assert!(!DeviceSelector::parse("046d:c24a/G600").matches("Other", 0x046d, 0xc24a, ""));
+        assert!(DeviceSelector::parse("G600").matches("G600", 0, 0, ""));
+    }
+
+    #[test]
+    fn selector_phys_suffix() {
+        let s = DeviceSelector::parse("046d:c24a/G600@usb-1/input0");
+        assert!(s.matches("G600", 0x046d, 0xc24a, "usb-1/input0"));
+        assert!(!s.matches("G600", 0x046d, 0xc24a, "usb-2/input0"));
+        assert_eq!(s.specificity(), 4);
+        // '@' after a plain name is NOT a phys suffix
+        let n = DeviceSelector::parse("Weird@Name");
+        assert_eq!(n, name_sel("Weird@Name"));
+        assert!(n.matches("Weird@Name", 0, 0, ""));
+        // vid:pid@phys works too
+        let vp = DeviceSelector::parse("046d:c24a@usb-1/input0");
+        assert!(vp.matches("anything", 0x046d, 0xc24a, "usb-1/input0"));
+        assert!(!vp.matches("anything", 0x046d, 0xc24a, ""));
+    }
+
+    #[test]
+    fn specificity_ranking() {
+        assert_eq!(DeviceSelector::parse("046d:c24a/G600@p").specificity(), 4);
+        assert_eq!(DeviceSelector::parse("046d:c24a/G600").specificity(), 3);
+        assert_eq!(DeviceSelector::parse("G600").specificity(), 2);
+        assert_eq!(DeviceSelector::parse("046d:c24a").specificity(), 1);
+    }
+
+    #[test]
+    fn resolve_slot_prefers_specific_then_first() {
+        let sels = vec![
+            "046d:c24a".to_string(),            // 0: spec 1
+            "G600".to_string(),                 // 1: spec 2
+            "046d:c24a/G600".to_string(),       // 2: spec 3
+            "046d:c24a/G600@usb-1".to_string(), // 3: spec 4
+        ];
+        assert_eq!(resolve_slot("G600", 0x046d, 0xc24a, "usb-1", &sels), Some(3));
+        assert_eq!(resolve_slot("G600", 0x046d, 0xc24a, "usb-2", &sels), Some(2)); // phys mismatch → next
+        assert_eq!(resolve_slot("Other", 0x046d, 0xc24a, "", &sels), Some(0));
+        assert_eq!(resolve_slot("Nope", 1, 1, "", &sels), None);
+        // tie on specificity → first in config order
+        let tie = vec![
+            "046d:c24a/G600".to_string(),
+            "046d:c24a/G601".to_string(),
+            "046d:c24a/G600".to_string(),
+        ];
+        assert_eq!(resolve_slot("G600", 0x046d, 0xc24a, "", &tie), Some(0));
     }
 }

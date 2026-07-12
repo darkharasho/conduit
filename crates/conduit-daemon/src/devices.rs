@@ -149,7 +149,8 @@ pub fn should_grab(d: &Discovered, s: &Settings) -> bool {
     }
 
     let matched = |list: &[String]| {
-        list.iter().any(|e| DeviceSelector::parse(e).matches(&d.name, d.vendor, d.product))
+        list.iter()
+            .any(|e| DeviceSelector::parse(e).matches(&d.name, d.vendor, d.product, &d.phys))
     };
 
     match d.class {
