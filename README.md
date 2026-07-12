@@ -20,6 +20,20 @@ space with no kernel patch required.
   control (used by the companion UI)
 - **Hotplug** — new keyboards and mice are grabbed automatically as they appear
 
+## Quickstart (dev)
+
+One command builds the daemon, starts it in the background, and opens the UI
+(Ctrl-C stops both; an already-running daemon is detected and reused):
+
+```bash
+cd ui && npm install && npm run dev
+```
+
+Nothing is remapped until you opt in: enable a device on the **Devices** screen
+(or set `grab_all_keyboards = true` in `~/.config/conduit/conduit.toml`), then
+add mappings on the **Mappings** screen. `Ctrl+Alt+Backspace` suspends all
+remapping at any time.
+
 ## Install
 
 ### 1. udev rule (one-time, requires sudo)
