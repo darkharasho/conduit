@@ -1,6 +1,7 @@
 mod devices;
 mod focus;
 mod hotplug;
+mod ipc;
 mod output;
 mod paths;
 mod runloop;
@@ -236,15 +237,21 @@ fn main() -> anyhow::Result<()> {
     // threads a way to send DeviceRemoved back to the engine).
     let run_tx = tx.clone();
 
-    // Drop our (main-thread) sender now that both the hotplug thread and the
-    // run loop thread hold their own clones.
+    // ── IPC server thread ──────────────────────────────────────────────────────
+    // Spawn before dropping our own tx so the run loop is never left with zero
+    // senders.  The join handle is kept alive for the process lifetime.
+    let _ipc_thread = ipc::spawn(tx.clone(), config_path.clone())
+        .context("spawning IPC server")?;
+
+    // Drop our (main-thread) sender now that the hotplug, focus, and IPC
+    // threads all hold their own clones.
     drop(tx);
 
     // ── Engine thread ──────────────────────────────────────────────────────────
     let engine = conduit_core::engine::Engine::new(compiled);
     let run_out = Arc::clone(&out);
     let run_thread = std::thread::spawn(move || {
-        runloop::run(engine, run_out, rx, run_tx, readers, settings)
+        runloop::run(engine, Some(run_out), rx, run_tx, readers, settings)
     });
 
     run_thread

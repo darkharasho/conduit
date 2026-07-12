@@ -46,6 +46,9 @@ pub enum SubscribeKind {
 #[derive(Debug)]
 pub enum QueryKind {
     GetStatus,
+    /// List discovered + grabbed devices.  The runloop returns the grabbed
+    /// device paths; the IPC layer probes them to fill in DeviceInfo fields.
+    Devices,
 }
 
 /// Central message type for the daemon engine thread.
@@ -122,9 +125,12 @@ pub fn drive(engine: &mut Engine, msg: Option<Msg>, now_us: u64) -> Vec<Event> {
 /// `tx` is a clone used to give to newly spawned reader threads so they can
 /// send `Msg::DeviceRemoved` on unplug.  `settings` is kept up-to-date via
 /// `Msg::Reload`.
+///
+/// `out` is `None` in test environments where `/dev/uinput` is not available;
+/// events are computed by the engine but not forwarded to a virtual device.
 pub fn run(
     mut engine: Engine,
-    out: Arc<Mutex<VirtualOutput>>,
+    out: Option<Arc<Mutex<VirtualOutput>>>,
     rx: Receiver<Msg>,
     tx: Sender<Msg>,
     mut readers: HashMap<PathBuf, GrabHandle>,
@@ -224,6 +230,26 @@ pub fn run(
                         &current_focus,
                         &grabbed_devices,
                     )),
+                    QueryKind::Devices => {
+                        // Probe each grabbed path to build DeviceInfo entries.
+                        // Devices that can no longer be probed are skipped.
+                        use conduit_proto::DeviceInfo;
+                        let devices: Vec<DeviceInfo> = grabbed_devices
+                            .iter()
+                            .filter_map(|p| {
+                                crate::devices::probe(std::path::PathBuf::from(p)).map(|d| DeviceInfo {
+                                    path: d.path.display().to_string(),
+                                    name: d.name,
+                                    vendor: d.vendor,
+                                    product: d.product,
+                                    is_keyboard: d.is_keyboard,
+                                    is_mouse: d.is_mouse,
+                                    grabbed: true,
+                                })
+                            })
+                            .collect();
+                        Response::Devices { devices }
+                    }
                 };
                 let _ = reply.send(resp);
                 Vec::new()
@@ -276,7 +302,7 @@ fn try_grab_device(
     path: &Path,
     settings: &Settings,
     tx: &Sender<Msg>,
-    out: &Arc<Mutex<VirtualOutput>>,
+    out: &Option<Arc<Mutex<VirtualOutput>>>,
     readers: &mut HashMap<PathBuf, GrabHandle>,
     grabbed_devices: &mut Vec<String>,
 ) {
@@ -288,6 +314,9 @@ fn try_grab_device(
         Some(d) if crate::devices::should_grab(&d, settings) => d,
         _ => return,
     };
+
+    // Cannot spawn a reader without a virtual output to forward events to.
+    let Some(out) = out else { return };
 
     let is_mouse = discovered.is_mouse;
     let handle = crate::devices::spawn_reader(
@@ -305,15 +334,29 @@ fn try_grab_device(
 }
 
 /// Emit events to the virtual output and post-phase-push them to subscribers.
-fn emit_all(out: &Arc<Mutex<VirtualOutput>>, events: &[Event], subs: &mut Vec<Sender<Push>>) {
-    let mut o = out.lock().unwrap();
-    for ev in events {
-        if let Err(e) = o.emit(ev) {
-            eprintln!("conduit: emit error: {e}");
+///
+/// When `out` is `None` (test environments without `/dev/uinput`) the engine's
+/// computed events are still pushed to event subscribers but not forwarded to
+/// any virtual device.
+fn emit_all(out: &Option<Arc<Mutex<VirtualOutput>>>, events: &[Event], subs: &mut Vec<Sender<Push>>) {
+    if let Some(out) = out {
+        let mut o = out.lock().unwrap();
+        for ev in events {
+            if let Err(e) = o.emit(ev) {
+                eprintln!("conduit: emit error: {e}");
+            }
+            if !subs.is_empty() {
+                let push = Push::Event(wire_event(ev, EventPhase::Post));
+                subs.retain(|tx| try_push(tx, &push));
+            }
         }
+    } else {
+        // No virtual output: still push post-phase events to subscribers.
         if !subs.is_empty() {
-            let push = Push::Event(wire_event(ev, EventPhase::Post));
-            subs.retain(|tx| try_push(tx, &push));
+            for ev in events {
+                let push = Push::Event(wire_event(ev, EventPhase::Post));
+                subs.retain(|tx| try_push(tx, &push));
+            }
         }
     }
 }
