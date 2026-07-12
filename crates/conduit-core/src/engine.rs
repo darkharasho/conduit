@@ -176,6 +176,44 @@ impl Engine {
         }
     }
 
+    pub fn set_focus(&mut self, f: &crate::config::FocusFields) {
+        let idx = self.cfg.profiles.iter().position(|p| {
+            p.matcher.as_ref().map_or(true, |m| m.matches(f))
+        }).unwrap_or(self.cfg.default_idx);
+        if idx != self.profile_idx {
+            self.profile_idx = idx;
+            self.active_layers.clear();
+            self.active_layers.push(0);
+        }
+    }
+
+    pub fn swap_config(&mut self, cfg: CompiledConfig, f: &crate::config::FocusFields) -> &[Event] {
+        self.out.clear();
+        if let Some(p) = self.pending.take() {
+            self.out.push(Event { key: p.tap, state: KeyState::Press, time_us: p.press_time_us });
+            self.out.push(Event { key: p.tap, state: KeyState::Release, time_us: p.press_time_us });
+        }
+        let replay = std::mem::take(&mut self.buffer);
+        self.cfg = cfg;
+        self.profile_idx = self.cfg.default_idx;
+        self.active_layers.clear();
+        self.active_layers.push(0);
+        self.set_focus(f);
+        for ev in replay {
+            self.process(ev);
+        }
+        &self.out
+    }
+
+    pub fn active_profile_name(&self) -> &str {
+        &self.cfg.profiles[self.profile_idx].name
+    }
+
+    pub fn active_layer_names(&self) -> Vec<&str> {
+        let profile = &self.cfg.profiles[self.profile_idx];
+        self.active_layers.iter().map(|&i| profile.layer_names[i as usize].as_str()).collect()
+    }
+
     #[cfg(test)]
     pub fn held_is_empty(&self) -> bool { self.held.is_empty() }
 }
@@ -189,6 +227,48 @@ mod tests {
     fn press(n: &str, t: u64) -> Event { Event { key: key(n), state: KeyState::Press, time_us: t } }
     fn release(n: &str, t: u64) -> Event { Event { key: key(n), state: KeyState::Release, time_us: t } }
     fn engine(toml: &str) -> Engine { Engine::new(compile(toml).unwrap()) }
+
+    const TWO_PROFILES: &str = r#"
+        [profile.default.keys]
+        a = "b"
+        [profile.game]
+        match = { class = "steam_app_123" }
+        keys = { a = "passthrough" }
+    "#;
+
+    fn focus(class: &str) -> crate::config::FocusFields<'static> {
+        crate::config::FocusFields {
+            process: Box::leak(class.to_string().into_boxed_str()),
+            class: Box::leak(class.to_string().into_boxed_str()),
+            title: "",
+        }
+    }
+
+    #[test]
+    fn focus_switches_profile() {
+        let mut e = engine(TWO_PROFILES);
+        assert_eq!(e.handle(press("a", 0)), &[press("b", 0)]);
+        e.handle(release("a", 1));
+        e.set_focus(&focus("steam_app_123"));
+        assert_eq!(e.active_profile_name(), "game");
+        assert_eq!(e.handle(press("a", 10)), &[press("a", 10)]);
+    }
+
+    #[test]
+    fn held_key_releases_under_old_mapping_after_switch() {
+        let mut e = engine(TWO_PROFILES);
+        e.handle(press("a", 0));                  // emitted b-press under default
+        e.set_focus(&focus("steam_app_123"));     // switch mid-hold
+        assert_eq!(e.handle(release("a", 10)), &[release("b", 10)]); // still pairs as b
+    }
+
+    #[test]
+    fn unmatched_focus_falls_back_to_default() {
+        let mut e = engine(TWO_PROFILES);
+        e.set_focus(&focus("steam_app_123"));
+        e.set_focus(&focus("kitty"));
+        assert_eq!(e.active_profile_name(), "default");
+    }
 
     #[test]
     fn simple_remap() {
