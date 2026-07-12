@@ -81,16 +81,12 @@ fn build_keyboard() -> std::io::Result<evdev::uinput::VirtualDevice> {
     let mut keys = AttributeSet::<Key>::new();
 
     for code in 1u16..=767 {
-        // Skip the mouse-button range (BTN_LEFT..=BTN_TASK).
-        if (0x110..=0x117).contains(&code) {
+        // Skip the entire BTN_ block (0x100..=0x15f); only BTN_MOUSE (0x110..=0x117)
+        // goes to the virtual mouse. Declaring joystick/gamepad/digitizer buttons on
+        // a keyboard makes libinput misclassify the device.
+        if (0x100..=0x15f).contains(&code) {
             continue;
         }
-        // Some codes in this range are invalid/gaps that the kernel rejects via
-        // EINVAL on UI_SET_KEYBIT.  We insert all non-mouse codes here; any
-        // invalid ones will cause the ioctl to fail silently inside evdev's
-        // `with_keys`, but in practice the evdev crate's `with_keys` calls each
-        // ioctl independently, so one bad code won't prevent the rest from being
-        // registered.  The VirtualDeviceBuilder does not validate codes.
         keys.insert(Key::new(code));
     }
 
