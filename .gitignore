@@ -7,3 +7,5 @@ build
 *.log
 .superpowers
 target/
+ui/src-tauri/gen/
+ui/src-tauri/target/
