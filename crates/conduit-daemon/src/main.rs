@@ -1,10 +1,14 @@
 mod devices;
 mod output;
 mod paths;
+mod runloop;
 
+use std::collections::HashMap;
 use std::fs;
 use std::io::Write as _;
 use std::os::unix::fs::OpenOptionsExt;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use anyhow::Context;
 use conduit_core::config;
 
@@ -31,6 +35,9 @@ const DEFAULT_CONFIG: &str = r#"# conduit.toml — Conduit keyboard remapper con
 "#;
 
 fn main() -> anyhow::Result<()> {
+    // Pin the monotonic time base before any thread reads it.
+    let _ = runloop::now_us();
+
     // ── Load (or create) config ───────────────────────────────────────────────
     let config_path = paths::config_path();
 
@@ -183,6 +190,39 @@ fn main() -> anyhow::Result<()> {
             );
         }
     }
+
+    // ── Create virtual output BEFORE grabbing (spec safety requirement) ──────
+    // If uinput setup fails we must not be holding any grabs, or the user
+    // would lose their keyboard with no way to type.
+    let out = Arc::new(Mutex::new(
+        output::VirtualOutput::new().context("creating virtual output devices")?,
+    ));
+
+    // ── Grab matching devices and spawn reader threads ────────────────────────
+    let (tx, rx) = crossbeam_channel::unbounded::<runloop::Msg>();
+    let mut readers: HashMap<PathBuf, devices::GrabHandle> = HashMap::new();
+    for d in &discovered {
+        if devices::should_grab(d, settings) {
+            let handle =
+                devices::spawn_reader(d.path.clone(), d.is_mouse, tx.clone(), Arc::clone(&out));
+            readers.insert(d.path.clone(), handle);
+        }
+    }
+    if readers.is_empty() {
+        eprintln!("conduit: no devices matched the grab rules; nothing grabbed");
+    }
+    // Drop our sender: the run loop exits once every reader thread has exited.
+    // (The IPC and focus threads of Tasks 12-14 will hold their own clones.)
+    drop(tx);
+
+    // ── Engine thread ──────────────────────────────────────────────────────────
+    let engine = conduit_core::engine::Engine::new(compiled);
+    let run_out = Arc::clone(&out);
+    let run_thread = std::thread::spawn(move || runloop::run(engine, run_out, rx, readers));
+
+    run_thread
+        .join()
+        .map_err(|_| anyhow::anyhow!("run loop thread panicked"))?;
 
     Ok(())
 }

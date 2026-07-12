@@ -1,5 +1,14 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+
+use crossbeam_channel::Sender;
+
 use conduit_core::config::Settings;
+use conduit_core::event::{Event, Key, KeyState};
+
+use crate::output::VirtualOutput;
+use crate::runloop::{now_us, Msg};
 
 /// A discovered input device with its classification.
 #[derive(Debug, Clone)]
@@ -141,6 +150,110 @@ pub fn should_grab(d: &Discovered, s: &Settings) -> bool {
     }
 
     grab
+}
+
+// ── Reader threads ────────────────────────────────────────────────────────────
+
+/// Handle for a spawned reader thread and its device grab.
+///
+/// Ungrab/close mechanism: the `evdev::Device` (and its `EVIOCGRAB`) is owned
+/// by the reader thread. Dropping a `GrabHandle` sets the shared stop flag and
+/// joins the thread; when the thread exits, the `Device` drops, which closes
+/// the fd and releases the kernel grab. Caveat: a thread blocked in
+/// `fetch_events()` only observes the stop flag after the next event batch
+/// arrives; in practice handles are dropped at process exit (the OS reclaims
+/// fds and grabs) or after the reader has already exited on a device error.
+pub struct GrabHandle {
+    stop: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for GrabHandle {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(h) = self.thread.take() {
+            let _ = h.join();
+        }
+    }
+}
+
+/// Spawn a reader thread for one device to grab.
+///
+/// The thread opens the device at `path`, grabs it, then loops
+/// `fetch_events()`:
+/// - EV_KEY events become core `Event`s (value 1 = Press, 0 = Release,
+///   2 = Repeat), stamped with `now_us()` at read time, sent as `Msg::Input`.
+/// - For mice (`is_mouse`): EV_REL and EV_MSC events are forwarded directly
+///   to the virtual mouse via `out` — motion latency must not pay a channel
+///   hop. EV_SYN is NOT forwarded: `VirtualDevice::emit` auto-appends
+///   SYN_REPORT and forwarding SYN would double it.
+/// - On a read error (device unplugged) the thread sends
+///   `Msg::DeviceRemoved(path)` and exits.
+pub fn spawn_reader(
+    path: PathBuf,
+    is_mouse: bool,
+    tx: Sender<Msg>,
+    out: Arc<Mutex<VirtualOutput>>,
+) -> GrabHandle {
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_flag = Arc::clone(&stop);
+
+    let thread = std::thread::spawn(move || {
+        let mut dev = match evdev::Device::open(&path) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("conduit: failed to open {}: {}", path.display(), e);
+                let _ = tx.send(Msg::DeviceRemoved(path));
+                return;
+            }
+        };
+        if let Err(e) = dev.grab() {
+            eprintln!("conduit: failed to grab {}: {}", path.display(), e);
+            let _ = tx.send(Msg::DeviceRemoved(path));
+            return;
+        }
+        let name = dev.name().unwrap_or("unknown").to_owned();
+        eprintln!("conduit: grabbed {} ({})", name, path.display());
+
+        while !stop_flag.load(Ordering::Relaxed) {
+            let events = match dev.fetch_events() {
+                Ok(evs) => evs,
+                Err(e) => {
+                    eprintln!("conduit: read error on {} ({}): {}", name, path.display(), e);
+                    let _ = tx.send(Msg::DeviceRemoved(path));
+                    return;
+                }
+            };
+            for raw in events {
+                let ev_type = raw.event_type();
+                if ev_type == evdev::EventType::KEY {
+                    let state = match raw.value() {
+                        1 => KeyState::Press,
+                        0 => KeyState::Release,
+                        2 => KeyState::Repeat,
+                        _ => continue,
+                    };
+                    let ev = Event { key: Key(raw.code()), state, time_us: now_us() };
+                    if tx.send(Msg::Input(ev)).is_err() {
+                        return; // engine thread gone; shut down
+                    }
+                } else if is_mouse
+                    && (ev_type == evdev::EventType::RELATIVE
+                        || ev_type == evdev::EventType::MISC)
+                {
+                    if let Ok(mut o) = out.lock() {
+                        let _ = o.emit_raw_mouse(&raw);
+                    }
+                }
+                // EV_SYN and everything else is dropped (SYN_REPORT is
+                // auto-appended by VirtualDevice::emit).
+            }
+        }
+        // Stop requested: Device drops here → fd closes → grab released.
+        eprintln!("conduit: released {} ({})", name, path.display());
+    });
+
+    GrabHandle { stop, thread: Some(thread) }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
