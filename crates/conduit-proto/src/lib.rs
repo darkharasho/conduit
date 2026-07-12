@@ -29,8 +29,8 @@ pub enum Response {
     Config { toml: String },
     Ok,
     Err { message: String },
-    Devices(Vec<DeviceInfo>),
-    Windows(Vec<FocusInfo>),
+    Devices { devices: Vec<DeviceInfo> },
+    Windows { windows: Vec<FocusInfo> },
     CapturedKey { name: String, code: u16 },
     Subscribed,
 }
@@ -73,6 +73,7 @@ pub struct WireEvent {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum EventPhase {
     Pre,
     Post,
@@ -104,5 +105,42 @@ mod tests {
         let json = serde_json::to_string(&original).expect("serialize");
         let deserialized: Push = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn wire_shapes_are_stable() {
+        assert_eq!(
+            serde_json::to_string(&Request::GetStatus).unwrap(),
+            r#"{"type":"get_status"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&Response::Ok).unwrap(),
+            r#"{"type":"ok"}"#
+        );
+        let devs = Response::Devices {
+            devices: vec![],
+        };
+        assert_eq!(
+            serde_json::to_string(&devs).unwrap(),
+            r#"{"type":"devices","devices":[]}"#
+        );
+        let wins = Response::Windows {
+            windows: vec![],
+        };
+        assert_eq!(
+            serde_json::to_string(&wins).unwrap(),
+            r#"{"type":"windows","windows":[]}"#
+        );
+        let ev = Push::Event(WireEvent {
+            phase: EventPhase::Pre,
+            key_name: "a".into(),
+            code: 30,
+            state: "press".into(),
+            time_us: 5,
+        });
+        assert_eq!(
+            serde_json::to_string(&ev).unwrap(),
+            r#"{"type":"event","phase":"pre","key_name":"a","code":30,"state":"press","time_us":5}"#
+        );
     }
 }
