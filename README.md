@@ -42,7 +42,34 @@ grab_mice = [
 ```
 
 The `vendor:product/name` form disambiguates receivers and gaming devices that
-expose several event nodes under one vendor/product pair.
+expose several event nodes under one vendor/product pair. A trailing
+`@<phys>` (physical port path, e.g. `@usb-0000:00:14.0-1/input0`) tells two
+otherwise-identical devices apart.
+
+## Per-device mappings
+
+Global profile mappings apply to every grabbed device. A profile can also
+carry **device override sections** that shadow the global tables for events
+from one device only:
+
+```toml
+[profile.default.keys]
+capslock = { tap = "esc", hold = "leftctrl" }      # all devices
+
+[profile.default.device."046d:c24a/Logitech Gaming Mouse G600".keys]
+btn_left = { tap = "enter", hold = "layer:nav" }   # this G600 only
+
+[profile.default.device."046d:c24a/Logitech Gaming Mouse G600".layers.nav]
+mouse4 = "volumeup"
+```
+
+Resolution walks the active layer stack top-down, checking the device's
+table before the global one at each layer — unmapped keys fall through, so
+overrides never hide global mappings you didn't replace. In the UI, the
+Mappings screen has one tab per grabbed device (mice get a mouse diagram
+with wheel and side buttons); the "This device only" checkbox writes into
+the device section, and identical twin devices are keyed by port
+automatically (`@phys`).
 
 ## Focus tracking (per-app profiles)
 
