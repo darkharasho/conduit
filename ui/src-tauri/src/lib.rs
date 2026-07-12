@@ -201,6 +201,11 @@ fn find_conduit_daemon_binary() -> Option<std::path::PathBuf> {
     // 3 & 4. Relative to the app executable (dev mode)
     if let Ok(exe) = std::env::current_exe() {
         if let Some(exe_dir) = exe.parent() {
+            // Workspace builds put conduit-daemon right next to conduit-ui.
+            let sibling = exe_dir.join("conduit-daemon");
+            if sibling.exists() {
+                return Some(sibling);
+            }
             // Go up from target/{debug,release}/ to project root
             for profile in &["debug", "release"] {
                 let candidate = exe_dir

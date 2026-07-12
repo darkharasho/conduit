@@ -20,10 +20,27 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-if [[ -S "$SOCK" ]]; then
-    # A daemon appears to be running already (e.g. via systemd) — reuse it.
-    echo "dev.sh: existing daemon socket at $SOCK — not starting a second daemon"
+# A socket FILE is not a live daemon (a killed daemon can't unlink it).
+# Probe with a real connection before deciding to reuse.
+daemon_alive() {
+    [[ -S "$SOCK" ]] || return 1
+    if command -v socat >/dev/null; then
+        printf '{"type":"get_status"}\n' | timeout 2 socat - "UNIX-CONNECT:$SOCK" >/dev/null 2>&1
+    elif command -v python3 >/dev/null; then
+        timeout 2 python3 -c "import socket,sys; s=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1])" "$SOCK" >/dev/null 2>&1
+    else
+        return 0  # no probe tool; assume alive (old behavior)
+    fi
+}
+
+if daemon_alive; then
+    # A daemon is running already (e.g. via systemd) — reuse it.
+    echo "dev.sh: live daemon at $SOCK — not starting a second daemon"
 else
+    if [[ -S "$SOCK" ]]; then
+        echo "dev.sh: removing stale socket at $SOCK (no daemon answering)"
+        rm -f "$SOCK"
+    fi
     echo "dev.sh: building daemon..."
     cargo build -p conduit-daemon --manifest-path "$REPO_ROOT/Cargo.toml"
     echo "dev.sh: starting daemon (debug build; use the systemd unit for daily use)"

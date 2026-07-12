@@ -54,6 +54,9 @@ pub struct DaemonHandle {
     /// a udev poll loop; IPC accept loop is blocked in `listener.incoming()`).
     /// We detach these on shutdown — the OS will clean them up on process exit.
     _detached_threads: Vec<std::thread::JoinHandle<()>>,
+    /// Socket path the IPC server bound; removed after the run loop exits so
+    /// wrapper scripts never mistake a stale socket file for a live daemon.
+    socket_path: PathBuf,
 }
 
 impl DaemonHandle {
@@ -72,6 +75,9 @@ impl DaemonHandle {
         if let Some(h) = self.run_thread.take() {
             let _ = h.join();
         }
+        // Remove the socket file so wrapper scripts don't mistake it for a
+        // live daemon (the IPC accept thread is detached and can't do this).
+        let _ = std::fs::remove_file(&self.socket_path);
         // _shutdown_tx and _detached_threads drop here.
     }
 
@@ -93,6 +99,9 @@ impl DaemonHandle {
         if let Some(h) = self.run_thread.take() {
             let _ = h.join();
         }
+        // Remove the socket file — a stale one makes dev.sh skip starting a
+        // fresh daemon on the next run.
+        let _ = std::fs::remove_file(&self.socket_path);
         // Everything else (_shutdown_tx, _detached_threads) drops here.
         // The detached threads (IPC accept, hotplug) cannot be joined promptly;
         // dropping their handles detaches them and the OS reclaims them.
@@ -184,7 +193,7 @@ pub fn start(config: DaemonConfig) -> anyhow::Result<DaemonHandle> {
     let sock_path = config
         .socket_path
         .unwrap_or_else(paths::socket_path);
-    let ipc_thread = ipc::spawn_at(sock_path, tx.clone(), config.config_path.clone(), Arc::clone(&gate))
+    let ipc_thread = ipc::spawn_at(sock_path.clone(), tx.clone(), config.config_path.clone(), Arc::clone(&gate))
         .context("spawning IPC server")?;
     detached.push(ipc_thread);
 
@@ -220,5 +229,6 @@ pub fn start(config: DaemonConfig) -> anyhow::Result<DaemonHandle> {
         _shutdown_tx: shutdown_tx,
         run_thread: Some(run_thread),
         _detached_threads: detached,
+        socket_path: sock_path,
     })
 }

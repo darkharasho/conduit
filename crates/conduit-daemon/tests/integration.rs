@@ -465,6 +465,7 @@ fn daemon_starts_and_stops_cleanly() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let config_path = tmp.path().join("conduit.toml");
     let socket_path = tmp.path().join("conduit-test.sock");
+    let socket_path_check = socket_path.clone();
 
     std::fs::write(
         &config_path,
@@ -488,7 +489,14 @@ grab_all_keyboards = false
     .expect("daemon start");
 
     std::thread::sleep(Duration::from_millis(200));
+    assert!(socket_path_check.exists(), "socket should exist while running");
     handle.shutdown();
+    // A stale socket file after shutdown makes wrapper scripts (dev.sh) think
+    // a daemon is still running; shutdown must remove it.
+    assert!(
+        !socket_path_check.exists(),
+        "socket file must be removed on shutdown"
+    );
 }
 
 /// Engine-via-channel smoke test.
