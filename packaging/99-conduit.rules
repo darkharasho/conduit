@@ -1,0 +1,5 @@
+# udev rule for Conduit keyboard remapper.
+# Allows members of the 'input' group to open /dev/uinput without root.
+# Install: sudo cp 99-conduit.rules /etc/udev/rules.d/
+#          sudo udevadm control --reload && sudo udevadm trigger
+KERNEL=="uinput", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"

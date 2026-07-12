@@ -5,6 +5,7 @@ mod ipc;
 mod output;
 mod paths;
 mod runloop;
+mod watch;
 
 use std::collections::HashMap;
 use std::fs;
@@ -38,6 +39,13 @@ const DEFAULT_CONFIG: &str = r#"# conduit.toml — Conduit keyboard remapper con
 "#;
 
 fn main() -> anyhow::Result<()> {
+    // ── --check flag: print JSON permission + config diagnostics and exit 0 ────
+    // The Tauri UI (Task 20) uses this for first-run setup guidance.
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(|s| s.as_str()) == Some("--check") {
+        return run_check();
+    }
+
     // Pin the monotonic time base before any thread reads it.
     let _ = runloop::now_us();
 
@@ -237,11 +245,28 @@ fn main() -> anyhow::Result<()> {
     // threads a way to send DeviceRemoved back to the engine).
     let run_tx = tx.clone();
 
+    // ── Shared reload gate (IPC ↔ watch deduplication) ────────────────────────
+    // Both the IPC set_config handler and the watch thread share this gate so
+    // that a set_config write does not cause a redundant second Msg::Reload.
+    // Seed it with the content that was already compiled at startup so the
+    // watcher does not immediately re-fire on the initial mtime.
+    let gate = {
+        let mut g = watch::ReloadGate::new();
+        g.record(&toml_str);
+        std::sync::Arc::new(std::sync::Mutex::new(g))
+    };
+
     // ── IPC server thread ──────────────────────────────────────────────────────
     // Spawn before dropping our own tx so the run loop is never left with zero
     // senders.  The join handle is kept alive for the process lifetime.
-    let _ipc_thread = ipc::spawn(tx.clone(), config_path.clone())
+    let _ipc_thread = ipc::spawn(tx.clone(), config_path.clone(), std::sync::Arc::clone(&gate))
         .context("spawning IPC server")?;
+
+    // ── Config file watcher thread ─────────────────────────────────────────────
+    // Polls the config file mtime every 500 ms; on change compiles and sends
+    // Msg::Reload.  Shares `gate` with the IPC thread to avoid double-reloads
+    // from set_config writes.
+    let _watch_thread = watch::spawn(config_path.clone(), tx.clone(), std::sync::Arc::clone(&gate));
 
     // Drop our (main-thread) sender now that the hotplug, focus, and IPC
     // threads all hold their own clones.
@@ -259,4 +284,63 @@ fn main() -> anyhow::Result<()> {
         .map_err(|_| anyhow::anyhow!("run loop thread panicked"))?;
 
     Ok(())
+}
+
+// ── --check mode ──────────────────────────────────────────────────────────────
+
+/// Print JSON startup diagnostics and exit 0.
+///
+/// Output: `{"uinput": bool, "input_group": bool, "config_ok": bool}`
+///
+/// - `uinput`: whether `/dev/uinput` can be opened for write (O_NONBLOCK).
+/// - `input_group`: whether the current process is a member of the `input`
+///   group (by GID lookup; the group must exist).
+/// - `config_ok`: whether the current config file parses and compiles without
+///   error. True also if the config file does not yet exist (the default config
+///   is always valid).
+///
+/// Always exits 0 so the UI can consume the JSON regardless of permission
+/// state.  A non-zero exit would prevent the UI from receiving any output.
+fn run_check() -> anyhow::Result<()> {
+    let uinput_ok = fs::OpenOptions::new()
+        .write(true)
+        .custom_flags(nix::libc::O_NONBLOCK)
+        .open("/dev/uinput")
+        .is_ok();
+
+    let input_group_ok = check_input_group();
+
+    let config_path = paths::config_path();
+    let config_ok = if config_path.exists() {
+        match fs::read_to_string(&config_path) {
+            Ok(toml_str) => config::compile(&toml_str).is_ok(),
+            Err(_) => false,
+        }
+    } else {
+        // No config file yet; the default will be used — always valid.
+        true
+    };
+
+    // Print as a single JSON line with no trailing newline issues.
+    println!(
+        "{{\"uinput\":{},\"input_group\":{},\"config_ok\":{}}}",
+        uinput_ok, input_group_ok, config_ok
+    );
+
+    Ok(())
+}
+
+/// Returns `true` if the calling process belongs to the `input` group.
+fn check_input_group() -> bool {
+    // Look up the numeric GID of the "input" group.
+    let input_gid = match nix::unistd::Group::from_name("input") {
+        Ok(Some(g)) => g.gid,
+        _ => return false, // group doesn't exist on this system
+    };
+
+    // Check the supplementary group list.
+    match nix::unistd::getgroups() {
+        Ok(groups) => groups.contains(&input_gid),
+        Err(_) => false,
+    }
 }

@@ -23,6 +23,7 @@
 use std::io::{BufRead, BufReader, Write as _};
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crossbeam_channel::{bounded, Sender};
@@ -31,6 +32,7 @@ use conduit_core::config;
 use conduit_proto::{Push, Request, Response};
 
 use crate::runloop::{Msg, QueryKind, SubscribeKind};
+use crate::watch::ReloadGate;
 
 // ── Public entry point ─────────────────────────────────────────────────────────
 
@@ -40,11 +42,16 @@ use crate::runloop::{Msg, QueryKind, SubscribeKind};
 ///
 /// Stale socket files are unlinked before binding.  Permissions are set to
 /// 0600 after bind so only the owning user can connect.
+///
+/// `gate` is shared with the watch thread: when `SetConfig` writes a new config
+/// it records the content hash in the gate so the watcher can skip the
+/// redundant mtime-change reload.
 pub fn spawn(
     tx: Sender<Msg>,
     config_path: PathBuf,
+    gate: Arc<Mutex<ReloadGate>>,
 ) -> anyhow::Result<std::thread::JoinHandle<()>> {
-    spawn_at(crate::paths::socket_path(), tx, config_path)
+    spawn_at(crate::paths::socket_path(), tx, config_path, gate)
 }
 
 /// Like `spawn` but binds to an explicit `sock_path` instead of reading from
@@ -54,6 +61,7 @@ fn spawn_at(
     sock_path: PathBuf,
     tx: Sender<Msg>,
     config_path: PathBuf,
+    gate: Arc<Mutex<ReloadGate>>,
 ) -> anyhow::Result<std::thread::JoinHandle<()>> {
     // Remove stale socket (ignore error if it didn't exist).
     let _ = std::fs::remove_file(&sock_path);
@@ -70,7 +78,7 @@ fn spawn_at(
 
     let handle = std::thread::Builder::new()
         .name("conduit-ipc-accept".into())
-        .spawn(move || accept_loop(listener, tx, config_path))
+        .spawn(move || accept_loop(listener, tx, config_path, gate))
         .map_err(|e| anyhow::anyhow!("IPC spawn: {e}"))?;
 
     Ok(handle)
@@ -82,6 +90,7 @@ fn accept_loop(
     listener: std::os::unix::net::UnixListener,
     tx: Sender<Msg>,
     config_path: PathBuf,
+    gate: Arc<Mutex<ReloadGate>>,
 ) {
     let mut conn_id: u64 = 0;
     for stream in listener.incoming() {
@@ -90,10 +99,11 @@ fn accept_loop(
                 conn_id += 1;
                 let tx2 = tx.clone();
                 let cp2 = config_path.clone();
+                let gate2 = Arc::clone(&gate);
                 let id = conn_id;
                 let _ = std::thread::Builder::new()
                     .name(format!("conduit-ipc-conn-{id}"))
-                    .spawn(move || handle_connection(s, tx2, cp2));
+                    .spawn(move || handle_connection(s, tx2, cp2, gate2));
             }
             Err(e) => {
                 eprintln!("conduit/ipc: accept error: {e}");
@@ -113,6 +123,7 @@ fn handle_connection(
     stream: std::os::unix::net::UnixStream,
     tx: Sender<Msg>,
     config_path: PathBuf,
+    gate: Arc<Mutex<ReloadGate>>,
 ) {
     // The read and write halves share the underlying fd; we need separate
     // handles.  `try_clone` gives us a second fd for writing.
@@ -149,7 +160,7 @@ fn handle_connection(
             }
         };
 
-        match dispatch(request, &tx, &config_path, &mut writer) {
+        match dispatch(request, &tx, &config_path, &gate, &mut writer) {
             DispatchResult::Continue => {}
             DispatchResult::SubscribeLoop(rx) => {
                 // Forward Push frames until the channel disconnects or the
@@ -175,6 +186,7 @@ fn dispatch(
     request: Request,
     tx: &Sender<Msg>,
     config_path: &PathBuf,
+    gate: &Arc<Mutex<ReloadGate>>,
     writer: &mut impl Write,
 ) -> DispatchResult {
     match request {
@@ -201,7 +213,7 @@ fn dispatch(
 
         // ── SetConfig ────────────────────────────────────────────────────────
         Request::SetConfig { toml } => {
-            let resp = set_config(&toml, config_path, tx);
+            let resp = set_config(&toml, config_path, tx, gate);
             if write_response(writer, &resp).is_err() {
                 return DispatchResult::WriteError;
             }
@@ -329,9 +341,15 @@ fn forward_pushes(
 /// (displayed inline by the UI) and does **not** touch the config file.
 ///
 /// On success: writes to a temp file in the same directory, renames it over
-/// the config path (atomic on Linux), sends `Msg::Reload`, and returns
-/// `Response::Ok`.
-fn set_config(toml: &str, config_path: &PathBuf, tx: &Sender<Msg>) -> Response {
+/// the config path (atomic on Linux), records the content hash in `gate` (so
+/// the watcher skips the mtime-change reload), sends `Msg::Reload`, and
+/// returns `Response::Ok`.
+fn set_config(
+    toml: &str,
+    config_path: &PathBuf,
+    tx: &Sender<Msg>,
+    gate: &Arc<Mutex<ReloadGate>>,
+) -> Response {
     let compiled = match config::compile(toml) {
         Ok(c) => c,
         Err(e) => {
@@ -375,6 +393,13 @@ fn set_config(toml: &str, config_path: &PathBuf, tx: &Sender<Msg>) -> Response {
         return Response::Err {
             message: format!("writing config: {e}"),
         };
+    }
+
+    // Record the content hash so the watcher skips the mtime-change reload
+    // that will result from our write above.
+    {
+        let mut g = gate.lock().unwrap();
+        g.record(toml);
     }
 
     let _ = tx.send(Msg::Reload(compiled));
@@ -456,7 +481,8 @@ a = "d"
 
             // Spawn the IPC server at the fixture-specific socket path.
             // We use `spawn_at` to avoid touching the global CONDUIT_SOCKET env var.
-            spawn_at(sock_path.clone(), tx_for_ipc, config_path.clone())
+            let gate = std::sync::Arc::new(std::sync::Mutex::new(crate::watch::ReloadGate::new()));
+            spawn_at(sock_path.clone(), tx_for_ipc, config_path.clone(), gate)
                 .expect("spawn ipc");
 
             // `spawn_at` returns only after the listener is bound, so the socket
