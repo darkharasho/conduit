@@ -134,14 +134,6 @@ export const ANSI_LAYOUT: KeyCap[][] = [
     { name: "compose",   label: "Menu",    width: 1.25 },
     { name: "rightctrl", label: "Ctrl",    width: 1.25 },
   ],
-  // Row 6: Mouse buttons (exempt from 15u row-width rule)
-  [
-    { name: "btn_left",   label: "M1",  width: 2 },
-    { name: "btn_middle", label: "M2",  width: 2 },
-    { name: "btn_right",  label: "M3",  width: 2 },
-    { name: "mouse4",     label: "M4",  width: 2 },
-    { name: "mouse5",     label: "M5",  width: 2 },
-  ],
 ];
 
 /** Canonical daemon key names, copied from crates/conduit-core/src/keys.rs KEYS table. */
@@ -157,4 +149,6 @@ export const VALID_KEY_NAMES: ReadonlySet<string> = new Set([
   "right", "end", "down", "pagedown", "insert", "delete", "mute",
   "volumedown", "volumeup", "leftmeta", "rightmeta", "compose", "back",
   "forward", "print", "btn_left", "btn_right", "btn_middle", "mouse4", "mouse5",
+  "btn_forward", "btn_back", "btn_task",
+  "wheelup", "wheeldown", "wheelleft", "wheelright",
 ]);

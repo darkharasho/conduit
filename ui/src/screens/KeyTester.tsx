@@ -48,6 +48,11 @@ function RowItem({ row }: RowItemProps) {
         {row.repeats !== undefined && row.repeats > 0 && (
           <span className="repeat-count">×{row.repeats + 1}</span>
         )}
+        {row.pre.device && (
+          <span className="tester-device" title={row.pre.device}>
+            {row.pre.device}
+          </span>
+        )}
       </div>
 
       {/* Apps received column */}

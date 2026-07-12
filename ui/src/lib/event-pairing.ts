@@ -4,7 +4,7 @@ import type { WireEvent } from "./client";
 
 export interface TesterRow {
   id: number;
-  pre: { name: string; state: string; timeUs: number };
+  pre: { name: string; state: string; timeUs: number; device: string };
   post: { name: string; state: string; timeUs: number }[];
   resolution?: string;
   /** Count of pre REPEAT events seen while this row was open. */
@@ -77,7 +77,7 @@ export function reduceEvents(rows: TesterRow[], ev: WireEvent): TesterRow[] {
     if (ev.state === "press") {
       const newRow: TesterRow = {
         id: nextId(rows),
-        pre: { name: ev.key_name, state: ev.state, timeUs: ev.time_us },
+        pre: { name: ev.key_name, state: ev.state, timeUs: ev.time_us, device: ev.device },
         post: [],
         _open: true,
       };

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { getConfig, setConfig, onConnection } from "../lib/client";
+import { getConfig, setConfig, onConnection, listDevices } from "../lib/client";
+import type { DeviceInfo } from "../lib/client";
 import {
   parseConfigToml,
   serializeConfigToml,
@@ -7,12 +8,18 @@ import {
   addLayer,
   listLayers,
   listProfiles,
-  getAction,
+  getEffectiveAction,
   actionToTomlLine,
   setProfileMatch,
+  setDeviceAction,
+  removeDeviceAction,
+  deviceSectionFor,
+  deviceSectionKey,
+  selectorMatches,
 } from "../lib/config-model";
 import type { ConfigModel, ActionModel } from "../lib/config-model";
 import { KeyboardViz } from "../components/KeyboardViz";
+import { MouseViz } from "../components/MouseViz";
 import { Toolbar } from "../components/Toolbar";
 import { InspectorPanel } from "../components/InspectorPanel";
 import { ProfileMatchEditor } from "../components/ProfileMatchEditor";
@@ -35,6 +42,12 @@ export function MappingsScreen({
   const [newLayerPrompt, setNewLayerPrompt] = useState(false);
   const [newLayerName, setNewLayerName] = useState("");
 
+  // Device tabs: grabbed devices, keyed by evdev path (unique even for twins)
+  const [devices, setDevices] = useState<DeviceInfo[]>([]);
+  const [activeDevPath, setActiveDevPath] = useState<string | null>(null);
+  // "This device only" scope for saves (resets on key/tab change)
+  const [deviceScope, setDeviceScope] = useState(false);
+
   // Hold onProfilesChange in a ref so loadConfig's deps stay stable
   const onProfilesChangeRef = useRef(onProfilesChange);
   useEffect(() => {
@@ -53,17 +66,33 @@ export function MappingsScreen({
     }
   }, []); // stable — no external deps
 
+  const loadDevices = useCallback(async () => {
+    try {
+      const devs = (await listDevices()).filter((d) => d.grabbed);
+      setDevices(devs);
+      setActiveDevPath((prev) =>
+        prev && devs.some((d) => d.path === prev) ? prev : devs[0]?.path ?? null
+      );
+    } catch {
+      // Non-fatal: no tabs, keyboard view without device context
+    }
+  }, []);
+
   useEffect(() => {
     loadConfig();
+    loadDevices();
 
     const unlistenConn = onConnection((connected) => {
-      if (connected) loadConfig();
+      if (connected) {
+        loadConfig();
+        loadDevices();
+      }
     });
 
     return () => {
       unlistenConn.then(([fn1, fn2]) => { fn1(); fn2(); });
     };
-  }, [loadConfig]);
+  }, [loadConfig, loadDevices]);
 
   // When rail selects a different profile, reset layer & editing
   useEffect(() => {
@@ -71,13 +100,54 @@ export function MappingsScreen({
     setEditingKey(null);
   }, [railActiveProfile]);
 
+  // Scope resets when the key or tab changes
+  useEffect(() => {
+    setDeviceScope(false);
+  }, [editingKey, activeDevPath]);
+
+  const activeDev = devices.find((d) => d.path === activeDevPath) ?? null;
+
+  // Offline sections: device selectors in this profile with no grabbed match
+  const profileModel = model?.profiles.find((p) => p.name === railActiveProfile);
+  const offlineSections = Object.keys(profileModel?.device ?? {}).filter(
+    (sel) => !devices.some((d) => selectorMatches(sel, d))
+  );
+
+  const persist = async (updated: ConfigModel) => {
+    setModel(updated);
+    try {
+      await setConfig(serializeConfigToml(updated));
+    } catch (err) {
+      setLoadError(String(err));
+      return;
+    }
+    onProfilesChangeRef.current(listProfiles(updated));
+  };
+
   const handleSaveAction = async (action: ActionModel): Promise<void> => {
     if (!model || !editingKey) return;
-    const updated = setAction(model, railActiveProfile, activeLayer, editingKey, action);
-    const toml = serializeConfigToml(updated);
-    await setConfig(toml);
-    setModel(updated);
-    onProfilesChangeRef.current(listProfiles(updated));
+    const updated =
+      deviceScope && activeDev
+        ? setDeviceAction(
+            model,
+            railActiveProfile,
+            deviceSectionFor(model, railActiveProfile, activeDev) ??
+              deviceSectionKey(activeDev, devices),
+            activeLayer,
+            editingKey,
+            action
+          )
+        : setAction(model, railActiveProfile, activeLayer, editingKey, action);
+    await persist(updated);
+  };
+
+  const handleRemoveOverride = async () => {
+    if (!model || !editingKey || !activeDev) return;
+    const section = deviceSectionFor(model, railActiveProfile, activeDev);
+    if (!section) return;
+    await persist(
+      removeDeviceAction(model, railActiveProfile, section, activeLayer, editingKey)
+    );
   };
 
   const handleAddLayer = () => {
@@ -104,14 +174,18 @@ export function MappingsScreen({
   };
 
   const layers = model ? listLayers(model, railActiveProfile) : ["base"];
-  const currentAction = model && editingKey
-    ? getAction(model, railActiveProfile, activeLayer, editingKey)
+  const effective = model && editingKey
+    ? getEffectiveAction(model, railActiveProfile, activeDev, activeLayer, editingKey)
     : null;
+  const currentAction = effective?.action ?? null;
+  const isDeviceOverride = effective?.source === "device";
 
   // TOML echo for inspector footer
   const tomlEcho = model && editingKey && currentAction
     ? actionToTomlLine(railActiveProfile, activeLayer, editingKey, currentAction)
     : null;
+
+  const isPointerClass = (cls: string) => cls === "mouse" || cls === "touchpad";
 
   return (
     <div className="screen-shell">
@@ -155,6 +229,33 @@ export function MappingsScreen({
       <div className="screen-content">
         {model ? (
           <>
+            {/* Device tabs */}
+            {(devices.length > 0 || offlineSections.length > 0) && (
+              <div className="devtabs" role="tablist" aria-label="Devices">
+                {devices.map((d) => (
+                  <button
+                    key={d.path}
+                    role="tab"
+                    aria-selected={d.path === activeDevPath}
+                    className={`devtab${d.path === activeDevPath ? " devtab--active" : ""}`}
+                    onClick={() => {
+                      setActiveDevPath(d.path);
+                      setEditingKey(null);
+                    }}
+                  >
+                    <span>{d.name}</span>
+                    <span className="devtab__cls">{d.class.toUpperCase()}</span>
+                  </button>
+                ))}
+                {offlineSections.map((sel) => (
+                  <span key={sel} className="devtab devtab--offline" title="Device not connected; overrides preserved">
+                    <span>{sel}</span>
+                    <span className="devtab__cls">OFFLINE</span>
+                  </span>
+                ))}
+              </div>
+            )}
+
             {/* New layer prompt */}
             {newLayerPrompt && (
               <div className="new-layer-prompt">
@@ -179,29 +280,67 @@ export function MappingsScreen({
               </div>
             )}
 
-            {/* Keyboard visualization */}
-            <KeyboardViz
-              model={model}
-              activeProfile={railActiveProfile}
-              activeLayer={activeLayer}
-              selectedKey={editingKey}
-              onSelectKey={(keyName) => {
-                setEditingKey((prev) => (prev === keyName ? null : keyName));
-              }}
-            />
-
-            {/* Inline inspector panel */}
-            {editingKey ? (
-              <InspectorPanel
-                key={`${editingKey}:${railActiveProfile}:${activeLayer}`}
-                keyName={editingKey}
+            {/* Visualization: mouse diagram for pointer devices, ANSI board otherwise */}
+            {activeDev && isPointerClass(activeDev.class) ? (
+              <MouseViz
                 model={model}
                 activeProfile={railActiveProfile}
                 activeLayer={activeLayer}
-                tomlEcho={tomlEcho}
-                onSave={handleSaveAction}
-                onClose={() => setEditingKey(null)}
+                selectedKey={editingKey}
+                onSelectKey={(keyName) => {
+                  setEditingKey((prev) => (prev === keyName ? null : keyName));
+                }}
+                dev={activeDev}
               />
+            ) : (
+              <KeyboardViz
+                model={model}
+                activeProfile={railActiveProfile}
+                activeLayer={activeLayer}
+                selectedKey={editingKey}
+                onSelectKey={(keyName) => {
+                  setEditingKey((prev) => (prev === keyName ? null : keyName));
+                }}
+                dev={activeDev}
+              />
+            )}
+
+            {/* Inline inspector panel */}
+            {editingKey ? (
+              <>
+                {activeDev && (
+                  <div className="scope-bar">
+                    <label className="scope-bar__toggle">
+                      <input
+                        type="checkbox"
+                        checked={deviceScope}
+                        onChange={(e) => setDeviceScope(e.target.checked)}
+                      />
+                      {" This device only ("}
+                      <span className="mono">{activeDev.name}</span>
+                      {")"}
+                    </label>
+                    {isDeviceOverride && (
+                      <button className="btn" onClick={handleRemoveOverride}>
+                        Remove override
+                      </button>
+                    )}
+                    {isDeviceOverride && (
+                      <span className="scope-bar__badge">device-specific</span>
+                    )}
+                  </div>
+                )}
+                <InspectorPanel
+                  key={`${editingKey}:${railActiveProfile}:${activeLayer}:${activeDevPath}`}
+                  keyName={editingKey}
+                  model={model}
+                  activeProfile={railActiveProfile}
+                  activeLayer={activeLayer}
+                  tomlEcho={tomlEcho}
+                  onSave={handleSaveAction}
+                  onClose={() => setEditingKey(null)}
+                />
+              </>
             ) : (
               <>
                 <ProfileMatchEditor
@@ -210,12 +349,7 @@ export function MappingsScreen({
                   profileName={railActiveProfile}
                   onApply={async (match) => {
                     const updated = setProfileMatch(model, railActiveProfile, match);
-                    setModel(updated);
-                    try {
-                      await setConfig(serializeConfigToml(updated));
-                    } catch (err) {
-                      setLoadError(String(err));
-                    }
+                    await persist(updated);
                   }}
                 />
                 <div className="inspector">

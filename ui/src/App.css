@@ -416,6 +416,7 @@ button {
 }
 
 .keycap {
+  position: relative; /* anchors the device-override dot */
   height: 44px;
   background: var(--bg-key);
   border: 1px solid var(--border-control);
@@ -874,6 +875,208 @@ button {
   color: var(--text-lo);
   background: var(--bg-key);
   border: 1px solid var(--border-control);
+}
+
+/* ── Device tabs (Mappings) ── */
+
+.devtabs {
+  display: flex;
+  gap: 4px;
+  margin: 2px 0 12px;
+  border-bottom: 1px solid var(--border-structural);
+  flex-wrap: wrap;
+}
+
+.devtab {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-structural);
+  border-bottom: none;
+  border-radius: var(--r6) var(--r6) 0 0;
+  background: transparent;
+  color: var(--text-lo);
+  font-size: 12px;
+}
+
+.devtab--active {
+  background: var(--bg-key);
+  color: var(--text-hi);
+  border-color: var(--border-control);
+}
+
+.devtab--offline {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.devtab__cls {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  border: 1px solid var(--border-control);
+  padding: 0 5px;
+  border-radius: 3px;
+}
+
+/* ── Mouse visualization ── */
+
+.mouse-viz {
+  display: flex;
+  gap: 30px;
+  align-items: flex-start;
+  padding: 8px 4px 14px 40px;
+}
+
+.mouse-viz__body {
+  position: relative;
+  width: 190px;
+  height: 250px;
+  border: 1px solid var(--border-control);
+  border-radius: 90px 90px 70px 70px;
+  background: var(--bg-key);
+  flex: none;
+}
+
+.mousekey {
+  border: 1px solid var(--border-control);
+  border-radius: var(--r4);
+  background: var(--bg-body);
+  color: var(--text-lo);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  position: relative;
+}
+
+.mousekey--m1 { position: absolute; left: 14px; top: 12px; width: 72px; height: 78px; }
+.mousekey--m2 { position: absolute; right: 14px; top: 12px; width: 72px; height: 78px; }
+.mousekey--m3 { position: absolute; left: 79px; top: 98px; width: 32px; height: 44px; }
+
+.mouse-viz__side {
+  position: absolute;
+  left: 8px;
+  top: 122px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mousekey--side { width: 30px; height: 32px; }
+
+.mousekey--mapped {
+  border-color: var(--teal-border);
+  background: var(--teal-bg);
+  color: var(--teal);
+}
+
+.mousekey--devspec::after {
+  content: "●";
+  position: absolute;
+  top: 1px;
+  right: 4px;
+  font-size: 7px;
+  color: var(--amber);
+}
+
+.mousekey--sel {
+  outline: 2px solid var(--teal);
+}
+
+.mousekey__label {
+  font-weight: 600;
+}
+
+.mousekey__action {
+  font-style: normal;
+  font-size: 9px;
+  color: var(--text-dim);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mousekey--mapped .mousekey__action {
+  color: var(--teal);
+}
+
+.mouse-viz__groups {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.mouse-viz__group-label {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 5px;
+}
+
+.mouse-viz__chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  max-width: 340px;
+}
+
+.mouse-viz__chips .mousekey {
+  padding: 6px 10px;
+  min-width: 64px;
+  min-height: 40px;
+}
+
+/* ── Mapping scope bar ── */
+
+.scope-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 12px;
+  border: 1px solid var(--border-structural);
+  border-radius: var(--r6) var(--r6) 0 0;
+  border-bottom: none;
+  font-size: 12px;
+  color: var(--text-mid);
+}
+
+.scope-bar__toggle input {
+  accent-color: var(--teal);
+  margin-right: 4px;
+}
+
+.scope-bar__badge {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  color: var(--amber);
+  border: 1px solid var(--amber-border);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.keycap--devspec::after {
+  content: "●";
+  position: absolute;
+  top: 1px;
+  right: 3px;
+  font-size: 6px;
+  color: var(--amber);
+}
+
+.tester-device {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dev-badge--touchpad {
