@@ -147,7 +147,8 @@ impl Engine {
                 }
                 Action::LayerToggle(n) => {
                     if let Some(pos) = self.active_layers.iter().rposition(|&l| l == n) {
-                        self.active_layers.remove(pos);
+                        // layer 0 (base) can never be popped
+                        if pos != 0 { self.active_layers.remove(pos); }
                     } else {
                         self.active_layers.push(n);
                     }
@@ -339,6 +340,17 @@ mod tests {
         assert_eq!(e.handle(press("a", 20)), &[press("a", 20)]);
         // but base 'tab = disabled' still applies through the layer
         assert!(e.handle(press("tab", 30)).is_empty());
+    }
+
+    #[test]
+    fn layer_toggle_cannot_pop_base_layer() {
+        // "layer:base" compiles to LayerToggle(0); pressing it must NOT remove layer 0
+        let toml = "[profile.default.keys]\na = \"b\"\nspace = \"layer:base\"";
+        let mut e = engine(toml);
+        e.handle(press("space", 0));
+        e.handle(release("space", 10));
+        // base layer still active: 'a' still remaps to 'b'
+        assert_eq!(e.handle(press("a", 20)), &[press("b", 20)]);
     }
 
 }
