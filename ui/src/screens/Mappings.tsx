@@ -9,11 +9,13 @@ import {
   listProfiles,
   getAction,
   actionToTomlLine,
+  setProfileMatch,
 } from "../lib/config-model";
 import type { ConfigModel, ActionModel } from "../lib/config-model";
 import { KeyboardViz } from "../components/KeyboardViz";
 import { Toolbar } from "../components/Toolbar";
 import { InspectorPanel } from "../components/InspectorPanel";
+import { ProfileMatchEditor } from "../components/ProfileMatchEditor";
 
 interface Props {
   /** Rail-selected profile (controlled by App.tsx rail) */
@@ -201,11 +203,27 @@ export function MappingsScreen({
                 onClose={() => setEditingKey(null)}
               />
             ) : (
-              <div className="inspector">
-                <div className="inspector__hint">
-                  Select a key above to edit its mapping.
+              <>
+                <ProfileMatchEditor
+                  key={railActiveProfile}
+                  model={model}
+                  profileName={railActiveProfile}
+                  onApply={async (match) => {
+                    const updated = setProfileMatch(model, railActiveProfile, match);
+                    setModel(updated);
+                    try {
+                      await setConfig(serializeConfigToml(updated));
+                    } catch (err) {
+                      setLoadError(String(err));
+                    }
+                  }}
+                />
+                <div className="inspector">
+                  <div className="inspector__hint">
+                    Select a key above to edit its mapping.
+                  </div>
                 </div>
-              </div>
+              </>
             )}
           </>
         ) : !loadError ? (
