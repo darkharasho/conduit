@@ -220,8 +220,13 @@ fn dispatch(
         }
 
         // ── ListDevices ──────────────────────────────────────────────────────
+        // Answer directly from `devices::discover()` so ALL devices (grabbed
+        // and ungrabbed) are returned — not just the grabbed subset.
+        // Marking which devices are currently grabbed is done by asking the
+        // runloop for its Status (which carries `grabbed_devices`), keeping the
+        // roundtrip off the hot path.
         Request::ListDevices => {
-            let resp = query(tx, QueryKind::Devices);
+            let resp = list_devices_response(tx);
             if write_response(writer, &resp).is_err() {
                 return DispatchResult::WriteError;
             }
@@ -292,6 +297,50 @@ fn dispatch(
 /// Alias so the dispatch function signature is cleaner.
 trait Write: std::io::Write {}
 impl<T: std::io::Write> Write for T {}
+
+/// Build the `Response::Devices` answer for a `ListDevices` request.
+///
+/// Calls `devices::discover()` directly (off the runloop hot path) so that ALL
+/// discovered devices — not just those currently grabbed — are returned to the
+/// UI.  The `grabbed` field is set by cross-referencing with the runloop's
+/// current `grabbed_devices` list (obtained via a `GetStatus` query).
+fn list_devices_response(tx: &Sender<Msg>) -> Response {
+    // Get the current set of grabbed device paths from the runloop.
+    let grabbed_paths: std::collections::HashSet<String> = match query(tx, QueryKind::GetStatus) {
+        Response::Status(s) => s.grabbed_devices.into_iter().collect(),
+        _ => std::collections::HashSet::new(),
+    };
+
+    // Discover all input devices regardless of grab state.
+    let discovered = match crate::devices::discover() {
+        Ok(devs) => devs,
+        Err(e) => {
+            return Response::Err {
+                message: format!("discover devices: {e}"),
+            };
+        }
+    };
+
+    use conduit_proto::DeviceInfo;
+    let devices: Vec<DeviceInfo> = discovered
+        .into_iter()
+        .map(|d| {
+            let path_str = d.path.display().to_string();
+            let grabbed = grabbed_paths.contains(&path_str);
+            DeviceInfo {
+                path: path_str,
+                name: d.name,
+                vendor: d.vendor,
+                product: d.product,
+                is_keyboard: d.is_keyboard,
+                is_mouse: d.is_mouse,
+                grabbed,
+            }
+        })
+        .collect();
+
+    Response::Devices { devices }
+}
 
 /// Send a `Msg::Query` and block for the reply.
 fn query(tx: &Sender<Msg>, kind: QueryKind) -> Response {

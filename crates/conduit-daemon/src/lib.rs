@@ -57,6 +57,24 @@ pub struct DaemonHandle {
 }
 
 impl DaemonHandle {
+    /// Block until the run loop exits on its own (all senders dropped or
+    /// `Msg::Shutdown` sent by another path).
+    ///
+    /// This is the correct method for the production daemon binary: it holds
+    /// the process alive while the daemon is running without sending a shutdown
+    /// signal itself.  The OS or a signal handler is responsible for cleanup.
+    ///
+    /// Do NOT use this in tests — use `shutdown()` instead so tests terminate
+    /// promptly.
+    pub fn wait(mut self) {
+        // Join the run-loop thread; it exits when the channel is closed
+        // (all senders dropped) or when it receives Msg::Shutdown.
+        if let Some(h) = self.run_thread.take() {
+            let _ = h.join();
+        }
+        // _shutdown_tx and _detached_threads drop here.
+    }
+
     /// Shut the daemon down.
     ///
     /// Sends `Msg::Shutdown` to the run loop (causes it to exit immediately),

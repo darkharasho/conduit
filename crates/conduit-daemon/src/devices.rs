@@ -160,10 +160,12 @@ pub fn should_grab(d: &Discovered, s: &Settings) -> bool {
 /// Ungrab/close mechanism: the `evdev::Device` (and its `EVIOCGRAB`) is owned
 /// by the reader thread. Dropping a `GrabHandle` sets the shared stop flag and
 /// joins the thread; when the thread exits, the `Device` drops, which closes
-/// the fd and releases the kernel grab. Caveat: a thread blocked in
-/// `fetch_events()` only observes the stop flag after the next event batch
-/// arrives; in practice handles are dropped at process exit (the OS reclaims
-/// fds and grabs) or after the reader has already exited on a device error.
+/// the fd and releases the kernel grab.
+///
+/// The reader thread uses `O_NONBLOCK` + `poll(2)` with a 50 ms timeout on the
+/// device fd (for grabbed devices) so the stop flag is honoured within
+/// milliseconds even when no events are arriving — avoiding a shutdown deadlock
+/// where `drop` would otherwise block indefinitely waiting for the next event.
 pub struct GrabHandle {
     stop: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
@@ -225,10 +227,20 @@ pub fn spawn_reader(
                 let _ = tx.send(Msg::DeviceRemoved(path));
                 return;
             }
-        } else {
-            // Set O_NONBLOCK: blocking read on an ungrabbed uinput event device
-            // returns ENODEV immediately on Linux; non-blocking returns EAGAIN
-            // when the queue is empty, which we handle with a short sleep.
+        }
+
+        // Always set O_NONBLOCK regardless of grab mode.
+        //
+        // For grabbed devices: this enables the poll(2)-with-timeout loop
+        // below, which checks the stop flag every 50 ms.  Without O_NONBLOCK
+        // the reader would block indefinitely inside fetch_events() and
+        // GrabHandle::drop (which joins the thread) would deadlock when no
+        // input events are arriving (e.g. at daemon shutdown).
+        //
+        // For ungrabbed (test) devices: a blocking read on an ungrabbed uinput
+        // event device returns ENODEV immediately on Linux; O_NONBLOCK returns
+        // EAGAIN/WouldBlock instead, which we handle with a short sleep below.
+        {
             let fd = dev.as_raw_fd();
             unsafe {
                 let flags = libc::fcntl(fd, libc::F_GETFL, 0);
@@ -244,11 +256,39 @@ pub fn spawn_reader(
         }
 
         while !stop_flag.load(Ordering::Relaxed) {
+            if do_grab {
+                // poll(2) with a 50 ms timeout: block until the fd becomes
+                // readable or the timeout expires, then recheck the stop flag.
+                //
+                // Latency impact: zero for arriving events — poll(2) returns
+                // immediately when the kernel has events ready on the fd.
+                // Stop flag is honoured within ~50 ms of being set, so
+                // GrabHandle::drop completes promptly even with no events.
+                let mut pfd = libc::pollfd {
+                    fd: dev.as_raw_fd(),
+                    events: libc::POLLIN,
+                    revents: 0,
+                };
+                // SAFETY: valid pollfd; timeout 50 ms.
+                unsafe { libc::poll(&mut pfd, 1, 50) };
+                // Whether we got POLLIN, a timeout, or EINTR: recheck the stop
+                // flag at the top of the loop, then call fetch_events if we have
+                // data (WouldBlock handles the rare race between poll & read).
+                if pfd.revents & libc::POLLIN == 0 {
+                    continue; // timeout or EINTR — recheck stop flag
+                }
+            }
+
             let events = match dev.fetch_events() {
                 Ok(evs) => evs,
-                Err(e) if !do_grab && e.kind() == std::io::ErrorKind::WouldBlock => {
-                    // O_NONBLOCK + empty queue — sleep briefly and retry.
-                    std::thread::sleep(std::time::Duration::from_millis(2));
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    // O_NONBLOCK + empty queue (can happen even after poll reports
+                    // POLLIN in some edge cases) — recheck stop flag and retry.
+                    if !do_grab {
+                        // For ungrabbed test devices, sleep briefly to avoid
+                        // a busy spin when there truly are no events.
+                        std::thread::sleep(std::time::Duration::from_millis(2));
+                    }
                     continue;
                 }
                 Err(e) => {

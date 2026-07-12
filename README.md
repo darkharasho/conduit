@@ -38,8 +38,12 @@ sudo usermod -aG input $USER   # then re-login
 ### 3. Build and install the daemon binary
 
 ```bash
-cargo build --release && install -Dm755 target/release/conduit-daemon ~/.local/bin/
+cargo build --release -p conduit-daemon && install -Dm755 target/release/conduit-daemon ~/.local/bin/
 ```
+
+> **Note:** Building the full workspace (`cargo build --release`) requires GTK
+> and webkit2gtk development headers (needed by the Tauri UI). Build only the
+> daemon with `-p conduit-daemon` if you don't need the UI.
 
 ### 4. Install and enable the systemd user unit
 
@@ -69,8 +73,10 @@ Note: on systemd/logind desktops, `input_group` may report `false` even though t
 ## Build requirements
 
 - Rust 1.75+ (2021 edition)
-- `libudev-devel` and `libevdev-devel` (or the distro equivalents)
+- `libudev-devel` (the `evdev` crate uses pure ioctl and does **not** need
+  `libevdev-devel`)
 - Linux kernel with `uinput` module (`modprobe uinput` if not auto-loaded)
+- For the UI only: `webkit2gtk4.1-devel` (or equivalent) for Tauri
 
 **Fedora / RPM-family systems:** the pkg-config files for libudev live in
 `/usr/lib64/pkgconfig`, which is not always on the default search path. Set:
@@ -101,11 +107,30 @@ capslock = { tap = "esc", hold = "leftctrl" }
 a = "b"
 
 [profile.gaming]
-match = { class = "steam_app_*" }
+match = { class = "steam_app_123" }
 
 [profile.gaming.keys]
 capslock = "passthrough"
 ```
 
+**Profile matching notes:**
+
+- `class` and `process` are **exact-match** strings (no glob expansion).
+  Use the exact window class or process name as reported by your compositor.
+- `title` accepts a **regular expression** (e.g. `title = ".*vim.*"`).
+
 Edit the file while the daemon is running — changes are picked up within
 ~500 ms. Invalid TOML is logged and the previous config remains active.
+
+## UI (Tauri app)
+
+The companion UI provides a graphical interface to view device status, edit
+mappings, and test key codes.  It connects to the running daemon automatically
+via the IPC socket.
+
+```bash
+cd ui && npm install && npm run tauri dev
+```
+
+Requires `webkit2gtk` development headers and a running `conduit-daemon`
+instance.

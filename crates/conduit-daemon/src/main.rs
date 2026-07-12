@@ -202,8 +202,13 @@ fn main() -> anyhow::Result<()> {
         enable_watch: true,
     })?;
 
-    // Wait for the run loop to exit (blocks until daemon shuts down).
-    handle.shutdown();
+    // Block here until the daemon is stopped externally (e.g. SIGTERM / systemd
+    // stop).  Using `wait()` instead of `shutdown()` avoids sending Msg::Shutdown
+    // ourselves — the daemon stays alive until all channel senders are dropped
+    // or an external signal terminates the process.  Systemd Restart=on-failure
+    // only fires on non-zero exit; `shutdown()` causes an immediate exit 0 which
+    // systemd would NOT restart, defeating the service.
+    handle.wait();
 
     Ok(())
 }
