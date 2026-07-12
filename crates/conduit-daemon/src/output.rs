@@ -46,6 +46,16 @@ impl VirtualOutput {
     ///
     /// `VirtualDevice::emit` appends `SYN_REPORT` automatically.
     pub fn emit(&mut self, ev: &Event) -> anyhow::Result<()> {
+        // Wheel pseudo-keys re-materialize as REL events on the virtual mouse.
+        // Press carries the tick; Release is swallowed.
+        if let Some((code, delta)) = wheel_rel(ev.key) {
+            if ev.state == KeyState::Press {
+                let raw = InputEvent::new(EventType::RELATIVE, code, delta);
+                self.mouse.emit(&[raw]).context("emitting wheel event")?;
+            }
+            return Ok(());
+        }
+
         let value = match ev.state {
             KeyState::Press => 1,
             KeyState::Release => 0,
@@ -72,6 +82,18 @@ impl VirtualOutput {
     }
 }
 
+/// Map a wheel pseudo-key back to its (REL code, delta). `None` for real keys.
+pub fn wheel_rel(key: conduit_core::event::Key) -> Option<(u16, i32)> {
+    use conduit_core::keys as k;
+    match key {
+        k::WHEEL_UP => Some((0x08, 1)),
+        k::WHEEL_DOWN => Some((0x08, -1)),
+        k::WHEEL_LEFT => Some((0x06, -1)),
+        k::WHEEL_RIGHT => Some((0x06, 1)),
+        _ => None,
+    }
+}
+
 // ── Device builders ──────────────────────────────────────────────────────────
 
 /// Build "Conduit Virtual Keyboard":
@@ -83,8 +105,9 @@ fn build_keyboard() -> std::io::Result<evdev::uinput::VirtualDevice> {
     for code in 1u16..=767 {
         // Skip the entire BTN_ block (0x100..=0x15f); only BTN_MOUSE (0x110..=0x117)
         // goes to the virtual mouse. Declaring joystick/gamepad/digitizer buttons on
-        // a keyboard makes libinput misclassify the device.
-        if (0x100..=0x15f).contains(&code) {
+        // a keyboard makes libinput misclassify the device. Also skip the wheel
+        // pseudo-keys (760..=763) — they only ever leave as REL events.
+        if (0x100..=0x15f).contains(&code) || (760..=763).contains(&code) {
             continue;
         }
         keys.insert(Key::new(code));
@@ -124,6 +147,17 @@ fn build_mouse() -> std::io::Result<evdev::uinput::VirtualDevice> {
 mod tests {
     use super::*;
     use conduit_core::event::{Event, Key, KeyState};
+
+    #[test]
+    fn wheel_rel_maps_pseudo_keys_to_rel_events() {
+        use conduit_core::keys;
+        assert_eq!(wheel_rel(keys::WHEEL_UP), Some((0x08, 1)));
+        assert_eq!(wheel_rel(keys::WHEEL_DOWN), Some((0x08, -1)));
+        assert_eq!(wheel_rel(keys::WHEEL_LEFT), Some((0x06, -1)));
+        assert_eq!(wheel_rel(keys::WHEEL_RIGHT), Some((0x06, 1)));
+        assert_eq!(wheel_rel(Key(30)), None);
+        assert_eq!(wheel_rel(Key(0x110)), None); // btn_left stays a button
+    }
 
     /// Creates both virtual devices and emits a KEY_A press and release.
     ///

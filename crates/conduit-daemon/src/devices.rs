@@ -160,6 +160,35 @@ pub fn should_grab(d: &Discovered, s: &Settings) -> bool {
     }
 }
 
+// ── Wheel translation ─────────────────────────────────────────────────────────
+
+pub const REL_HWHEEL: u16 = 0x06;
+pub const REL_WHEEL: u16 = 0x08;
+pub const REL_WHEEL_HI_RES: u16 = 0x0b;
+pub const REL_HWHEEL_HI_RES: u16 = 0x0c;
+
+/// Translate a wheel REL event into engine key events: one Press+Release pair
+/// of the matching pseudo-key per tick.
+pub fn wheel_events(rel_code: u16, value: i32, now: u64) -> Vec<Event> {
+    use conduit_core::keys as k;
+    let key = match (rel_code, value > 0) {
+        (REL_WHEEL, true) => k::WHEEL_UP,
+        (REL_WHEEL, false) => k::WHEEL_DOWN,
+        (REL_HWHEEL, true) => k::WHEEL_RIGHT,
+        (REL_HWHEEL, false) => k::WHEEL_LEFT,
+        _ => return Vec::new(),
+    };
+    if value == 0 {
+        return Vec::new();
+    }
+    let mut out = Vec::with_capacity(value.unsigned_abs() as usize * 2);
+    for _ in 0..value.unsigned_abs() {
+        out.push(Event { key, state: KeyState::Press, time_us: now });
+        out.push(Event { key, state: KeyState::Release, time_us: now });
+    }
+    out
+}
+
 // ── Reader threads ────────────────────────────────────────────────────────────
 
 /// Handle for a spawned reader thread and its device grab.
@@ -317,10 +346,28 @@ pub fn spawn_reader(
                     if tx.send(Msg::Input(ev)).is_err() {
                         return; // engine thread gone; shut down
                     }
-                } else if is_pointer
-                    && (ev_type == evdev::EventType::RELATIVE
-                        || ev_type == evdev::EventType::MISC)
-                {
+                } else if is_pointer && ev_type == evdev::EventType::RELATIVE {
+                    match raw.code() {
+                        REL_WHEEL | REL_HWHEEL => {
+                            // Wheel goes through the engine so it can be remapped.
+                            for ev in wheel_events(raw.code(), raw.value(), now_us()) {
+                                if tx.send(Msg::Input(ev)).is_err() {
+                                    return;
+                                }
+                            }
+                        }
+                        // Hi-res wheel would double-scroll alongside the
+                        // synthesized low-res ticks; libinput re-derives hi-res
+                        // downstream.
+                        REL_WHEEL_HI_RES | REL_HWHEEL_HI_RES => {}
+                        _ => {
+                            // Motion stays on the direct path — no channel hop.
+                            if let Ok(mut o) = out.lock() {
+                                let _ = o.emit_raw_mouse(&raw);
+                            }
+                        }
+                    }
+                } else if is_pointer && ev_type == evdev::EventType::MISC {
                     if let Ok(mut o) = out.lock() {
                         let _ = o.emit_raw_mouse(&raw);
                     }
@@ -411,6 +458,29 @@ mod tests {
     #[test]
     fn discovered_id_format() {
         assert_eq!(dev("G600", DeviceClass::Mouse).id(), "046d:c24a/G600");
+    }
+
+    // ── Wheel translation ──────────────────────────────────────────────────────
+
+    #[test]
+    fn wheel_events_translate_ticks() {
+        use conduit_core::keys as ckeys;
+        // REL_WHEEL +1 → wheelup press+release
+        let evs = wheel_events(REL_WHEEL, 1, 42);
+        assert_eq!(evs.len(), 2);
+        assert_eq!(evs[0], Event { key: ckeys::WHEEL_UP, state: KeyState::Press, time_us: 42 });
+        assert_eq!(evs[1], Event { key: ckeys::WHEEL_UP, state: KeyState::Release, time_us: 42 });
+        // value -3 → three wheeldown pairs
+        let evs = wheel_events(REL_WHEEL, -3, 0);
+        assert_eq!(evs.len(), 6);
+        assert!(evs.iter().all(|e| e.key == ckeys::WHEEL_DOWN));
+        // HWHEEL: positive = right, negative = left
+        assert_eq!(wheel_events(REL_HWHEEL, 1, 0)[0].key, ckeys::WHEEL_RIGHT);
+        assert_eq!(wheel_events(REL_HWHEEL, -1, 0)[0].key, ckeys::WHEEL_LEFT);
+        // zero and non-wheel codes → nothing
+        assert!(wheel_events(REL_WHEEL, 0, 0).is_empty());
+        assert!(wheel_events(0x00, 5, 0).is_empty()); // REL_X
+        assert!(wheel_events(REL_WHEEL_HI_RES, 120, 0).is_empty());
     }
 
     // ── EACCES detection — pure decision logic ────────────────────────────────
