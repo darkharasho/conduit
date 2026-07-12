@@ -129,6 +129,12 @@ fn build_monitor() -> anyhow::Result<udev::MonitorSocket> {
     Ok(monitor)
 }
 
+/// Returns `true` if the `io::ErrorKind` is a transient permission error that
+/// warrants a single retry after udev has had more time to apply rules.
+pub fn should_retry(kind: std::io::ErrorKind) -> bool {
+    kind == std::io::ErrorKind::PermissionDenied
+}
+
 /// Process one udev event.  Returns `true` if the channel is still alive,
 /// `false` if the run loop has disconnected (daemon shutting down).
 fn handle_event(event: udev::Event, tx: &Sender<Msg>) -> bool {
@@ -146,7 +152,39 @@ fn handle_event(event: udev::Event, tx: &Sender<Msg>) -> bool {
         udev::EventType::Add => {
             // Sleep 100 ms: udev may not have applied group/mode yet.
             std::thread::sleep(Duration::from_millis(100));
-            tx.send(Msg::DeviceAdded(path)).is_ok()
+
+            // Probe openability before notifying the engine thread.  On
+            // PermissionDenied, wait an extra 500 ms and retry once — this
+            // keeps the EACCES settle logic here on the hotplug thread rather
+            // than blocking the engine's input hot path.
+            match std::fs::File::open(&path) {
+                Ok(_) => {
+                    // File is accessible; let the engine thread do the full
+                    // evdev probe and grab.
+                    tx.send(Msg::DeviceAdded(path)).is_ok()
+                }
+                Err(e) if should_retry(e.kind()) => {
+                    std::thread::sleep(Duration::from_millis(500));
+                    match std::fs::File::open(&path) {
+                        Ok(_) => tx.send(Msg::DeviceAdded(path)).is_ok(),
+                        Err(e2) => {
+                            eprintln!(
+                                "conduit: {}: permission denied after settle wait ({}); skipping",
+                                path.display(),
+                                e2
+                            );
+                            // Channel may still be alive; don't signal disconnect.
+                            true
+                        }
+                    }
+                }
+                Err(_) => {
+                    // Non-permission error (e.g. device already removed).
+                    // Send DeviceAdded and let the engine's probe produce the
+                    // appropriate log line for unusual errors.
+                    tx.send(Msg::DeviceAdded(path)).is_ok()
+                }
+            }
         }
         udev::EventType::Remove => {
             tx.send(Msg::DeviceRemoved(path)).is_ok()
@@ -238,5 +276,19 @@ mod tests {
         reg.remove(&a);
         assert!(!reg.contains(&a));
         assert!(reg.contains(&b));
+    }
+
+    // ── should_retry ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn should_retry_true_for_permission_denied() {
+        assert!(should_retry(std::io::ErrorKind::PermissionDenied));
+    }
+
+    #[test]
+    fn should_retry_false_for_other_errors() {
+        assert!(!should_retry(std::io::ErrorKind::NotFound));
+        assert!(!should_retry(std::io::ErrorKind::BrokenPipe));
+        assert!(!should_retry(std::io::ErrorKind::TimedOut));
     }
 }

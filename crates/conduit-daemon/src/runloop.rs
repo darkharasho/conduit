@@ -269,12 +269,9 @@ pub fn run(
 
 /// Attempt to probe and grab a newly-added device.
 ///
-/// - Probes `path` via `devices::probe`.
-/// - If `should_grab` passes and the path is not already in `readers`:
-///   - On `EACCES` (permissions not yet applied by udev) → wait 500 ms and
-///     retry once.
-///   - On success → spawn a reader thread, insert into `readers` and
-///     `grabbed_devices`.
+/// Non-blocking: contains_key check → probe → should_grab → spawn_reader →
+/// insert + status push.  EACCES settle/retry logic now lives in the hotplug
+/// thread (`hotplug::handle_event`) and never runs here.
 fn try_grab_device(
     path: &Path,
     settings: &Settings,
@@ -287,35 +284,9 @@ fn try_grab_device(
         return;
     }
 
-    // Inner closure: probe + decide; returns None when the device doesn't
-    // warrant grabbing (wrong type, Conduit Virtual, etc.).
-    let probe_and_check = |p: &Path| -> Option<crate::devices::Discovered> {
-        let d = crate::devices::probe(p.to_path_buf())?;
-        if crate::devices::should_grab(&d, settings) {
-            Some(d)
-        } else {
-            None
-        }
-    };
-
-    let discovered = match probe_and_check(path) {
-        Some(d) => d,
-        None => {
-            // Check if it's an EACCES that we should retry.
-            let eacces = std::fs::File::open(path)
-                .err()
-                .and_then(|e| e.raw_os_error())
-                == Some(nix::libc::EACCES);
-            if !eacces {
-                return; // Not our concern (not a grabbable device).
-            }
-            // Retry once after 500 ms for permission propagation.
-            std::thread::sleep(Duration::from_millis(500));
-            match probe_and_check(path) {
-                Some(d) => d,
-                None => return,
-            }
-        }
+    let discovered = match crate::devices::probe(path.to_path_buf()) {
+        Some(d) if crate::devices::should_grab(&d, settings) => d,
+        _ => return,
     };
 
     let is_mouse = discovered.is_mouse;
