@@ -810,6 +810,14 @@ button {
   border: 1px solid var(--border-control);
 }
 
+.dev-badge--touchpad {
+  color: var(--text-lo);
+  background: var(--bg-key);
+  border: 1px solid var(--border-control);
+}
+
+.dev-badge--gamepad,
+.dev-badge--media,
 .dev-badge--other {
   color: var(--text-dim);
   background: transparent;

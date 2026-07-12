@@ -328,10 +328,12 @@ describe("getDeviceGrabs", () => {
   });
 });
 
+const ident = (name: string) => ({ name, vendor: 0, product: 0, id: name });
+
 describe("setKeyboardGrab", () => {
   it("grab_all=false: adds a keyboard to grab_keyboards", () => {
     const m = parseConfigToml(EXPLICIT_KEYBOARDS_TOML);
-    const m2 = setKeyboardGrab(m, "kbd-c", true, ["kbd-a", "kbd-b"]);
+    const m2 = setKeyboardGrab(m, ident("kbd-c"), true, ["kbd-a", "kbd-b"]);
     const grabs = getDeviceGrabs(m2);
     expect(grabs.grabKeyboards).toContain("kbd-c");
     expect(grabs.grabKeyboards).toContain("kbd-a");
@@ -341,7 +343,7 @@ describe("setKeyboardGrab", () => {
 
   it("grab_all=false: removes a keyboard from grab_keyboards", () => {
     const m = parseConfigToml(EXPLICIT_KEYBOARDS_TOML);
-    const m2 = setKeyboardGrab(m, "kbd-a", false, ["kbd-a", "kbd-b"]);
+    const m2 = setKeyboardGrab(m, ident("kbd-a"), false, ["kbd-a", "kbd-b"]);
     const grabs = getDeviceGrabs(m2);
     expect(grabs.grabKeyboards).not.toContain("kbd-a");
     expect(grabs.grabKeyboards).toContain("kbd-b");
@@ -349,14 +351,14 @@ describe("setKeyboardGrab", () => {
 
   it("grab_all=false: add is idempotent", () => {
     const m = parseConfigToml(EXPLICIT_KEYBOARDS_TOML);
-    const m2 = setKeyboardGrab(m, "kbd-a", true, ["kbd-a", "kbd-b"]);
+    const m2 = setKeyboardGrab(m, ident("kbd-a"), true, ["kbd-a", "kbd-b"]);
     const grabs = getDeviceGrabs(m2);
     expect(grabs.grabKeyboards.filter((k) => k === "kbd-a")).toHaveLength(1);
   });
 
   it("grab_all=false: remove non-existent is idempotent", () => {
     const m = parseConfigToml(EXPLICIT_KEYBOARDS_TOML);
-    const m2 = setKeyboardGrab(m, "kbd-z", false, ["kbd-a", "kbd-b"]);
+    const m2 = setKeyboardGrab(m, ident("kbd-z"), false, ["kbd-a", "kbd-b"]);
     expect(getDeviceGrabs(m2).grabKeyboards).toEqual(["kbd-a", "kbd-b"]);
   });
 
@@ -364,7 +366,7 @@ describe("setKeyboardGrab", () => {
     const m = parseConfigToml(GRAB_ALL_TOML);
     // Currently grabbed keyboards: kbd-a, kbd-b, kbd-c — we toggle kbd-b off
     const currentlyGrabbed = ["kbd-a", "kbd-b", "kbd-c"];
-    const m2 = setKeyboardGrab(m, "kbd-b", false, currentlyGrabbed);
+    const m2 = setKeyboardGrab(m, ident("kbd-b"), false, currentlyGrabbed);
     const grabs = getDeviceGrabs(m2);
     expect(grabs.grabAllKeyboards).toBe(false);
     expect(grabs.grabKeyboards).toContain("kbd-a");
@@ -375,7 +377,7 @@ describe("setKeyboardGrab", () => {
   it("grab_all=true: toggling ON (adding) when grab_all already true keeps grab_all", () => {
     const m = parseConfigToml(GRAB_ALL_TOML);
     // Adding a device when grab_all is already true should not change grab_all
-    const m2 = setKeyboardGrab(m, "kbd-new", true, ["kbd-a"]);
+    const m2 = setKeyboardGrab(m, ident("kbd-new"), true, ["kbd-a"]);
     const grabs = getDeviceGrabs(m2);
     // grab_all stays true (adding to grab_all is a no-op conceptually, but
     // implementation may keep grab_all=true)
@@ -384,14 +386,14 @@ describe("setKeyboardGrab", () => {
 
   it("creates [devices] section if absent", () => {
     const m = parseConfigToml(NO_DEVICES_TOML);
-    const m2 = setKeyboardGrab(m, "kbd-new", true, []);
+    const m2 = setKeyboardGrab(m, ident("kbd-new"), true, []);
     const grabs = getDeviceGrabs(m2);
     expect(grabs.grabKeyboards).toContain("kbd-new");
   });
 
   it("is immutable — original model unchanged", () => {
     const m = parseConfigToml(EXPLICIT_KEYBOARDS_TOML);
-    setKeyboardGrab(m, "kbd-a", false, ["kbd-a", "kbd-b"]);
+    setKeyboardGrab(m, ident("kbd-a"), false, ["kbd-a", "kbd-b"]);
     expect(getDeviceGrabs(m).grabKeyboards).toEqual(["kbd-a", "kbd-b"]);
   });
 });
@@ -399,7 +401,7 @@ describe("setKeyboardGrab", () => {
 describe("setMouseGrab", () => {
   it("adds a mouse to grab_mice", () => {
     const m = parseConfigToml(EXPLICIT_KEYBOARDS_TOML);
-    const m2 = setMouseGrab(m, "mouse-y", true);
+    const m2 = setMouseGrab(m, ident("mouse-y"), true);
     const grabs = getDeviceGrabs(m2);
     expect(grabs.grabMice).toContain("mouse-y");
     expect(grabs.grabMice).toContain("mouse-x");
@@ -407,31 +409,31 @@ describe("setMouseGrab", () => {
 
   it("removes a mouse from grab_mice", () => {
     const m = parseConfigToml(EXPLICIT_KEYBOARDS_TOML);
-    const m2 = setMouseGrab(m, "mouse-x", false);
+    const m2 = setMouseGrab(m, ident("mouse-x"), false);
     expect(getDeviceGrabs(m2).grabMice).not.toContain("mouse-x");
   });
 
   it("add is idempotent", () => {
     const m = parseConfigToml(EXPLICIT_KEYBOARDS_TOML);
-    const m2 = setMouseGrab(m, "mouse-x", true);
+    const m2 = setMouseGrab(m, ident("mouse-x"), true);
     expect(getDeviceGrabs(m2).grabMice.filter((n) => n === "mouse-x")).toHaveLength(1);
   });
 
   it("remove non-existent is idempotent", () => {
     const m = parseConfigToml(EXPLICIT_KEYBOARDS_TOML);
-    const m2 = setMouseGrab(m, "ghost-mouse", false);
+    const m2 = setMouseGrab(m, ident("ghost-mouse"), false);
     expect(getDeviceGrabs(m2).grabMice).toEqual(["mouse-x"]);
   });
 
   it("creates [devices] section if absent", () => {
     const m = parseConfigToml(NO_DEVICES_TOML);
-    const m2 = setMouseGrab(m, "mouse-new", true);
+    const m2 = setMouseGrab(m, ident("mouse-new"), true);
     expect(getDeviceGrabs(m2).grabMice).toContain("mouse-new");
   });
 
   it("is immutable — original model unchanged", () => {
     const m = parseConfigToml(EXPLICIT_KEYBOARDS_TOML);
-    setMouseGrab(m, "mouse-x", false);
+    setMouseGrab(m, ident("mouse-x"), false);
     expect(getDeviceGrabs(m).grabMice).toEqual(["mouse-x"]);
   });
 });
@@ -533,5 +535,67 @@ describe("actionToTomlLine", () => {
     expect(line).toBe(
       `conduit.toml → [profile.myprofile.layers.symbols] a = "b"`
     );
+  });
+});
+
+// ── Device selectors + grab_all_mice ─────────────────────────────────────────
+
+import {
+  selectorMatches,
+  listMatchesDevice,
+  setProfileMatch,
+} from "./config-model";
+
+const g600 = { name: "G600", vendor: 0x046d, product: 0xc24a };
+
+describe("device selectors", () => {
+  it("matches name, vid:pid, and vid:pid/name forms", () => {
+    expect(selectorMatches("G600", g600)).toBe(true);
+    expect(selectorMatches("046d:c24a", g600)).toBe(true);
+    expect(selectorMatches("046d:c24a/G600", g600)).toBe(true);
+    expect(selectorMatches("046d:ffff", g600)).toBe(false);
+    expect(selectorMatches("046d:c24a/Other", g600)).toBe(false);
+    expect(selectorMatches("Other", g600)).toBe(false);
+  });
+
+  it("grab_all_mice round-trips and setMouseGrab writes canonical id", () => {
+    const m = parseConfigToml("[devices]\ngrab_all_mice = true");
+    expect(getDeviceGrabs(m).grabAllMice).toBe(true);
+
+    const m2 = setMouseGrab(parseConfigToml(""), { ...g600, id: "046d:c24a/G600" }, true);
+    expect(getDeviceGrabs(m2).grabMice).toEqual(["046d:c24a/G600"]);
+    expect(serializeConfigToml(m2)).toContain("046d:c24a/G600");
+
+    // Removal drops any selector form matching the device.
+    const m3 = parseConfigToml('[devices]\ngrab_mice = ["G600", "046d:c24a"]');
+    const m4 = setMouseGrab(m3, { ...g600, id: "046d:c24a/G600" }, false);
+    expect(getDeviceGrabs(m4).grabMice).toEqual([]);
+  });
+
+  it("listMatchesDevice", () => {
+    expect(listMatchesDevice(["046d:c24a"], g600)).toBe(true);
+    expect(listMatchesDevice(["nope"], g600)).toBe(false);
+    expect(listMatchesDevice([], g600)).toBe(false);
+  });
+});
+
+// ── setProfileMatch ──────────────────────────────────────────────────────────
+
+describe("setProfileMatch", () => {
+  it("writes, updates, and clears the match table", () => {
+    const m = parseConfigToml(
+      '[profile.game]\nmatch = { class = "steam" }\n[profile.game.keys]\na = "b"'
+    );
+    const m2 = setProfileMatch(m, "game", { class: "steam_app_123", title: "Elden" });
+    expect(m2.profiles[0].match).toEqual({ class: "steam_app_123", title: "Elden" });
+    // empty strings dropped
+    const m3 = setProfileMatch(m, "game", { class: "x", process: "" });
+    expect(m3.profiles[0].match).toEqual({ class: "x" });
+    // all empty → removed
+    const m4 = setProfileMatch(m, "game", {});
+    expect(m4.profiles[0].match).toBeUndefined();
+    expect(serializeConfigToml(m4)).not.toContain("match");
+    // unknown profile → unchanged
+    expect(setProfileMatch(m, "nope", { class: "x" })).toBe(m);
   });
 });

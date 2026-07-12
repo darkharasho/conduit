@@ -13,6 +13,8 @@ import {
   getDeviceGrabs,
   setKeyboardGrab,
   setMouseGrab,
+  setGrabAllMice,
+  listMatchesDevice,
 } from "../lib/config-model";
 import type { ConfigModel } from "../lib/config-model";
 import { Toolbar } from "../components/Toolbar";
@@ -20,6 +22,15 @@ import { Toolbar } from "../components/Toolbar";
 function toHex(n: number): string {
   return n.toString(16).padStart(4, "0");
 }
+
+const CLASS_LABELS: Record<string, string> = {
+  keyboard: "Keyboard",
+  mouse: "Mouse",
+  touchpad: "Touchpad",
+  gamepad: "Gamepad",
+  media: "Media",
+  other: "Other",
+};
 
 export function DevicesScreen() {
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
@@ -87,7 +98,7 @@ export function DevicesScreen() {
     if (!config) return;
     clearDeviceError(device.name);
     try {
-      const newModel = setKeyboardGrab(config, device.name, grabbed, currentlyGrabbed);
+      const newModel = setKeyboardGrab(config, device, grabbed, currentlyGrabbed);
       await applyConfig(newModel);
     } catch (err) {
       setDeviceError(device.name, String(err));
@@ -99,7 +110,7 @@ export function DevicesScreen() {
     const grabs = getDeviceGrabs(config);
     const currentlyGrabbed = devices
       .filter((d) => d.is_keyboard && d.grabbed)
-      .map((d) => d.name);
+      .map((d) => d.id);
 
     if (grabs.grabAllKeyboards && !newGrabbed) {
       setPendingKbToggle({
@@ -118,7 +129,7 @@ export function DevicesScreen() {
     if (!config) return;
     clearDeviceError(device.name);
     try {
-      const newModel = setMouseGrab(config, device.name, newGrabbed);
+      const newModel = setMouseGrab(config, device, newGrabbed);
       await applyConfig(newModel);
     } catch (err) {
       setDeviceError(device.name, String(err));
@@ -191,6 +202,25 @@ export function DevicesScreen() {
           </div>
         )}
 
+        {grabs && (
+          <label className="grab-toggle" style={{ fontSize: 12, display: "block", margin: "8px 0" }}>
+            <input
+              type="checkbox"
+              checked={grabs.grabAllMice}
+              disabled={!config}
+              onChange={(e) => {
+                if (!config) return;
+                applyConfig(setGrabAllMice(config, e.target.checked)).catch((err) =>
+                  setLoadError(String(err))
+                );
+              }}
+            />
+            {" Grab all mice automatically ("}
+            <code>grab_all_mice</code>
+            {") — touchpads excluded"}
+          </label>
+        )}
+
         {devices.length === 0 && !loadError ? (
           <p className="muted" style={{ fontSize: 12 }}>No devices found.</p>
         ) : (
@@ -205,19 +235,24 @@ export function DevicesScreen() {
             </thead>
             <tbody>
               {devices.map((dev) => {
-                const isKeyboard = dev.is_keyboard;
-                const isMouse = dev.is_mouse;
+                const isKeyboard = dev.class === "keyboard";
+                const isMouse = dev.class === "mouse";
+                const isTouchpad = dev.class === "touchpad";
 
                 let isGrabbed = dev.grabbed;
                 if (grabs) {
                   if (isKeyboard) {
-                    isGrabbed = grabs.grabAllKeyboards || grabs.grabKeyboards.includes(dev.name);
+                    isGrabbed =
+                      grabs.grabAllKeyboards || listMatchesDevice(grabs.grabKeyboards, dev);
                   } else if (isMouse) {
-                    isGrabbed = grabs.grabMice.includes(dev.name);
+                    isGrabbed = grabs.grabAllMice || listMatchesDevice(grabs.grabMice, dev);
+                  } else if (isTouchpad) {
+                    // Mirrors the daemon: touchpads need an explicit selector.
+                    isGrabbed = listMatchesDevice(grabs.grabMice, dev);
                   }
                 }
 
-                const canToggle = isKeyboard || isMouse;
+                const canToggle = isKeyboard || isMouse || isTouchpad;
                 const err = deviceErrors[dev.name];
 
                 return (
@@ -227,9 +262,9 @@ export function DevicesScreen() {
                       {toHex(dev.vendor)}:{toHex(dev.product)}
                     </td>
                     <td>
-                      {isKeyboard && <span className="dev-badge dev-badge--keyboard">Keyboard</span>}
-                      {isMouse && <span className="dev-badge dev-badge--mouse">Mouse</span>}
-                      {!isKeyboard && !isMouse && <span className="dev-badge dev-badge--other">Other</span>}
+                      <span className={`dev-badge dev-badge--${dev.class}`}>
+                        {CLASS_LABELS[dev.class] ?? "Other"}
+                      </span>
                     </td>
                     <td className="devices-table__grab">
                       {canToggle ? (

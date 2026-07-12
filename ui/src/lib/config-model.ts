@@ -278,6 +278,7 @@ export function addLayer(
 
 export interface DeviceGrabs {
   grabAllKeyboards: boolean;
+  grabAllMice: boolean;
   grabKeyboards: string[];
   grabMice: string[];
 }
@@ -286,9 +287,43 @@ export interface DeviceGrabs {
 export function getDeviceGrabs(m: ConfigModel): DeviceGrabs {
   const d = m.devices;
   const grabAllKeyboards = (d["grab_all_keyboards"] as boolean | undefined) ?? false;
+  const grabAllMice = (d["grab_all_mice"] as boolean | undefined) ?? false;
   const grabKeyboards = (d["grab_keyboards"] as string[] | undefined) ?? [];
   const grabMice = (d["grab_mice"] as string[] | undefined) ?? [];
-  return { grabAllKeyboards, grabKeyboards, grabMice };
+  return { grabAllKeyboards, grabAllMice, grabKeyboards, grabMice };
+}
+
+// ── Device selectors ──────────────────────────────────────────────────────────
+
+/** Identity fields a selector can match against (subset of DeviceInfo). */
+export interface DeviceIdent {
+  name: string;
+  vendor: number;
+  product: number;
+}
+
+function parseVidPid(s: string): [number, number] | null {
+  const m = /^([0-9a-fA-F]{4}):([0-9a-fA-F]{4})$/.exec(s);
+  if (!m) return null;
+  return [parseInt(m[1], 16), parseInt(m[2], 16)];
+}
+
+/** Mirror of the daemon's DeviceSelector grammar: name | vid:pid | vid:pid/name */
+export function selectorMatches(entry: string, dev: DeviceIdent): boolean {
+  const slash = entry.indexOf("/");
+  if (slash > 0) {
+    const vp = parseVidPid(entry.slice(0, slash));
+    if (vp) {
+      return vp[0] === dev.vendor && vp[1] === dev.product && entry.slice(slash + 1) === dev.name;
+    }
+  }
+  const vp = parseVidPid(entry);
+  if (vp) return vp[0] === dev.vendor && vp[1] === dev.product;
+  return entry === dev.name;
+}
+
+export function listMatchesDevice(list: string[], dev: DeviceIdent): boolean {
+  return list.some((e) => selectorMatches(e, dev));
 }
 
 /**
@@ -306,9 +341,9 @@ export function getDeviceGrabs(m: ConfigModel): DeviceGrabs {
  */
 export function setKeyboardGrab(
   m: ConfigModel,
-  name: string,
+  dev: DeviceIdent & { id: string },
   grabbed: boolean,
-  currentlyGrabbedKeyboards: string[]
+  currentlyGrabbedKeyboardIds: string[]
 ): ConfigModel {
   const d = { ...m.devices };
   const grabAll = (d["grab_all_keyboards"] as boolean | undefined) ?? false;
@@ -316,24 +351,19 @@ export function setKeyboardGrab(
   if (grabAll) {
     if (!grabbed) {
       // Convert grab_all → explicit list, minus this device
-      const explicit = currentlyGrabbedKeyboards.filter((k) => k !== name);
+      const explicit = currentlyGrabbedKeyboardIds.filter((k) => k !== dev.id);
       d["grab_all_keyboards"] = false;
       d["grab_keyboards"] = explicit;
     }
     // grabbed=true when grab_all=true: no-op (all keyboards already grabbed)
   } else {
-    // Explicit list mode
+    // Explicit list mode. Additions write the canonical `vid:pid/name` id;
+    // removals drop any selector form matching the device.
     const current = (d["grab_keyboards"] as string[] | undefined) ?? [];
     if (grabbed) {
-      // Add idempotently
-      if (!current.includes(name)) {
-        d["grab_keyboards"] = [...current, name];
-      } else {
-        d["grab_keyboards"] = [...current];
-      }
+      d["grab_keyboards"] = listMatchesDevice(current, dev) ? [...current] : [...current, dev.id];
     } else {
-      // Remove
-      d["grab_keyboards"] = current.filter((k) => k !== name);
+      d["grab_keyboards"] = current.filter((e) => !selectorMatches(e, dev));
     }
   }
 
@@ -341,24 +371,48 @@ export function setKeyboardGrab(
 }
 
 /**
- * Toggle a mouse's grab state.
- * Adds/removes name from grab_mice (idempotent).
+ * Toggle a mouse's (or touchpad's) grab state. Additions write the canonical
+ * `vid:pid/name` id; removals drop any selector form matching the device.
  */
 export function setMouseGrab(
   m: ConfigModel,
-  name: string,
+  dev: DeviceIdent & { id: string },
   grabbed: boolean
 ): ConfigModel {
   const d = { ...m.devices };
   const current = (d["grab_mice"] as string[] | undefined) ?? [];
 
   if (grabbed) {
-    d["grab_mice"] = current.includes(name) ? [...current] : [...current, name];
+    d["grab_mice"] = listMatchesDevice(current, dev) ? [...current] : [...current, dev.id];
   } else {
-    d["grab_mice"] = current.filter((n) => n !== name);
+    d["grab_mice"] = current.filter((e) => !selectorMatches(e, dev));
   }
 
   return { ...m, devices: d };
+}
+
+/** Set `devices.grab_all_mice` (touchpads are never included by the daemon). */
+export function setGrabAllMice(m: ConfigModel, on: boolean): ConfigModel {
+  return { ...m, devices: { ...m.devices, grab_all_mice: on } };
+}
+
+/**
+ * Replace a profile's match rule. Empty-string values are dropped; an empty
+ * result removes the match table entirely. Unknown profile → unchanged model.
+ */
+export function setProfileMatch(
+  m: ConfigModel,
+  profileName: string,
+  match: Record<string, string> | undefined
+): ConfigModel {
+  const profIdx = m.profiles.findIndex((p) => p.name === profileName);
+  if (profIdx === -1) return m;
+  const cleaned = Object.fromEntries(
+    Object.entries(match ?? {}).filter(([, v]) => v.trim() !== "")
+  );
+  const next = Object.keys(cleaned).length > 0 ? cleaned : undefined;
+  const profiles = m.profiles.map((p, i) => (i === profIdx ? { ...p, match: next } : p));
+  return { ...m, profiles };
 }
 
 // ── Presentation helpers (pure, no side effects) ──────────────────────────────
