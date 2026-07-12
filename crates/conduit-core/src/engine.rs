@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use crate::config::{Action, CompiledConfig, HoldAction};
 use crate::event::{Event, Key, KeyState};
 
@@ -27,6 +27,10 @@ pub struct Engine {
     out: Vec<Event>,            // reused output buffer
     pending: Option<Pending>,
     buffer: Vec<Event>,
+    // Panic chord / suspend state
+    suspended: bool,
+    chord_down: HashSet<Key>,
+    chord_armed: bool,
 }
 
 impl Engine {
@@ -40,6 +44,9 @@ impl Engine {
             out: Vec::with_capacity(16),
             pending: None,
             buffer: Vec::new(),
+            suspended: false,
+            chord_down: HashSet::new(),
+            chord_armed: true,
         }
     }
 
@@ -96,6 +103,42 @@ impl Engine {
     }
 
     fn process(&mut self, ev: Event) {
+        // ── Panic chord tracking (always active, even while suspended) ──────────
+        let chord_keys = self.cfg.settings.panic_chord.clone();
+        if !chord_keys.is_empty() {
+            if chord_keys.contains(&ev.key) {
+                match ev.state {
+                    KeyState::Press => {
+                        self.chord_down.insert(ev.key);
+                    }
+                    KeyState::Release | KeyState::Repeat => {
+                        if ev.state == KeyState::Release {
+                            self.chord_down.remove(&ev.key);
+                            // Re-arm when any chord key is released
+                            self.chord_armed = true;
+                        }
+                    }
+                }
+                // Check if all chord keys are down and chord is armed
+                let all_down = chord_keys.iter().all(|k| self.chord_down.contains(k));
+                if all_down && self.chord_armed {
+                    self.chord_armed = false;
+                    if self.suspended {
+                        self.resume();
+                    } else {
+                        // Suspend: emit flush events into current out buffer (do NOT clear it)
+                        self.do_suspend();
+                    }
+                }
+            }
+        }
+
+        // While suspended: raw passthrough only (chord keys already handled above)
+        if self.suspended {
+            self.out.push(ev);
+            return;
+        }
+
         // Handle pending tap-hold state: buffer events or resolve
         if let Some(pending_phys) = self.pending.as_ref().map(|p| p.phys) {
             if ev.key == pending_phys && ev.state == KeyState::Release {
@@ -174,6 +217,51 @@ impl Engine {
                 None => self.out.push(ev),
             },
         }
+    }
+
+    /// Internal: flush held keys as releases (appends to self.out, does NOT clear it).
+    /// Also resolves any pending tap-hold as a tap, clears held/buffer, resets layers,
+    /// and sets suspended = true.
+    fn do_suspend(&mut self) {
+        // Resolve pending as tap first (like swap_config does)
+        if let Some(p) = self.pending.take() {
+            self.out.push(Event { key: p.tap, state: KeyState::Press, time_us: p.press_time_us });
+            self.out.push(Event { key: p.tap, state: KeyState::Release, time_us: p.press_time_us });
+        }
+        // Emit Release for every held OutKey
+        for (_phys, entry) in &self.held {
+            if let HeldEntry::OutKey(k) = entry {
+                self.out.push(Event { key: *k, state: KeyState::Release, time_us: 0 });
+            }
+        }
+        // Clear all state
+        self.held.clear();
+        self.buffer.clear();
+        self.active_layers.clear();
+        self.active_layers.push(0);
+        self.suspended = true;
+    }
+
+    /// Flush held keys, clear engine state, and enter suspended mode.
+    /// Returns the emitted flush events.
+    /// If already suspended, returns the previous out buffer without clearing
+    /// (the held/state was already flushed on the first call).
+    pub fn suspend(&mut self) -> &[Event] {
+        if !self.suspended {
+            self.out.clear();
+            self.do_suspend();
+        }
+        &self.out
+    }
+
+    /// Exit suspended mode (raw passthrough ends).
+    pub fn resume(&mut self) {
+        self.suspended = false;
+    }
+
+    /// Returns true if the engine is currently suspended.
+    pub fn is_suspended(&self) -> bool {
+        self.suspended
     }
 
     pub fn set_focus(&mut self, f: &crate::config::FocusFields) {
@@ -431,6 +519,29 @@ mod tests {
         e.handle(release("space", 10));
         // base layer still active: 'a' still remaps to 'b'
         assert_eq!(e.handle(press("a", 20)), &[press("b", 20)]);
+    }
+
+    #[test]
+    fn panic_chord_suspends_and_resumes() {
+        let mut e = engine("[profile.default.keys]\na = \"b\"");
+        e.handle(press("leftctrl", 0));
+        e.handle(press("leftalt", 10));
+        e.handle(press("backspace", 20)); // chord complete → suspend
+        assert!(e.is_suspended());
+        e.handle(release("leftctrl", 30)); e.handle(release("leftalt", 31)); e.handle(release("backspace", 32));
+        assert_eq!(e.handle(press("a", 40)), &[press("a", 40)]); // raw passthrough
+        e.handle(release("a", 45));
+        e.handle(press("leftctrl", 50)); e.handle(press("leftalt", 51)); e.handle(press("backspace", 52));
+        assert!(!e.is_suspended()); // chord toggles back
+    }
+
+    #[test]
+    fn suspend_releases_held_outputs() {
+        let mut e = engine("[profile.default.keys]\na = \"b\"");
+        e.handle(press("a", 0)); // b held
+        e.suspend();
+        // flush emitted b-release so nothing sticks
+        assert!(e.suspend().contains(&release("b", 0)));
     }
 
 }
