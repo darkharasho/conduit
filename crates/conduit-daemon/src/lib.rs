@@ -7,6 +7,7 @@
 //! Used by integration tests to drive the real daemon as a library rather than
 //! as a subprocess.
 
+pub mod classify;
 pub mod devices;
 pub mod focus;
 pub mod hotplug;
