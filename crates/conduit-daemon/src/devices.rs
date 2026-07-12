@@ -71,6 +71,46 @@ pub fn discover() -> anyhow::Result<Vec<Discovered>> {
     Ok(results)
 }
 
+/// Scan `/dev/input/event*` with `read_dir` and return the paths of nodes that
+/// fail to open with `PermissionDenied`.  This is used to detect the situation
+/// where `evdev::enumerate()` returned an empty list *because* the user has no
+/// access to any input device — evdev silently skips devices it can't open.
+pub fn eacces_blocked_event_nodes() -> Vec<std::path::PathBuf> {
+    eacces_blocked_event_nodes_in("/dev/input")
+}
+
+/// Testable inner implementation: scans `dir` for files whose names start with
+/// `"event"` and returns those that fail to open with `PermissionDenied`.
+pub fn eacces_blocked_event_nodes_in(dir: &str) -> Vec<std::path::PathBuf> {
+    let mut blocked = Vec::new();
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return blocked;
+    };
+    for entry in rd.flatten() {
+        let path = entry.path();
+        let name = entry.file_name();
+        if !name.to_string_lossy().starts_with("event") {
+            continue;
+        }
+        if let Err(e) = std::fs::File::open(&path) {
+            if e.kind() == std::io::ErrorKind::PermissionDenied {
+                blocked.push(path);
+            }
+        }
+    }
+    blocked.sort();
+    blocked
+}
+
+/// Pure decision function: given the number of discovered devices and the
+/// number of EACCES-blocked event nodes, returns `true` when the daemon
+/// should print the permissions error and exit 2.
+///
+/// This exists to allow unit-testing the logic without touching the filesystem.
+pub fn should_fail_eacces(discovered_count: usize, eacces_count: usize) -> bool {
+    discovered_count == 0 && eacces_count > 0
+}
+
 /// Determine whether a discovered device should be grabbed based on the loaded
 /// `Settings`.
 ///
@@ -182,5 +222,28 @@ mod tests {
             is_mouse: false,
         };
         assert!(!should_grab(&other, &s));
+    }
+
+    // ── EACCES detection — pure decision logic ────────────────────────────────
+
+    #[test]
+    fn eacces_fail_when_no_discovered_and_some_blocked() {
+        // Zero discovered devices + at least one EACCES node → should fail.
+        assert!(should_fail_eacces(0, 1));
+        assert!(should_fail_eacces(0, 5));
+    }
+
+    #[test]
+    fn eacces_no_fail_when_devices_were_discovered() {
+        // Some devices discovered → evdev had access; do not trigger EACCES exit.
+        assert!(!should_fail_eacces(1, 0));
+        assert!(!should_fail_eacces(3, 2));
+        assert!(!should_fail_eacces(1, 5));
+    }
+
+    #[test]
+    fn eacces_no_fail_when_nothing_blocked() {
+        // No blocked nodes (no /dev/input nodes exist, or all are accessible) → ok.
+        assert!(!should_fail_eacces(0, 0));
     }
 }

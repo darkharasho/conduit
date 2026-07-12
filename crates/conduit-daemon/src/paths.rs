@@ -38,48 +38,59 @@ mod tests {
 
     #[test]
     fn config_path_uses_xdg_config_home() {
-        // Safety: single-threaded test context; env manipulation is local to this block.
-        // We use a temp dir to avoid side effects.
         let tmp = std::env::temp_dir().join("conduit-test-config-home");
-        std::env::set_var("XDG_CONFIG_HOME", &tmp);
-        let p = config_path();
-        std::env::remove_var("XDG_CONFIG_HOME");
-        assert_eq!(p, tmp.join("conduit").join("conduit.toml"));
+        // temp_env serializes all env-var mutations through an internal lock,
+        // preventing races when tests run with --test-threads > 1.
+        temp_env::with_var("XDG_CONFIG_HOME", Some(&tmp), || {
+            let p = config_path();
+            assert_eq!(p, tmp.join("conduit").join("conduit.toml"));
+        });
     }
 
     #[test]
     fn config_path_falls_back_to_home_config() {
-        std::env::remove_var("XDG_CONFIG_HOME");
-        // Set HOME to a known value
         let fake_home = std::env::temp_dir().join("conduit-test-home");
-        let orig_home = std::env::var_os("HOME");
-        std::env::set_var("HOME", &fake_home);
-        let p = config_path();
-        // Restore
-        if let Some(h) = orig_home {
-            std::env::set_var("HOME", h);
-        } else {
-            std::env::remove_var("HOME");
-        }
-        assert_eq!(p, fake_home.join(".config").join("conduit").join("conduit.toml"));
+        // Remove XDG_CONFIG_HOME and override HOME simultaneously so neither
+        // can bleed into another concurrently-running paths test.
+        temp_env::with_vars(
+            [
+                ("XDG_CONFIG_HOME", None::<&std::ffi::OsStr>),
+                ("HOME", Some(fake_home.as_os_str())),
+            ],
+            || {
+                let p = config_path();
+                assert_eq!(
+                    p,
+                    fake_home
+                        .join(".config")
+                        .join("conduit")
+                        .join("conduit.toml")
+                );
+            },
+        );
     }
 
     #[test]
     fn socket_path_honors_conduit_socket_override() {
         let override_path = "/tmp/my-conduit.sock";
-        std::env::set_var("CONDUIT_SOCKET", override_path);
-        let p = socket_path();
-        std::env::remove_var("CONDUIT_SOCKET");
-        assert_eq!(p, std::path::PathBuf::from(override_path));
+        temp_env::with_var("CONDUIT_SOCKET", Some(override_path), || {
+            let p = socket_path();
+            assert_eq!(p, std::path::PathBuf::from(override_path));
+        });
     }
 
     #[test]
     fn socket_path_uses_xdg_runtime_dir() {
-        std::env::remove_var("CONDUIT_SOCKET");
         let runtime = std::env::temp_dir().join("conduit-test-runtime");
-        std::env::set_var("XDG_RUNTIME_DIR", &runtime);
-        let p = socket_path();
-        std::env::remove_var("XDG_RUNTIME_DIR");
-        assert_eq!(p, runtime.join("conduit.sock"));
+        temp_env::with_vars(
+            [
+                ("CONDUIT_SOCKET", None::<&std::ffi::OsStr>),
+                ("XDG_RUNTIME_DIR", Some(runtime.as_os_str())),
+            ],
+            || {
+                let p = socket_path();
+                assert_eq!(p, runtime.join("conduit.sock"));
+            },
+        );
     }
 }

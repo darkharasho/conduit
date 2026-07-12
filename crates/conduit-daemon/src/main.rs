@@ -2,6 +2,7 @@ mod devices;
 mod paths;
 
 use std::fs;
+use std::io::Write as _;
 use std::os::unix::fs::OpenOptionsExt;
 use anyhow::Context;
 use conduit_core::config;
@@ -41,8 +42,23 @@ fn main() -> anyhow::Result<()> {
             fs::create_dir_all(parent)
                 .with_context(|| format!("creating config directory {}", parent.display()))?;
         }
-        fs::write(&config_path, DEFAULT_CONFIG)
-            .with_context(|| format!("writing default config to {}", config_path.display()))?;
+        // Write atomically: write to a .tmp file in the same directory, then
+        // rename into place so a crash mid-write never leaves a partial file.
+        let tmp_path = config_path.with_extension("toml.tmp");
+        {
+            let mut f = fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(&tmp_path)
+                .with_context(|| format!("opening temp file {}", tmp_path.display()))?;
+            f.write_all(DEFAULT_CONFIG.as_bytes())
+                .with_context(|| format!("writing to temp file {}", tmp_path.display()))?;
+            f.flush()
+                .with_context(|| format!("flushing temp file {}", tmp_path.display()))?;
+        }
+        fs::rename(&tmp_path, &config_path)
+            .with_context(|| format!("renaming {} to {}", tmp_path.display(), config_path.display()))?;
         eprintln!(
             "conduit: created default config at {}",
             config_path.display()
@@ -57,6 +73,36 @@ fn main() -> anyhow::Result<()> {
     // ── Discover devices ──────────────────────────────────────────────────────
     let discovered = devices::discover()
         .context("enumerating input devices")?;
+
+    // ── Supplemental EACCES check ─────────────────────────────────────────────
+    // evdev::enumerate() silently skips devices it cannot open, so if the user
+    // has no access to /dev/input the discovery list is empty with no error.
+    // Detect this: when discovery found nothing, probe /dev/input/event* directly
+    // and check for EACCES so we can emit an actionable message.
+    {
+        let eacces_blocked = devices::eacces_blocked_event_nodes();
+        if devices::should_fail_eacces(discovered.len(), eacces_blocked.len()) {
+            eprintln!("conduit: no input devices discovered.");
+            eprintln!(
+                "conduit: {} /dev/input/event* node(s) are blocked by permission errors:",
+                eacces_blocked.len()
+            );
+            for p in &eacces_blocked {
+                eprintln!("  {}", p.display());
+            }
+            eprintln!();
+            eprintln!("conduit: ACTION REQUIRED — fix input device permissions:");
+            eprintln!("  1. Add your user to the 'input' group:");
+            eprintln!("       sudo usermod -aG input $USER");
+            eprintln!("     then log out and back in (or run: newgrp input).");
+            eprintln!("  2. A udev rule will be installed by the conduit package (Task 15).");
+            eprintln!("     For now you can create /etc/udev/rules.d/99-conduit.rules:");
+            eprintln!("       KERNEL==\"uinput\", GROUP=\"input\", MODE=\"0660\"");
+            eprintln!("       SUBSYSTEM==\"input\", GROUP=\"input\", MODE=\"0660\"");
+            eprintln!("     then run: sudo udevadm control --reload-rules && sudo udevadm trigger");
+            std::process::exit(2);
+        }
+    }
 
     // ── Permission check: try opening any device we would grab ────────────────
     let mut perm_error = false;
