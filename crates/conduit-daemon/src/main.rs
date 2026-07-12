@@ -1,4 +1,5 @@
 mod devices;
+mod output;
 mod paths;
 
 use std::fs;
