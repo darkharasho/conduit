@@ -1,4 +1,5 @@
 mod devices;
+mod focus;
 mod hotplug;
 mod output;
 mod paths;
@@ -218,6 +219,18 @@ fn main() -> anyhow::Result<()> {
     // when no devices are currently grabbed.  Spawn it BEFORE dropping our own
     // tx so the run loop is never left with zero senders.
     let _hotplug_thread = hotplug::spawn(tx.clone());
+
+    // ── Focus watcher thread ───────────────────────────────────────────────────
+    // Autodetect the display environment (Hyprland → X11 → None) and spawn a
+    // background thread that streams Msg::Focus events to the run loop.
+    // If no backend is available the daemon runs with the default profile only.
+    let _focus_thread = focus::detect().map(|backend| {
+        let focus_tx = tx.clone();
+        std::thread::Builder::new()
+            .name("conduit-focus".into())
+            .spawn(move || backend.run(focus_tx))
+            .expect("spawning focus thread")
+    });
 
     // Clone a sender for the run loop (used to give newly-spawned reader
     // threads a way to send DeviceRemoved back to the engine).
