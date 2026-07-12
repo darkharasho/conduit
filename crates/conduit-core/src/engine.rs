@@ -1,10 +1,23 @@
 use std::collections::HashMap;
-use crate::config::{Action, CompiledConfig};
+use crate::config::{Action, CompiledConfig, HoldAction};
 use crate::event::{Event, Key, KeyState};
 
 #[derive(Clone, Copy, Debug)]
 #[allow(dead_code)]
 enum HeldEntry { OutKey(Key), LayerHeld(u8), Swallowed }
+
+struct Pending {
+    phys: Key,
+    tap: Key,
+    hold: HoldAction,
+    press_time_us: u64,
+    deadline_us: u64,
+}
+
+enum Resolution {
+    Tap { release_time_us: u64 },
+    Hold,
+}
 
 pub struct Engine {
     cfg: CompiledConfig,
@@ -12,12 +25,22 @@ pub struct Engine {
     active_layers: Vec<u8>,     // stack; index 0 is always base layer 0 (Task 5)
     held: HashMap<Key, HeldEntry>,
     out: Vec<Event>,            // reused output buffer
+    pending: Option<Pending>,
+    buffer: Vec<Event>,
 }
 
 impl Engine {
     pub fn new(cfg: CompiledConfig) -> Self {
         let profile_idx = cfg.default_idx;
-        Engine { cfg, profile_idx, active_layers: vec![0], held: HashMap::new(), out: Vec::with_capacity(16) }
+        Engine {
+            cfg,
+            profile_idx,
+            active_layers: vec![0],
+            held: HashMap::new(),
+            out: Vec::with_capacity(16),
+            pending: None,
+            buffer: Vec::new(),
+        }
     }
 
     pub fn handle(&mut self, ev: Event) -> &[Event] {
@@ -26,8 +49,17 @@ impl Engine {
         &self.out
     }
 
-    pub fn tick(&mut self, _now_us: u64) -> &[Event] { self.out.clear(); &self.out } // Task 4
-    pub fn next_deadline_us(&self) -> Option<u64> { None }                            // Task 4
+    pub fn tick(&mut self, now_us: u64) -> &[Event] {
+        self.out.clear();
+        if self.pending.as_ref().map_or(false, |p| p.deadline_us <= now_us) {
+            self.resolve(Resolution::Hold);
+        }
+        &self.out
+    }
+
+    pub fn next_deadline_us(&self) -> Option<u64> {
+        self.pending.as_ref().map(|p| p.deadline_us)
+    }
 
     fn lookup(&self, key: Key) -> Action {
         let profile = &self.cfg.profiles[self.profile_idx];
@@ -37,7 +69,56 @@ impl Engine {
         Action::Passthrough
     }
 
+    fn resolve(&mut self, how: Resolution) {
+        let p = self.pending.take().expect("resolve without pending");
+        match how {
+            Resolution::Tap { release_time_us } => {
+                self.out.push(Event { key: p.tap, state: KeyState::Press, time_us: p.press_time_us });
+                self.out.push(Event { key: p.tap, state: KeyState::Release, time_us: release_time_us });
+            }
+            Resolution::Hold => match p.hold {
+                HoldAction::Key(k) => {
+                    self.held.insert(p.phys, HeldEntry::OutKey(k));
+                    self.out.push(Event { key: k, state: KeyState::Press, time_us: p.press_time_us });
+                }
+                HoldAction::Layer(l) => {
+                    self.active_layers.push(l);
+                    self.held.insert(p.phys, HeldEntry::LayerHeld(l));
+                }
+            },
+        }
+        // Drain buffered events through normal processing.
+        // A buffered TapHold press will re-establish pending; subsequent events
+        // re-buffer behind it via the pending check at the top of process().
+        for ev in std::mem::take(&mut self.buffer) {
+            self.process(ev);
+        }
+    }
+
     fn process(&mut self, ev: Event) {
+        // Handle pending tap-hold state: buffer events or resolve
+        if let Some(pending_phys) = self.pending.as_ref().map(|p| p.phys) {
+            if ev.key == pending_phys && ev.state == KeyState::Release {
+                // pending key released before deadline → tap
+                self.resolve(Resolution::Tap { release_time_us: ev.time_us });
+                return;
+            }
+            if ev.key == pending_phys {
+                // swallow repeats of the pending key
+                return;
+            }
+            self.buffer.push(ev);
+            // permissive hold: same key pressed AND released inside the buffer?
+            let hold_now = self.buffer.iter().any(|b| {
+                b.state == KeyState::Release
+                    && self.buffer.iter().any(|b2| b2.key == b.key && b2.state == KeyState::Press)
+            });
+            if hold_now {
+                self.resolve(Resolution::Hold);
+            }
+            return;
+        }
+
         match ev.state {
             KeyState::Press => match self.lookup(ev.key) {
                 Action::Key(out) => {
@@ -49,12 +130,26 @@ impl Engine {
                     self.out.push(ev);
                 }
                 Action::Disabled => { self.held.insert(ev.key, HeldEntry::Swallowed); }
-                _ => { /* TapHold: Task 4. Layer*: Task 5. */ }
+                Action::TapHold { tap, hold, timeout_us } => {
+                    self.pending = Some(Pending {
+                        phys: ev.key,
+                        tap,
+                        hold,
+                        press_time_us: ev.time_us,
+                        deadline_us: ev.time_us + timeout_us,
+                    });
+                }
+                _ => { /* Layer*: Task 5. */ }
             },
             KeyState::Release => match self.held.remove(&ev.key) {
                 Some(HeldEntry::OutKey(out)) => self.out.push(Event { key: out, ..ev }),
                 Some(HeldEntry::Swallowed) => {}
-                Some(HeldEntry::LayerHeld(_)) => {} // Task 5
+                Some(HeldEntry::LayerHeld(l)) => {
+                    // Pop the layer from active_layers (last occurrence)
+                    if let Some(pos) = self.active_layers.iter().rposition(|&x| x == l) {
+                        self.active_layers.remove(pos);
+                    }
+                }
                 None => self.out.push(ev),
             },
             KeyState::Repeat => match self.held.get(&ev.key) {
@@ -114,5 +209,75 @@ mod tests {
         e.handle(press("a", 0));
         assert_eq!(e.handle(release("a", 10)), &[release("b", 10)]);
         assert!(e.held_is_empty());
+    }
+
+    const TH: &str = "[profile.default.keys]\ncapslock = { tap = \"esc\", hold = \"leftctrl\" }";
+
+    #[test]
+    fn tap_when_released_before_timeout() {
+        let mut e = engine(TH);
+        assert!(e.handle(press("capslock", 0)).is_empty());
+        assert_eq!(e.next_deadline_us(), Some(200_000));
+        assert_eq!(e.handle(release("capslock", 150_000)),
+                   &[press("esc", 0), release("esc", 150_000)]);
+        assert_eq!(e.next_deadline_us(), None);
+    }
+
+    #[test]
+    fn hold_when_timeout_fires() {
+        let mut e = engine(TH);
+        e.handle(press("capslock", 0));
+        assert_eq!(e.tick(200_000), &[press("leftctrl", 0)]);
+        assert_eq!(e.handle(release("capslock", 300_000)), &[release("leftctrl", 300_000)]);
+    }
+
+    #[test]
+    fn permissive_hold_on_nested_tap() {
+        // caps down, a down, a up  => hold resolves immediately: ctrl+a
+        let mut e = engine(TH);
+        e.handle(press("capslock", 0));
+        assert!(e.handle(press("a", 50_000)).is_empty()); // buffered
+        assert_eq!(e.handle(release("a", 90_000)),
+                   &[press("leftctrl", 0), press("a", 50_000), release("a", 90_000)]);
+    }
+
+    #[test]
+    fn buffered_events_replay_on_tap() {
+        // caps down, a down, caps up before timeout => esc tap, then a press replays
+        let mut e = engine(TH);
+        e.handle(press("capslock", 0));
+        e.handle(press("a", 50_000));
+        assert_eq!(e.handle(release("capslock", 100_000)),
+                   &[press("esc", 0), release("esc", 100_000), press("a", 50_000)]);
+        // 'a' is now properly held; its release pairs normally
+        assert_eq!(e.handle(release("a", 200_000)), &[release("a", 200_000)]);
+    }
+
+    #[test]
+    fn nested_tap_holds_resolve_in_order() {
+        // Two home-row mods: d=hold-shift, f=hold-ctrl. d down, f down, j down, j up
+        // => d resolves hold (f pressed+? no—permissive needs press AND release of same key).
+        // Sequence: d↓ f↓ j↓ j↑ : j↓+j↑ in d's buffer → d=hold(shift); replay f↓ (new pending),
+        // j↓+j↑ re-buffer → f=hold(ctrl); replay j↓ j↑.
+        let toml = "[profile.default.keys]\nd = { tap = \"d\", hold = \"leftshift\" }\nf = { tap = \"f\", hold = \"leftctrl\" }";
+        let mut e = engine(toml);
+        e.handle(press("d", 0));
+        e.handle(press("f", 10_000));
+        e.handle(press("j", 20_000));
+        assert_eq!(e.handle(release("j", 30_000)),
+                   &[press("leftshift", 0), press("leftctrl", 10_000),
+                     press("j", 20_000), release("j", 30_000)]);
+    }
+
+    #[test]
+    fn hold_to_layer() {
+        let toml = "[profile.default.keys]\nf = { tap = \"f\", hold = \"layer:nav\" }\n[profile.default.layers.nav]\nh = \"left\"";
+        let mut e = engine(toml);
+        e.handle(press("f", 0));
+        e.tick(200_000); // resolve hold → nav layer active (emits nothing)
+        assert_eq!(e.handle(press("h", 250_000)), &[press("left", 250_000)]);
+        e.handle(release("h", 260_000));
+        e.handle(release("f", 300_000)); // pops layer
+        assert_eq!(e.handle(press("h", 350_000)), &[press("h", 350_000)]);
     }
 }
