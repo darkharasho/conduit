@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { getConfig, setConfig, onConnection, listDevices } from "../lib/client";
+import { getConfig, setConfig, onConnection, onKeyEvent, listDevices } from "../lib/client";
 import type { DeviceInfo } from "../lib/client";
 import {
   parseConfigToml,
@@ -47,6 +47,8 @@ export function MappingsScreen({
   const [activeDevPath, setActiveDevPath] = useState<string | null>(null);
   // "This device only" scope for saves (resets on key/tab change)
   const [deviceScope, setDeviceScope] = useState(false);
+  // Detect flow: waiting for a physical press on the active device
+  const [detecting, setDetecting] = useState(false);
 
   // Hold onProfilesChange in a ref so loadConfig's deps stay stable
   const onProfilesChangeRef = useRef(onProfilesChange);
@@ -106,6 +108,29 @@ export function MappingsScreen({
   }, [editingKey, activeDevPath]);
 
   const activeDev = devices.find((d) => d.path === activeDevPath) ?? null;
+
+  // Detect: select the first key pressed on the active device. HID
+  // descriptors over-declare wildly (a 9-button mouse can declare 300
+  // codes), so pressing the real button is the only reliable identifier.
+  const activeDevName = activeDev?.name ?? null;
+  useEffect(() => {
+    if (!detecting || !activeDevName) return;
+    let done = false;
+    const unlisten = onKeyEvent((ev) => {
+      if (done) return;
+      if (ev.phase === "pre" && ev.state === "press" && ev.device === activeDevName) {
+        done = true;
+        setEditingKey(ev.key_name);
+        setDetecting(false);
+      }
+    });
+    const timeout = setTimeout(() => setDetecting(false), 10_000);
+    return () => {
+      done = true;
+      clearTimeout(timeout);
+      unlisten.then((f) => f());
+    };
+  }, [detecting, activeDevName]);
 
   // Offline sections: device selectors in this profile with no grabbed match
   const profileModel = model?.profiles.find((p) => p.name === railActiveProfile);
@@ -253,6 +278,15 @@ export function MappingsScreen({
                     <span className="devtab__cls">OFFLINE</span>
                   </span>
                 ))}
+                {activeDev && (
+                  <button
+                    className={`btn devtabs__detect${detecting ? " devtabs__detect--active" : ""}`}
+                    onClick={() => setDetecting((v) => !v)}
+                    title="Press a physical button/key on this device to jump to its mapping"
+                  >
+                    {detecting ? `press a button on ${activeDev.name}…` : "Detect button"}
+                  </button>
+                )}
               </div>
             )}
 

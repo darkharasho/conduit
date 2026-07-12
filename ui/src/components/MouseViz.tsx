@@ -54,6 +54,10 @@ export function MouseViz({
   const extraCodes = declared
     ? [...declared].filter((c) => !DIAGRAM_CODES.has(c)).sort((a, b) => a - b)
     : [];
+  // Real mouse controls live in the BTN ranges; KEY_* codes on a mouse node
+  // are almost always firmware over-declaration.
+  const isButtonCode = (c: number) =>
+    (c >= 0x100 && c <= 0x15f) || (c >= 0x2c0 && c <= 0x2e7);
 
   const control = (key: string, label: string, extraClass = "") => {
     const eff = getEffectiveAction(model, activeProfile, dev, activeLayer, key);
@@ -125,6 +129,7 @@ export function MouseViz({
         onSelectKey={onSelectKey}
         dev={dev}
         codes={extraCodes}
+        primary={isButtonCode}
       />
     </div>
   );

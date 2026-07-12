@@ -104,3 +104,65 @@ describe("MappingsScreen — C1 render-loop regression", () => {
     expect(callsAfterRerender).toBe(callsAfterMount);
   });
 });
+
+describe("MappingsScreen — Detect button", () => {
+  it("selects the first key pressed on the active device", async () => {
+    const g502 = {
+      path: "/dev/input/event11",
+      name: "Logitech G502 X PLUS",
+      vendor: 0x046d,
+      product: 0x4099,
+      is_keyboard: false,
+      is_mouse: true,
+      grabbed: true,
+      id: "046d:4099/Logitech G502 X PLUS",
+      class: "mouse",
+      phys: "usb-1",
+      keys: [0x110, 0x111, 0x112, 0x120],
+      wheel: true,
+      hwheel: true,
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockInvoke.mockImplementation((async (cmd: string) =>
+      cmd === "list_devices" ? [g502] : MINIMAL_TOML) as any);
+
+    // Capture per-event listeners registered through the Tauri layer.
+    const listeners = new Map<string, (e: { payload: unknown }) => void>();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockListen.mockImplementation((async (event: string, cb: (e: { payload: unknown }) => void) => {
+      listeners.set(event, cb);
+      return vi.fn();
+    }) as any);
+
+    const { findByText, container } = render(
+      <MappingsScreen railActiveProfile="default" onProfilesChange={() => {}} />
+    );
+
+    const detectBtn = await findByText("Detect button");
+    await act(async () => {
+      detectBtn.click();
+    });
+
+    // Fire a press from the device through the event subscription.
+    const eventCb = listeners.get("conduit://event");
+    expect(eventCb).toBeDefined();
+    await act(async () => {
+      eventCb!({
+        payload: {
+          phase: "pre",
+          key_name: "key:288",
+          code: 288,
+          state: "press",
+          time_us: 1,
+          device: "Logitech G502 X PLUS",
+        },
+      });
+    });
+
+    // The detected key chip is selected and the detect prompt is gone.
+    const chip = container.querySelector('[data-key="key:288"]');
+    expect(chip?.className).toContain("mousekey--sel");
+    expect(container.textContent).toContain("Detect button");
+    expect(container.textContent).not.toContain("press a button on");
+  });
+});

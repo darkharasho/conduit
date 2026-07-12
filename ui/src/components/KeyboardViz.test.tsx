@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { render } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { KeyboardViz } from "./KeyboardViz";
 import { parseConfigToml } from "../lib/config-model";
 
@@ -29,10 +29,13 @@ describe("KeyboardViz capability filtering", () => {
     expect(capA.className).not.toContain("keycap--absent");
     const capQ = container.querySelector('button[title="q"]')!;
     expect(capQ.className).toContain("keycap--absent");
-    // extras strip: named + key:N chips, both mappable
+    // extras strip: named codes are primary; bare key:N codes are hidden
+    // behind the "declared" expander (firmware over-declaration).
     expect(container.querySelector('[data-key="volumeup"]')).not.toBeNull();
+    expect(container.textContent).toContain("Also on this device (1)");
+    expect(container.querySelector('[data-key="key:704"]')).toBeNull();
+    fireEvent.click(screen.getByText(/1 more declared codes/));
     expect(container.querySelector('[data-key="key:704"]')).not.toBeNull();
-    expect(container.textContent).toContain("Also on this device (2)");
   });
 
   it("no capability data → nothing dimmed, no extras strip", () => {

@@ -1076,6 +1076,22 @@ button {
 
 .extra-keys__more {
   font-size: 10px;
+  color: var(--text-dim);
+}
+
+.extra-keys__declared {
+  margin-top: 8px;
+}
+
+.devtabs__detect {
+  margin-left: auto;
+  align-self: center;
+  font-size: 11px;
+}
+
+.devtabs__detect--active {
+  color: var(--amber);
+  border-color: var(--amber-border);
 }
 
 .keycap--devspec::after {

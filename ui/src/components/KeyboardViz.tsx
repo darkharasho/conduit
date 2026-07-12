@@ -1,6 +1,6 @@
 import type { ConfigModel, ActionModel, DeviceIdent } from "../lib/config-model";
 import { getEffectiveAction } from "../lib/config-model";
-import { ANSI_LAYOUT, codeForKeyName } from "../lib/keyboard-layout";
+import { ANSI_LAYOUT, codeForKeyName, keyNameForCode } from "../lib/keyboard-layout";
 import { ExtraKeys } from "./ExtraKeys";
 
 interface Props {
@@ -118,6 +118,9 @@ export function KeyboardViz({
         onSelectKey={onSelectKey}
         dev={dev}
         codes={extraCodes}
+        // Named codes (media keys etc.) are plausibly real; bare key:N codes
+        // on a keyboard node are usually descriptor filler.
+        primary={(c) => !keyNameForCode(c).startsWith("key:")}
       />
     </div>
   );
