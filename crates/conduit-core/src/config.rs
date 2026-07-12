@@ -65,6 +65,7 @@ pub struct Settings {
     pub tap_hold_timeout_us: u64,
     pub panic_chord: Vec<Key>,
     pub grab_all_keyboards: bool,
+    pub grab_all_mice: bool,
     pub grab_keyboards: Vec<String>,
     pub grab_mice: Vec<String>,
 }
@@ -123,6 +124,8 @@ struct RawSettings {
 struct RawDevices {
     #[serde(default)]
     grab_all_keyboards: bool,
+    #[serde(default)]
+    grab_all_mice: bool,
     #[serde(default)]
     grab_keyboards: Vec<String>,
     #[serde(default)]
@@ -200,6 +203,7 @@ pub fn compile(toml_str: &str) -> Result<CompiledConfig, ConfigError> {
         tap_hold_timeout_us,
         panic_chord: panic_chord.clone(),
         grab_all_keyboards: raw.devices.grab_all_keyboards,
+        grab_all_mice: raw.devices.grab_all_mice,
         grab_keyboards: raw.devices.grab_keyboards,
         grab_mice: raw.devices.grab_mice,
     };
@@ -678,5 +682,13 @@ mod tests {
         let c = compile("[profile.default.keys]\na = \"esc\"").unwrap();
         assert_eq!(c.profiles[c.default_idx].name, "default");
         assert!(c.profiles[c.default_idx].matcher.is_none());
+    }
+
+    #[test]
+    fn grab_all_mice_parses_and_defaults_false() {
+        let s = compile("[devices]\ngrab_all_mice = true").unwrap().settings;
+        assert!(s.grab_all_mice);
+        let s = compile("[profile.default.keys]\na = \"b\"").unwrap().settings;
+        assert!(!s.grab_all_mice);
     }
 }
