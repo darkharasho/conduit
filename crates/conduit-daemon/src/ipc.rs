@@ -56,8 +56,8 @@ pub fn spawn(
 
 /// Like `spawn` but binds to an explicit `sock_path` instead of reading from
 /// the environment.  Used by integration tests to avoid concurrent env-var
-/// races.
-fn spawn_at(
+/// races, and by the library `start()` function to allow an overridden socket path.
+pub fn spawn_at(
     sock_path: PathBuf,
     tx: Sender<Msg>,
     config_path: PathBuf,
@@ -475,6 +475,7 @@ a = "d"
                         tx,
                         HashMap::new(),
                         settings,
+                        Vec::new(),
                     )
                 })
                 .expect("spawn runloop");

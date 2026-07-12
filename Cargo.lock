@@ -89,6 +89,7 @@ dependencies = [
  "conduit-proto",
  "crossbeam-channel",
  "evdev",
+ "libc",
  "nix 0.29.0",
  "regex",
  "serde_json",

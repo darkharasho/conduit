@@ -1,20 +1,19 @@
-mod devices;
-mod focus;
-mod hotplug;
-mod ipc;
-mod output;
-mod paths;
-mod runloop;
-mod watch;
+//! conduit-daemon binary entry point.
+//!
+//! Thin wrapper: handles `--check`, permission checks, device table display,
+//! then delegates to `conduit_daemon::start()` for the actual daemon threads.
 
-use std::collections::HashMap;
 use std::fs;
 use std::io::Write as _;
 use std::os::unix::fs::OpenOptionsExt;
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+
 use anyhow::Context;
-use conduit_core::config;
+
+// Re-export the library crate's modules under `mod` aliases so that the
+// binary can use them without a separate crate dependency path.
+use conduit_daemon::devices;
+use conduit_daemon::paths;
+use conduit_daemon::runloop;
 
 /// Default config file contents (all active settings as comments).
 const DEFAULT_CONFIG: &str = r#"# conduit.toml — Conduit keyboard remapper configuration
@@ -85,7 +84,7 @@ fn main() -> anyhow::Result<()> {
         DEFAULT_CONFIG.to_string()
     };
 
-    let compiled = config::compile(&toml_str)
+    let compiled = conduit_core::config::compile(&toml_str)
         .with_context(|| format!("parsing config at {}", config_path.display()))?;
     let settings = compiled.settings.clone();
 
@@ -94,10 +93,6 @@ fn main() -> anyhow::Result<()> {
         .context("enumerating input devices")?;
 
     // ── Supplemental EACCES check ─────────────────────────────────────────────
-    // evdev::enumerate() silently skips devices it cannot open, so if the user
-    // has no access to /dev/input the discovery list is empty with no error.
-    // Detect this: when discovery found nothing, probe /dev/input/event* directly
-    // and check for EACCES so we can emit an actionable message.
     {
         let eacces_blocked = devices::eacces_blocked_event_nodes();
         if devices::should_fail_eacces(discovered.len(), eacces_blocked.len()) {
@@ -198,86 +193,19 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    // ── Create virtual output BEFORE grabbing (spec safety requirement) ──────
-    // If uinput setup fails we must not be holding any grabs, or the user
-    // would lose their keyboard with no way to type.
-    let out = Arc::new(Mutex::new(
-        output::VirtualOutput::new().context("creating virtual output devices")?,
-    ));
+    // ── Start the daemon (all features enabled) ───────────────────────────────
+    let handle = conduit_daemon::start(conduit_daemon::DaemonConfig {
+        config_path,
+        socket_path: None, // use default from paths::socket_path()
+        enable_focus: true,
+        enable_hotplug: true,
+        enable_watch: true,
+        no_grab: false,
+        extra_grabbed_devices: Vec::new(),
+    })?;
 
-    // ── Grab matching devices and spawn reader threads ────────────────────────
-    let (tx, rx) = crossbeam_channel::unbounded::<runloop::Msg>();
-    let mut readers: HashMap<PathBuf, devices::GrabHandle> = HashMap::new();
-    for d in &discovered {
-        if devices::should_grab(d, &settings) {
-            let handle =
-                devices::spawn_reader(d.path.clone(), d.is_mouse, tx.clone(), Arc::clone(&out));
-            readers.insert(d.path.clone(), handle);
-        }
-    }
-    if readers.is_empty() {
-        eprintln!("conduit: no devices matched the grab rules; waiting for hotplug");
-    }
-
-    // ── Hotplug monitor thread ─────────────────────────────────────────────────
-    // The hotplug thread holds a tx clone which keeps the run loop alive even
-    // when no devices are currently grabbed.  Spawn it BEFORE dropping our own
-    // tx so the run loop is never left with zero senders.
-    let _hotplug_thread = hotplug::spawn(tx.clone());
-
-    // ── Focus watcher thread ───────────────────────────────────────────────────
-    // Autodetect the display environment (Hyprland → X11 → None) and spawn a
-    // background thread that streams Msg::Focus events to the run loop.
-    // If no backend is available the daemon runs with the default profile only.
-    let _focus_thread = focus::detect().map(|backend| {
-        let focus_tx = tx.clone();
-        std::thread::Builder::new()
-            .name("conduit-focus".into())
-            .spawn(move || backend.run(focus_tx))
-            .expect("spawning focus thread")
-    });
-
-    // Clone a sender for the run loop (used to give newly-spawned reader
-    // threads a way to send DeviceRemoved back to the engine).
-    let run_tx = tx.clone();
-
-    // ── Shared reload gate (IPC ↔ watch deduplication) ────────────────────────
-    // Both the IPC set_config handler and the watch thread share this gate so
-    // that a set_config write does not cause a redundant second Msg::Reload.
-    // Seed it with the content that was already compiled at startup so the
-    // watcher does not immediately re-fire on the initial mtime.
-    let gate = {
-        let mut g = watch::ReloadGate::new();
-        g.record(&toml_str);
-        std::sync::Arc::new(std::sync::Mutex::new(g))
-    };
-
-    // ── IPC server thread ──────────────────────────────────────────────────────
-    // Spawn before dropping our own tx so the run loop is never left with zero
-    // senders.  The join handle is kept alive for the process lifetime.
-    let _ipc_thread = ipc::spawn(tx.clone(), config_path.clone(), std::sync::Arc::clone(&gate))
-        .context("spawning IPC server")?;
-
-    // ── Config file watcher thread ─────────────────────────────────────────────
-    // Polls the config file mtime every 500 ms; on change compiles and sends
-    // Msg::Reload.  Shares `gate` with the IPC thread to avoid double-reloads
-    // from set_config writes.
-    let _watch_thread = watch::spawn(config_path.clone(), tx.clone(), std::sync::Arc::clone(&gate));
-
-    // Drop our (main-thread) sender now that the hotplug, focus, and IPC
-    // threads all hold their own clones.
-    drop(tx);
-
-    // ── Engine thread ──────────────────────────────────────────────────────────
-    let engine = conduit_core::engine::Engine::new(compiled);
-    let run_out = Arc::clone(&out);
-    let run_thread = std::thread::spawn(move || {
-        runloop::run(engine, Some(run_out), rx, run_tx, readers, settings)
-    });
-
-    run_thread
-        .join()
-        .map_err(|_| anyhow::anyhow!("run loop thread panicked"))?;
+    // Wait for the run loop to exit (blocks until daemon shuts down).
+    handle.shutdown();
 
     Ok(())
 }
@@ -285,18 +213,6 @@ fn main() -> anyhow::Result<()> {
 // ── --check mode ──────────────────────────────────────────────────────────────
 
 /// Print JSON startup diagnostics and exit 0.
-///
-/// Output: `{"uinput": bool, "input_group": bool, "config_ok": bool}`
-///
-/// - `uinput`: whether `/dev/uinput` can be opened for write (O_NONBLOCK).
-/// - `input_group`: whether the current process is a member of the `input`
-///   group (by GID lookup; the group must exist).
-/// - `config_ok`: whether the current config file parses and compiles without
-///   error. True also if the config file does not yet exist (the default config
-///   is always valid).
-///
-/// Always exits 0 so the UI can consume the JSON regardless of permission
-/// state.  A non-zero exit would prevent the UI from receiving any output.
 fn run_check() -> anyhow::Result<()> {
     let uinput_ok = fs::OpenOptions::new()
         .write(true)
@@ -309,15 +225,13 @@ fn run_check() -> anyhow::Result<()> {
     let config_path = paths::config_path();
     let config_ok = if config_path.exists() {
         match fs::read_to_string(&config_path) {
-            Ok(toml_str) => config::compile(&toml_str).is_ok(),
+            Ok(toml_str) => conduit_core::config::compile(&toml_str).is_ok(),
             Err(_) => false,
         }
     } else {
-        // No config file yet; the default will be used — always valid.
         true
     };
 
-    // Print as a single JSON line with no trailing newline issues.
     println!(
         "{{\"uinput\":{},\"input_group\":{},\"config_ok\":{}}}",
         uinput_ok, input_group_ok, config_ok
@@ -328,13 +242,11 @@ fn run_check() -> anyhow::Result<()> {
 
 /// Returns `true` if the calling process belongs to the `input` group.
 fn check_input_group() -> bool {
-    // Look up the numeric GID of the "input" group.
     let input_gid = match nix::unistd::Group::from_name("input") {
         Ok(Some(g)) => g.gid,
-        _ => return false, // group doesn't exist on this system
+        _ => return false,
     };
 
-    // Check the supplementary group list.
     match nix::unistd::getgroups() {
         Ok(groups) => groups.contains(&input_gid),
         Err(_) => false,

@@ -1,3 +1,4 @@
+use std::os::fd::AsRawFd;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -179,8 +180,8 @@ impl Drop for GrabHandle {
 
 /// Spawn a reader thread for one device to grab.
 ///
-/// The thread opens the device at `path`, grabs it, then loops
-/// `fetch_events()`:
+/// The thread opens the device at `path`, optionally grabs it (see `do_grab`),
+/// then loops `fetch_events()`:
 /// - EV_KEY events become core `Event`s (value 1 = Press, 0 = Release,
 ///   2 = Repeat), stamped with `now_us()` at read time, sent as `Msg::Input`.
 /// - For mice (`is_mouse`): EV_REL and EV_MSC events are forwarded directly
@@ -189,9 +190,20 @@ impl Drop for GrabHandle {
 ///   SYN_REPORT and forwarding SYN would double it.
 /// - On a read error (device unplugged) the thread sends
 ///   `Msg::DeviceRemoved(path)` and exits.
+///
+/// `do_grab`: when `true` (the default for production), `EVIOCGRAB` is called to
+/// obtain exclusive access so key events do not leak to the compositor.  Set
+/// `false` in integration tests that use a `uinput`-created fake keyboard.
+///
+/// **Kernel limitation**: a uinput-created event device returns `ENODEV` on a
+/// *blocking* `read()` if the reader does not hold an exclusive grab.  When
+/// `do_grab=false` we set `O_NONBLOCK` and treat `EAGAIN`/`WouldBlock` as
+/// "no events yet — sleep briefly and retry".  Events still flow from the
+/// uinput fd into the event device and are visible via the non-blocking read.
 pub fn spawn_reader(
     path: PathBuf,
     is_mouse: bool,
+    do_grab: bool,
     tx: Sender<Msg>,
     out: Arc<Mutex<VirtualOutput>>,
 ) -> GrabHandle {
@@ -207,17 +219,38 @@ pub fn spawn_reader(
                 return;
             }
         };
-        if let Err(e) = dev.grab() {
-            eprintln!("conduit: failed to grab {}: {}", path.display(), e);
-            let _ = tx.send(Msg::DeviceRemoved(path));
-            return;
+        if do_grab {
+            if let Err(e) = dev.grab() {
+                eprintln!("conduit: failed to grab {}: {}", path.display(), e);
+                let _ = tx.send(Msg::DeviceRemoved(path));
+                return;
+            }
+        } else {
+            // Set O_NONBLOCK: blocking read on an ungrabbed uinput event device
+            // returns ENODEV immediately on Linux; non-blocking returns EAGAIN
+            // when the queue is empty, which we handle with a short sleep.
+            let fd = dev.as_raw_fd();
+            unsafe {
+                let flags = libc::fcntl(fd, libc::F_GETFL, 0);
+                libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+            }
         }
+
         let name = dev.name().unwrap_or("unknown").to_owned();
-        eprintln!("conduit: grabbed {} ({})", name, path.display());
+        if do_grab {
+            eprintln!("conduit: grabbed {} ({})", name, path.display());
+        } else {
+            eprintln!("conduit: monitoring (no-grab) {} ({})", name, path.display());
+        }
 
         while !stop_flag.load(Ordering::Relaxed) {
             let events = match dev.fetch_events() {
                 Ok(evs) => evs,
+                Err(e) if !do_grab && e.kind() == std::io::ErrorKind::WouldBlock => {
+                    // O_NONBLOCK + empty queue — sleep briefly and retry.
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                    continue;
+                }
                 Err(e) => {
                     eprintln!("conduit: read error on {} ({}): {}", name, path.display(), e);
                     let _ = tx.send(Msg::DeviceRemoved(path));

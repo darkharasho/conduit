@@ -68,6 +68,10 @@ pub enum Msg {
     Subscribe(SubscribeKind, Sender<Push>),
     Query(QueryKind, Sender<Response>),
     CaptureNextKey(Sender<Response>),
+    /// Graceful shutdown signal: the run loop exits immediately upon receiving
+    /// this message.  Sent by `DaemonHandle::shutdown()` so tests can stop the
+    /// daemon without having to wait for every sender clone to be dropped.
+    Shutdown,
 }
 
 // ── Time base ─────────────────────────────────────────────────────────────────
@@ -135,6 +139,7 @@ pub fn run(
     tx: Sender<Msg>,
     mut readers: HashMap<PathBuf, GrabHandle>,
     mut settings: Settings,
+    extra_grabbed: Vec<String>,
 ) {
     // Subscriber senders must come from bounded channels (cap 256, created by
     // the IPC task); a slow consumer is dropped on the first failed try_send.
@@ -144,6 +149,7 @@ pub fn run(
     let mut capture_reply: Option<Sender<Response>> = None;
     let mut grabbed_devices: Vec<String> =
         readers.keys().map(|p| p.display().to_string()).collect();
+    grabbed_devices.extend(extra_grabbed);
     grabbed_devices.sort();
 
     loop {
@@ -258,6 +264,10 @@ pub fn run(
                 capture_reply = Some(reply);
                 Vec::new()
             }
+            Some(Msg::Shutdown) => {
+                // Graceful shutdown: exit the run loop immediately.
+                return;
+            }
             // Engine-driving subset: None (tick), Input, Focus, Suspend, Resume.
             other => {
                 let status_changed = matches!(
@@ -322,6 +332,7 @@ fn try_grab_device(
     let handle = crate::devices::spawn_reader(
         path.to_path_buf(),
         is_mouse,
+        true, // always grab in production (hotplug path)
         tx.clone(),
         Arc::clone(out),
     );
