@@ -30,9 +30,16 @@
 //! intentionally NOT a full-loop test — it covers only the engine-translate →
 //! emit path.  Kept because it is fast and hermetic.
 //!
+//! ## Test serialization
+//!
+//! Tests serialize via `TEST_SERIAL` because each daemon instance creates
+//! a virtual device with the same name. Under parallel test runners, multiple
+//! tests can interfere with each other by finding the wrong test's virtual
+//! device.
+//!
 //! Run with:
 //! ```sh
-//! PKG_CONFIG_PATH=/usr/lib64/pkgconfig cargo test -p conduit-daemon --test integration -- --ignored --nocapture
+//! cargo test -p conduit-daemon --test integration -- --ignored
 //! ```
 
 use std::collections::HashSet;
@@ -44,6 +51,13 @@ use std::time::{Duration, Instant};
 
 use conduit_daemon::DaemonConfig;
 use evdev::{AttributeSet, EventType, InputEvent, Key};
+
+// ── Test serialization ────────────────────────────────────────────────────────
+
+/// Serializes integration tests because each daemon creates a virtual device
+/// with the same name. Multiple parallel tests would interfere with device
+/// lookup and EVIOCGRAB.
+static TEST_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 // ── Key codes ─────────────────────────────────────────────────────────────────
 
@@ -229,6 +243,8 @@ fn ipc_send_get_status(sock_path: &PathBuf) -> conduit_proto::Response {
 #[test]
 #[ignore]
 fn full_loop_key_remap_and_ipc() {
+    let _guard = TEST_SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+
     // ── Create the fake keyboard ──────────────────────────────────────────────
     let mut fake_kbd = create_fake_keyboard();
 
@@ -316,8 +332,10 @@ grab_keyboards = ["Conduit Test Source"]
 
     // ── Honest grab-confirmation gate ─────────────────────────────────────────
     // Poll IPC get_status until grabbed_devices contains the fake keyboard path.
-    // This confirms the reader thread actually called EVIOCGRAB and succeeded.
-    // The device only appears here after the real grab lands.
+    // This confirms the device is registered in grabbed_devices after the
+    // reader thread spawns (device only appears here after the real grab lands).
+    // The "conduit: grab confirmed" log message proves the reader thread
+    // successfully called EVIOCGRAB via the ioctl.
     //
     // Safety: DO NOT emit any events before this gate passes.  Until the daemon
     // holds the exclusive grab, events on fake_kbd flow to the compositor.
@@ -442,6 +460,8 @@ grab_keyboards = ["Conduit Test Source"]
 #[test]
 #[ignore]
 fn daemon_starts_and_stops_cleanly() {
+    let _guard = TEST_SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+
     let tmp = tempfile::tempdir().expect("tempdir");
     let config_path = tmp.path().join("conduit.toml");
     let socket_path = tmp.path().join("conduit-test.sock");
@@ -484,6 +504,8 @@ grab_all_keyboards = false
 #[test]
 #[ignore]
 fn engine_via_channel_smoke() {
+    let _guard = TEST_SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+
     use conduit_daemon::runloop::Msg;
     use conduit_core::event::{Event, Key as EvKey, KeyState};
 
