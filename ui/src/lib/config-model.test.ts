@@ -599,3 +599,83 @@ describe("setProfileMatch", () => {
     expect(setProfileMatch(m, "nope", { class: "x" })).toBe(m);
   });
 });
+
+// ── Per-device override sections ─────────────────────────────────────────────
+
+import {
+  selectorSpecificity,
+  deviceSectionFor,
+  deviceSectionKey,
+  getEffectiveAction,
+  setDeviceAction,
+  removeDeviceAction,
+} from "./config-model";
+
+const DEV_SECTIONS_TOML = `
+[profile.default.keys]
+a = "b"
+
+[profile.default.device."046d:c24a/G600".keys]
+btn_left = "enter"
+`;
+const g600full = { name: "G600", vendor: 0x046d, product: 0xc24a, phys: "usb-1", id: "046d:c24a/G600" };
+
+describe("device override sections", () => {
+  it("round-trips profile.device through TOML", () => {
+    const m = parseConfigToml(DEV_SECTIONS_TOML);
+    expect(m.profiles[0].device?.["046d:c24a/G600"].keys["btn_left"]).toBe("enter");
+    expect(serializeConfigToml(m)).toContain('"046d:c24a/G600"');
+  });
+
+  it("selector @phys and specificity", () => {
+    expect(selectorMatches("046d:c24a/G600@usb-1", g600full)).toBe(true);
+    expect(selectorMatches("046d:c24a/G600@usb-2", g600full)).toBe(false);
+    expect(selectorMatches("Weird@Name", { name: "Weird@Name", vendor: 0, product: 0 })).toBe(true);
+    expect(selectorSpecificity("046d:c24a/G600@usb-1")).toBe(4);
+    expect(selectorSpecificity("046d:c24a/G600")).toBe(3);
+    expect(selectorSpecificity("G600")).toBe(2);
+    expect(selectorSpecificity("046d:c24a")).toBe(1);
+  });
+
+  it("deviceSectionFor picks most specific, ties → first", () => {
+    const m = parseConfigToml(`
+[profile.default.device."046d:c24a".keys]
+a = "x"
+[profile.default.device."046d:c24a/G600".keys]
+a = "y"
+`);
+    expect(deviceSectionFor(m, "default", g600full)).toBe("046d:c24a/G600");
+    expect(deviceSectionFor(m, "default", { ...g600full, name: "Other" })).toBe("046d:c24a");
+    expect(deviceSectionFor(m, "default", { name: "n", vendor: 1, product: 1 })).toBeNull();
+  });
+
+  it("effective action: device shadows profile, falls through otherwise", () => {
+    const m = parseConfigToml(DEV_SECTIONS_TOML);
+    expect(getEffectiveAction(m, "default", g600full, "base", "btn_left"))
+      .toEqual({ action: { kind: "key", key: "enter" }, source: "device" });
+    expect(getEffectiveAction(m, "default", g600full, "base", "a"))
+      .toEqual({ action: { kind: "key", key: "b" }, source: "profile" });
+    expect(getEffectiveAction(m, "default", g600full, "base", "q")).toBeNull();
+    // no device context → profile only
+    expect(getEffectiveAction(m, "default", null, "base", "btn_left")).toBeNull();
+  });
+
+  it("setDeviceAction creates and removeDeviceAction prunes", () => {
+    let m = parseConfigToml('[profile.default.keys]\na = "b"');
+    m = setDeviceAction(m, "default", "046d:c24a/G600", "base", "mouse4", { kind: "key", key: "back" });
+    expect(getEffectiveAction(m, "default", g600full, "base", "mouse4")?.source).toBe("device");
+    // layer table
+    m = setDeviceAction(m, "default", "046d:c24a/G600", "nav", "h", { kind: "key", key: "home" });
+    expect(m.profiles[0].device?.["046d:c24a/G600"].layers["nav"]["h"]).toBe("home");
+    m = removeDeviceAction(m, "default", "046d:c24a/G600", "nav", "h");
+    m = removeDeviceAction(m, "default", "046d:c24a/G600", "base", "mouse4");
+    expect(m.profiles[0].device).toBeUndefined(); // fully pruned
+  });
+
+  it("deviceSectionKey appends @phys only for twins", () => {
+    const twinA = { ...g600full, phys: "usb-1" };
+    const twinB = { ...g600full, phys: "usb-2" };
+    expect(deviceSectionKey(twinA, [twinA])).toBe("046d:c24a/G600");
+    expect(deviceSectionKey(twinA, [twinA, twinB])).toBe("046d:c24a/G600@usb-1");
+  });
+});

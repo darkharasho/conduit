@@ -36,6 +36,13 @@ export interface ProfileModel {
   keys: Record<string, RawActionModel>;
   /** Named layers: layerName → keyName → action */
   layers: Record<string, Record<string, RawActionModel>>;
+  /** Per-device override sections, keyed by device selector string */
+  device?: Record<string, DeviceOverrideModel>;
+}
+
+export interface DeviceOverrideModel {
+  keys: Record<string, RawActionModel>;
+  layers: Record<string, Record<string, RawActionModel>>;
 }
 
 /** Raw action as stored in TOML — either a plain string or a tap-hold object */
@@ -116,6 +123,23 @@ export function parseConfigToml(toml: string): ConfigModel {
     const rawKeys = (rp["keys"] as Record<string, RawActionModel> | undefined) ?? {};
     const rawLayers =
       (rp["layers"] as Record<string, Record<string, RawActionModel>> | undefined) ?? {};
+    const rawDevice = rp["device"] as
+      | Record<string, { keys?: Record<string, RawActionModel>; layers?: Record<string, Record<string, RawActionModel>> }>
+      | undefined;
+
+    const device = rawDevice
+      ? Object.fromEntries(
+          Object.entries(rawDevice).map(([sel, ovr]) => [
+            sel,
+            {
+              keys: { ...(ovr.keys ?? {}) },
+              layers: Object.fromEntries(
+                Object.entries(ovr.layers ?? {}).map(([ln, lk]) => [ln, { ...lk }])
+              ),
+            },
+          ])
+        )
+      : undefined;
 
     return {
       name,
@@ -125,6 +149,7 @@ export function parseConfigToml(toml: string): ConfigModel {
       layers: Object.fromEntries(
         Object.entries(rawLayers).map(([lname, lkeys]) => [lname, { ...lkeys }])
       ),
+      device,
     };
   });
 
@@ -147,6 +172,16 @@ export function serializeConfigToml(m: ConfigModel): string {
     const entry: Record<string, unknown> = {};
     if (prof.match !== undefined) entry["match"] = prof.match;
     if (prof.inherit !== undefined) entry["inherit"] = prof.inherit;
+    if (prof.device !== undefined && Object.keys(prof.device).length > 0) {
+      entry["device"] = Object.fromEntries(
+        Object.entries(prof.device).map(([sel, ovr]) => {
+          const o: Record<string, unknown> = {};
+          if (Object.keys(ovr.keys).length > 0) o["keys"] = ovr.keys;
+          if (Object.keys(ovr.layers).length > 0) o["layers"] = ovr.layers;
+          return [sel, o];
+        })
+      );
+    }
     if (Object.keys(prof.keys).length > 0) entry["keys"] = prof.keys;
     if (Object.keys(prof.layers).length > 0) entry["layers"] = prof.layers;
     profileMap[prof.name] = entry;
@@ -300,6 +335,8 @@ export interface DeviceIdent {
   name: string;
   vendor: number;
   product: number;
+  /** Physical port path; only consulted by `@phys`-suffixed selectors. */
+  phys?: string;
 }
 
 function parseVidPid(s: string): [number, number] | null {
@@ -308,22 +345,210 @@ function parseVidPid(s: string): [number, number] | null {
   return [parseInt(m[1], 16), parseInt(m[2], 16)];
 }
 
-/** Mirror of the daemon's DeviceSelector grammar: name | vid:pid | vid:pid/name */
-export function selectorMatches(entry: string, dev: DeviceIdent): boolean {
-  const slash = entry.indexOf("/");
-  if (slash > 0) {
-    const vp = parseVidPid(entry.slice(0, slash));
-    if (vp) {
-      return vp[0] === dev.vendor && vp[1] === dev.product && entry.slice(slash + 1) === dev.name;
+type ParsedSelector = {
+  kind: "name" | "vidpid" | "vidpidname";
+  name?: string;
+  vendor?: number;
+  product?: number;
+  phys?: string;
+};
+
+/**
+ * Mirror of the daemon's DeviceSelector grammar:
+ * name | vid:pid | vid:pid/name, each optionally suffixed with `@phys`
+ * (recognized only when the prefix parses as vid:pid or vid:pid/name).
+ */
+function parseSelector(entry: string): ParsedSelector {
+  const at = entry.lastIndexOf("@");
+  if (at > 0) {
+    const prefix = entry.slice(0, at);
+    const base = parseSelectorBase(prefix);
+    if (base.kind !== "name") {
+      return { ...base, phys: entry.slice(at + 1) };
     }
   }
-  const vp = parseVidPid(entry);
-  if (vp) return vp[0] === dev.vendor && vp[1] === dev.product;
-  return entry === dev.name;
+  return parseSelectorBase(entry);
+}
+
+function parseSelectorBase(s: string): ParsedSelector {
+  const slash = s.indexOf("/");
+  if (slash > 0) {
+    const vp = parseVidPid(s.slice(0, slash));
+    if (vp) {
+      return { kind: "vidpidname", vendor: vp[0], product: vp[1], name: s.slice(slash + 1) };
+    }
+  }
+  const vp = parseVidPid(s);
+  if (vp) return { kind: "vidpid", vendor: vp[0], product: vp[1] };
+  return { kind: "name", name: s };
+}
+
+export function selectorMatches(entry: string, dev: DeviceIdent): boolean {
+  const sel = parseSelector(entry);
+  const baseOk =
+    sel.kind === "name"
+      ? sel.name === dev.name
+      : sel.kind === "vidpid"
+        ? sel.vendor === dev.vendor && sel.product === dev.product
+        : sel.vendor === dev.vendor && sel.product === dev.product && sel.name === dev.name;
+  return baseOk && (sel.phys === undefined || sel.phys === (dev.phys ?? ""));
+}
+
+/** 4 = vid:pid/name@phys, 3 = vid:pid/name, 2 = name, 1 = vid:pid (mirrors daemon). */
+export function selectorSpecificity(entry: string): number {
+  const sel = parseSelector(entry);
+  if (sel.phys !== undefined) return 4;
+  if (sel.kind === "vidpidname") return 3;
+  if (sel.kind === "name") return 2;
+  return 1;
 }
 
 export function listMatchesDevice(list: string[], dev: DeviceIdent): boolean {
   return list.some((e) => selectorMatches(e, dev));
+}
+
+// ── Per-device override accessors ─────────────────────────────────────────────
+
+/**
+ * The existing device section key that best matches `dev` in this profile
+ * (highest specificity; ties → first in section order), or null.
+ */
+export function deviceSectionFor(
+  m: ConfigModel,
+  profileName: string,
+  dev: DeviceIdent
+): string | null {
+  const prof = m.profiles.find((p) => p.name === profileName);
+  if (!prof?.device) return null;
+  let best: string | null = null;
+  let bestSpec = 0;
+  for (const sel of Object.keys(prof.device)) {
+    if (!selectorMatches(sel, dev)) continue;
+    const spec = selectorSpecificity(sel);
+    if (spec > bestSpec) {
+      best = sel;
+      bestSpec = spec;
+    }
+  }
+  return best;
+}
+
+/**
+ * Section key the UI should WRITE for this device: the canonical
+ * `vid:pid/name`, `@phys`-suffixed only when another listed device shares
+ * the canonical id (twin devices).
+ */
+export function deviceSectionKey(
+  dev: DeviceIdent & { id: string; phys?: string },
+  allDevices: Array<{ id: string; phys?: string }>
+): string {
+  const twins = allDevices.filter((d) => d.id === dev.id);
+  if (twins.length > 1 && dev.phys) {
+    return `${dev.id}@${dev.phys}`;
+  }
+  return dev.id;
+}
+
+/**
+ * Effective action for a key as seen by `dev`: its device section shadows
+ * the profile's own tables; absent everywhere → null. `dev: null` = no
+ * device context (profile tables only).
+ */
+export function getEffectiveAction(
+  m: ConfigModel,
+  profileName: string,
+  dev: DeviceIdent | null,
+  layer: string,
+  keyName: string
+): { action: ActionModel; source: "device" | "profile" } | null {
+  if (dev) {
+    const section = deviceSectionFor(m, profileName, dev);
+    if (section) {
+      const prof = m.profiles.find((p) => p.name === profileName)!;
+      const ovr = prof.device![section];
+      const raw = layer === "base" ? ovr.keys[keyName] : ovr.layers[layer]?.[keyName];
+      if (raw !== undefined) {
+        return { action: rawToAction(raw), source: "device" };
+      }
+    }
+  }
+  const global = getAction(m, profileName, layer, keyName);
+  return global ? { action: global, source: "profile" } : null;
+}
+
+/** Write a device-scoped mapping, creating the section/layer as needed. */
+export function setDeviceAction(
+  m: ConfigModel,
+  profileName: string,
+  sectionKey: string,
+  layer: string,
+  keyName: string,
+  action: ActionModel
+): ConfigModel {
+  const profIdx = m.profiles.findIndex((p) => p.name === profileName);
+  if (profIdx === -1) throw new Error(`Profile "${profileName}" not found`);
+
+  const profiles = m.profiles.map((p, i) => {
+    if (i !== profIdx) return p;
+    const device = { ...(p.device ?? {}) };
+    const ovr: DeviceOverrideModel = device[sectionKey]
+      ? {
+          keys: { ...device[sectionKey].keys },
+          layers: Object.fromEntries(
+            Object.entries(device[sectionKey].layers).map(([k, v]) => [k, { ...v }])
+          ),
+        }
+      : { keys: {}, layers: {} };
+    const raw = actionToRaw(action);
+    if (layer === "base") {
+      ovr.keys[keyName] = raw;
+    } else {
+      ovr.layers[layer] = { ...(ovr.layers[layer] ?? {}), [keyName]: raw };
+    }
+    device[sectionKey] = ovr;
+    return { ...p, device };
+  });
+
+  return { ...m, profiles };
+}
+
+/** Delete a device-scoped mapping; prunes empty layers/sections/maps. */
+export function removeDeviceAction(
+  m: ConfigModel,
+  profileName: string,
+  sectionKey: string,
+  layer: string,
+  keyName: string
+): ConfigModel {
+  const profIdx = m.profiles.findIndex((p) => p.name === profileName);
+  if (profIdx === -1) return m;
+
+  const profiles = m.profiles.map((p, i) => {
+    if (i !== profIdx || !p.device?.[sectionKey]) return p;
+    const device = { ...p.device };
+    const ovr: DeviceOverrideModel = {
+      keys: { ...device[sectionKey].keys },
+      layers: Object.fromEntries(
+        Object.entries(device[sectionKey].layers).map(([k, v]) => [k, { ...v }])
+      ),
+    };
+    if (layer === "base") {
+      delete ovr.keys[keyName];
+    } else if (ovr.layers[layer]) {
+      delete ovr.layers[layer][keyName];
+      if (Object.keys(ovr.layers[layer]).length === 0) delete ovr.layers[layer];
+    }
+    if (Object.keys(ovr.keys).length === 0 && Object.keys(ovr.layers).length === 0) {
+      delete device[sectionKey];
+    } else {
+      device[sectionKey] = ovr;
+    }
+    const next: ProfileModel = { ...p, device };
+    if (Object.keys(device).length === 0) delete next.device;
+    return next;
+  });
+
+  return { ...m, profiles };
 }
 
 /**
