@@ -150,16 +150,20 @@ pub fn start(config: DaemonConfig) -> anyhow::Result<DaemonHandle> {
 
     // Grab matching devices and spawn reader threads.
     let mut readers: HashMap<PathBuf, devices::GrabHandle> = HashMap::new();
+    let mut sources: HashMap<PathBuf, runloop::SourceInfo> = HashMap::new();
     for d in &discovered {
         if devices::should_grab(d, &settings) {
+            let source = devices::next_source_id();
             let handle = devices::spawn_reader(
                 d.path.clone(),
                 d.is_pointer(),
                 true, // always grab in production
+                source,
                 tx.clone(),
                 Arc::clone(&out),
             );
             readers.insert(d.path.clone(), handle);
+            sources.insert(d.path.clone(), runloop::SourceInfo::from_discovered(source, d));
         }
     }
 
@@ -212,6 +216,7 @@ pub fn start(config: DaemonConfig) -> anyhow::Result<DaemonHandle> {
     let shutdown_tx = tx;
 
     let run_out = Arc::clone(&out);
+    let device_selectors = compiled.device_selectors.clone();
     let run_thread = std::thread::Builder::new()
         .name("conduit-runloop".into())
         .spawn(move || {
@@ -222,6 +227,8 @@ pub fn start(config: DaemonConfig) -> anyhow::Result<DaemonHandle> {
                 run_tx,
                 readers,
                 settings,
+                sources,
+                device_selectors,
             )
         })
         .context("spawning run loop thread")?;

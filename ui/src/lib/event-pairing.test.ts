@@ -9,7 +9,7 @@ function pre(
   state: "press" | "release" | "repeat",
   time_us: number
 ): WireEvent {
-  return { phase: "pre", key_name, code: 0, state, time_us };
+  return { phase: "pre", key_name, code: 0, state, time_us, device: "" };
 }
 
 function post(
@@ -17,7 +17,7 @@ function post(
   state: "press" | "release" | "repeat",
   time_us: number
 ): WireEvent {
-  return { phase: "post", key_name, code: 0, state, time_us };
+  return { phase: "post", key_name, code: 0, state, time_us, device: "" };
 }
 
 describe("reduceEvents — simple remap", () => {

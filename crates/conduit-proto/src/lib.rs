@@ -79,6 +79,9 @@ pub struct WireEvent {
     pub code: u16,
     pub state: String,
     pub time_us: u64,
+    /// Source device name (pre-phase events only; empty on post-phase).
+    #[serde(default)]
+    pub device: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -110,6 +113,7 @@ mod tests {
             code: 28,
             state: "press".to_string(),
             time_us: 1234567890,
+            device: "Test Kbd".to_string(),
         });
         let json = serde_json::to_string(&original).expect("serialize");
         let deserialized: Push = serde_json::from_str(&json).expect("deserialize");
@@ -164,10 +168,11 @@ mod tests {
             code: 30,
             state: "press".into(),
             time_us: 5,
+            device: "".into(),
         });
         assert_eq!(
             serde_json::to_string(&ev).unwrap(),
-            r#"{"type":"event","phase":"pre","key_name":"a","code":30,"state":"press","time_us":5}"#
+            r#"{"type":"event","phase":"pre","key_name":"a","code":30,"state":"press","time_us":5,"device":""}"#
         );
     }
 }

@@ -193,6 +193,7 @@ describe("onKeyEvent", () => {
       code: 30,
       state: "press",
       time_us: 1234567890,
+      device: "",
     };
 
     // TypeScript doesn't narrow closure-assigned variables; use non-null assertion

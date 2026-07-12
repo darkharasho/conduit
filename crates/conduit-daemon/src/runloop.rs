@@ -58,7 +58,10 @@ pub enum QueryKind {
 /// threads (Tasks 12-14).
 #[allow(dead_code)]
 pub enum Msg {
-    Input(Event),
+    /// A physical input event and the source id of the reader that produced
+    /// it (`devices::next_source_id`). `None` = injected without a device
+    /// context (tests, IPC); only global mapping tables apply.
+    Input(Event, Option<u16>),
     Focus(FocusInfo),
     Reload(CompiledConfig),
     Suspend,
@@ -97,7 +100,9 @@ pub fn now_us() -> u64 {
 pub fn drive(engine: &mut Engine, msg: Option<Msg>, now_us: u64) -> Vec<Event> {
     match msg {
         None => engine.tick(now_us).to_vec(),
-        Some(Msg::Input(ev)) => engine.handle(ev).to_vec(),
+        // Source→slot translation lives in `run` (it owns the source map);
+        // drive() resolves inputs against global tables only.
+        Some(Msg::Input(ev, _src)) => engine.handle(ev).to_vec(),
         Some(Msg::Focus(f)) => {
             engine.set_focus(&FocusFields {
                 process: &f.process,
@@ -113,6 +118,54 @@ pub fn drive(engine: &mut Engine, msg: Option<Msg>, now_us: u64) -> Vec<Event> {
         }
         Some(_) => Vec::new(),
     }
+}
+
+// ── Source → device-slot resolution ───────────────────────────────────────────
+
+/// Identity of one grabbed device's reader, used to resolve its device slot
+/// against the live config's `device_selectors`.
+pub struct SourceInfo {
+    pub id: u16,
+    pub name: String,
+    pub vendor: u16,
+    pub product: u16,
+    pub phys: String,
+}
+
+impl SourceInfo {
+    pub fn from_discovered(id: u16, d: &crate::devices::Discovered) -> SourceInfo {
+        SourceInfo {
+            id,
+            name: d.name.clone(),
+            vendor: d.vendor,
+            product: d.product,
+            phys: d.phys.clone(),
+        }
+    }
+}
+
+/// source id → device slot under the given selector list.
+pub fn compute_slots(
+    sources: &HashMap<PathBuf, SourceInfo>,
+    selectors: &[String],
+) -> HashMap<u16, Option<u16>> {
+    sources
+        .values()
+        .map(|s| {
+            (
+                s.id,
+                crate::classify::resolve_slot(&s.name, s.vendor, s.product, &s.phys, selectors),
+            )
+        })
+        .collect()
+}
+
+fn source_name(sources: &HashMap<PathBuf, SourceInfo>, id: u16) -> String {
+    sources
+        .values()
+        .find(|s| s.id == id)
+        .map(|s| s.name.clone())
+        .unwrap_or_default()
 }
 
 // ── The engine thread ─────────────────────────────────────────────────────────
@@ -139,6 +192,8 @@ pub fn run(
     tx: Sender<Msg>,
     mut readers: HashMap<PathBuf, GrabHandle>,
     mut settings: Settings,
+    mut sources: HashMap<PathBuf, SourceInfo>,
+    mut device_selectors: Vec<String>,
 ) {
     // Subscriber senders must come from bounded channels (cap 256, created by
     // the IPC task); a slow consumer is dropped on the first failed try_send.
@@ -149,6 +204,7 @@ pub fn run(
     let mut grabbed_devices: Vec<String> =
         readers.keys().map(|p| p.display().to_string()).collect();
     grabbed_devices.sort();
+    let mut slots = compute_slots(&sources, &device_selectors);
 
     loop {
         // Sleep until the next message or the engine's next tap-hold deadline.
@@ -170,9 +226,10 @@ pub fn run(
         // Pre-phase push and key capture: every *physical* input event, before
         // any mapping. CaptureNextKey answers on the next PRESS and does NOT
         // consume the event — it still flows through the engine below.
-        if let Some(Msg::Input(ev)) = &msg {
+        if let Some(Msg::Input(ev, src)) = &msg {
             if !event_subs.is_empty() {
-                let push = Push::Event(wire_event(ev, EventPhase::Pre));
+                let device = src.map(|s| source_name(&sources, s)).unwrap_or_default();
+                let push = Push::Event(wire_event(ev, EventPhase::Pre, &device));
                 event_subs.retain(|tx| try_push(tx, &push));
             }
             if ev.state == KeyState::Press {
@@ -187,11 +244,18 @@ pub fn run(
 
         let now = now_us();
         let outputs: Vec<Event> = match msg {
+            // Production input path: translate source id → device slot here
+            // (run owns the source map); drive() only sees slotless inputs.
+            Some(Msg::Input(ev, src)) => {
+                let slot = src.and_then(|s| slots.get(&s).copied().flatten());
+                engine.handle_on(ev, slot).to_vec()
+            }
             Some(Msg::Reload(cfg)) => {
                 // swap_config needs the current focus so buffered events
                 // replay under the right profile — handled here, not in
                 // drive(), because only run() knows the focus.
                 let new_settings = cfg.settings.clone();
+                device_selectors = cfg.device_selectors.clone();
                 let evs = {
                     let (process, class, title) = current_focus
                         .as_ref()
@@ -202,11 +266,21 @@ pub fn run(
                         .to_vec()
                 };
                 settings = new_settings;
+                slots = compute_slots(&sources, &device_selectors);
                 push_status(&engine, &current_focus, &grabbed_devices, &mut status_subs);
                 evs
             }
             Some(Msg::DeviceAdded(p)) => {
-                try_grab_device(&p, &settings, &tx, &out, &mut readers, &mut grabbed_devices);
+                try_grab_device(
+                    &p,
+                    &settings,
+                    &tx,
+                    &out,
+                    &mut readers,
+                    &mut grabbed_devices,
+                    &mut sources,
+                );
+                slots = compute_slots(&sources, &device_selectors);
                 push_status(&engine, &current_focus, &grabbed_devices, &mut status_subs);
                 Vec::new()
             }
@@ -214,6 +288,8 @@ pub fn run(
                 // The reader thread has already exited; dropping its handle
                 // joins it and releases the (already-dropped) device grab.
                 readers.remove(&p);
+                sources.remove(&p);
+                slots = compute_slots(&sources, &device_selectors);
                 let s = p.display().to_string();
                 grabbed_devices.retain(|g| g != &s);
                 eprintln!("conduit: released {}", p.display());
@@ -316,6 +392,7 @@ fn try_grab_device(
     out: &Option<Arc<Mutex<VirtualOutput>>>,
     readers: &mut HashMap<PathBuf, GrabHandle>,
     grabbed_devices: &mut Vec<String>,
+    sources: &mut HashMap<PathBuf, SourceInfo>,
 ) {
     if readers.contains_key(path) {
         return;
@@ -330,14 +407,17 @@ fn try_grab_device(
     let Some(out) = out else { return };
 
     let is_pointer = discovered.is_pointer();
+    let source = crate::devices::next_source_id();
     let handle = crate::devices::spawn_reader(
         path.to_path_buf(),
         is_pointer,
         true, // always grab in production (hotplug path)
+        source,
         tx.clone(),
         Arc::clone(out),
     );
     readers.insert(path.to_path_buf(), handle);
+    sources.insert(path.to_path_buf(), SourceInfo::from_discovered(source, &discovered));
     let s = path.display().to_string();
     if !grabbed_devices.contains(&s) {
         grabbed_devices.push(s);
@@ -358,7 +438,7 @@ fn emit_all(out: &Option<Arc<Mutex<VirtualOutput>>>, events: &[Event], subs: &mu
                 eprintln!("conduit: emit error: {e}");
             }
             if !subs.is_empty() {
-                let push = Push::Event(wire_event(ev, EventPhase::Post));
+                let push = Push::Event(wire_event(ev, EventPhase::Post, ""));
                 subs.retain(|tx| try_push(tx, &push));
             }
         }
@@ -366,18 +446,21 @@ fn emit_all(out: &Option<Arc<Mutex<VirtualOutput>>>, events: &[Event], subs: &mu
         // No virtual output: still push post-phase events to subscribers.
         if !subs.is_empty() {
             for ev in events {
-                let push = Push::Event(wire_event(ev, EventPhase::Post));
+                let push = Push::Event(wire_event(ev, EventPhase::Post, ""));
                 subs.retain(|tx| try_push(tx, &push));
             }
         }
     }
 }
 
-fn wire_event(ev: &Event, phase: EventPhase) -> WireEvent {
+/// `device`: source device name for pre-phase events; `""` for post-phase
+/// (outputs belong to the virtual devices, not a physical source).
+fn wire_event(ev: &Event, phase: EventPhase, device: &str) -> WireEvent {
     WireEvent {
         phase,
         key_name: conduit_core::keys::name(ev.key),
         code: ev.key.0,
+        device: device.to_string(),
         state: match ev.state {
             KeyState::Press => "press",
             KeyState::Release => "release",
@@ -447,9 +530,28 @@ mod tests {
     }
 
     #[test]
+    fn slot_map_recomputes_from_selectors() {
+        let mut sources = HashMap::new();
+        sources.insert(
+            PathBuf::from("/dev/input/event9"),
+            SourceInfo {
+                id: 7,
+                name: "G600".into(),
+                vendor: 0x046d,
+                product: 0xc24a,
+                phys: "usb-1".into(),
+            },
+        );
+        let slots = compute_slots(&sources, &["046d:c24a/G600".to_string()]);
+        assert_eq!(slots.get(&7), Some(&Some(0)));
+        let slots = compute_slots(&sources, &[]);
+        assert_eq!(slots.get(&7), Some(&None));
+    }
+
+    #[test]
     fn drive_input_flows_through_remapping() {
         let mut e = engine_with("[profile.default.keys]\na = \"b\"");
-        let result = drive(&mut e, Some(Msg::Input(press("a", 0))), 0);
+        let result = drive(&mut e, Some(Msg::Input(press("a", 0), None)), 0);
         assert_eq!(result, vec![press("b", 0)]);
     }
 
@@ -457,7 +559,7 @@ mod tests {
     fn drive_none_ticks_expired_deadline() {
         let toml = "[profile.default.keys]\ncapslock = { tap = \"esc\", hold = \"leftctrl\" }";
         let mut e = engine_with(toml);
-        drive(&mut e, Some(Msg::Input(press("capslock", 0))), 0);
+        drive(&mut e, Some(Msg::Input(press("capslock", 0), None)), 0);
         let result = drive(&mut e, None, 200_000);
         assert_eq!(result, vec![press("leftctrl", 0)]);
     }
@@ -485,7 +587,7 @@ mod tests {
     #[test]
     fn drive_suspend_returns_flush_events() {
         let mut e = engine_with("[profile.default.keys]\na = \"b\"");
-        drive(&mut e, Some(Msg::Input(press("a", 0))), 0);
+        drive(&mut e, Some(Msg::Input(press("a", 0), None)), 0);
         let result = drive(&mut e, Some(Msg::Suspend), 0);
         assert!(result
             .iter()
@@ -499,14 +601,14 @@ mod tests {
         assert!(e.is_suspended());
         // While suspended: raw passthrough
         assert_eq!(
-            drive(&mut e, Some(Msg::Input(press("a", 10))), 10),
+            drive(&mut e, Some(Msg::Input(press("a", 10), None)), 10),
             vec![press("a", 10)]
         );
-        drive(&mut e, Some(Msg::Input(release("a", 15))), 15);
+        drive(&mut e, Some(Msg::Input(release("a", 15), None)), 15);
         drive(&mut e, Some(Msg::Resume), 20);
         assert!(!e.is_suspended());
         assert_eq!(
-            drive(&mut e, Some(Msg::Input(press("a", 30))), 30),
+            drive(&mut e, Some(Msg::Input(press("a", 30), None)), 30),
             vec![press("b", 30)]
         );
     }

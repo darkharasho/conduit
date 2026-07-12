@@ -1,6 +1,6 @@
 use std::os::fd::AsRawFd;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crossbeam_channel::Sender;
@@ -192,6 +192,15 @@ pub fn wheel_events(rel_code: u16, value: i32, now: u64) -> Vec<Event> {
 
 // ── Reader threads ────────────────────────────────────────────────────────────
 
+static NEXT_SOURCE: AtomicU16 = AtomicU16::new(0);
+
+/// Allocate a process-unique source id for a reader thread. The runloop maps
+/// source ids to device slots (`classify::resolve_slot`) against the live
+/// config's `device_selectors`.
+pub fn next_source_id() -> u16 {
+    NEXT_SOURCE.fetch_add(1, Ordering::Relaxed)
+}
+
 /// Handle for a spawned reader thread and its device grab.
 ///
 /// Ungrab/close mechanism: the `evdev::Device` (and its `EVIOCGRAB`) is owned
@@ -243,6 +252,7 @@ pub fn spawn_reader(
     path: PathBuf,
     is_pointer: bool,
     do_grab: bool,
+    source: u16,
     tx: Sender<Msg>,
     out: Arc<Mutex<VirtualOutput>>,
 ) -> GrabHandle {
@@ -344,7 +354,7 @@ pub fn spawn_reader(
                         _ => continue,
                     };
                     let ev = Event { key: Key(raw.code()), state, time_us: now_us() };
-                    if tx.send(Msg::Input(ev)).is_err() {
+                    if tx.send(Msg::Input(ev, Some(source))).is_err() {
                         return; // engine thread gone; shut down
                     }
                 } else if is_pointer && ev_type == evdev::EventType::RELATIVE {
@@ -352,7 +362,7 @@ pub fn spawn_reader(
                         REL_WHEEL | REL_HWHEEL => {
                             // Wheel goes through the engine so it can be remapped.
                             for ev in wheel_events(raw.code(), raw.value(), now_us()) {
-                                if tx.send(Msg::Input(ev)).is_err() {
+                                if tx.send(Msg::Input(ev, Some(source))).is_err() {
                                     return;
                                 }
                             }

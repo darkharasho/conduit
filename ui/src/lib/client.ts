@@ -39,6 +39,8 @@ export interface WireEvent {
   code: number;
   state: string;
   time_us: number;
+  /** Source device name (pre-phase events only; empty on post-phase) */
+  device: string;
 }
 
 export interface CapturedKey {

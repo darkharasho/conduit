@@ -573,8 +573,8 @@ grab_all_keyboards = false
 
     // Inject F13 press+release directly into the channel.
     let now = conduit_daemon::runloop::now_us();
-    msg_tx.send(Msg::Input(Event { key: EvKey(KEY_F13), state: KeyState::Press,   time_us: now })).expect("send press");
-    msg_tx.send(Msg::Input(Event { key: EvKey(KEY_F13), state: KeyState::Release, time_us: now + 10_000 })).expect("send release");
+    msg_tx.send(Msg::Input(Event { key: EvKey(KEY_F13), state: KeyState::Press,   time_us: now }, None)).expect("send press");
+    msg_tx.send(Msg::Input(Event { key: EvKey(KEY_F13), state: KeyState::Release, time_us: now + 10_000 }, None)).expect("send release");
 
     let got = poll_read_key_events(&mut virt_dev, 2, Duration::from_secs(2), "channel smoke");
     assert_eq!(got[0], (KEY_F14, 1), "engine smoke: expected F14 press, got {:?}", got);
