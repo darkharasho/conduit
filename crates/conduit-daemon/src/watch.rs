@@ -128,7 +128,7 @@ fn poll_loop(config_path: PathBuf, tx: Sender<Msg>, gate: Arc<Mutex<ReloadGate>>
                     "conduit/watch: config error in {}: {e}",
                     config_path.display()
                 );
-                // Do NOT update last_mtime back — keep old config live.
+                // last_mtime already updated above; next poll with same mtime skips (avoids retry spam).
                 continue;
             }
         };

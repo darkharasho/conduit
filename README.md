@@ -44,6 +44,7 @@ cargo build --release && install -Dm755 target/release/conduit-daemon ~/.local/b
 ### 4. Install and enable the systemd user unit
 
 ```bash
+mkdir -p ~/.config/systemd/user/
 cp packaging/conduit.service ~/.config/systemd/user/
 systemctl --user enable --now conduit.service
 ```
@@ -62,6 +63,8 @@ Fields:
 - `uinput` — whether `/dev/uinput` is writable (requires udev rule above)
 - `input_group` — whether the current user is in the `input` group
 - `config_ok` — whether the current config file compiles without error
+
+Note: on systemd/logind desktops, `input_group` may report `false` even though the daemon works — logind grants device access to your active session automatically. Adding yourself to the `input` group is only needed for headless or non-seat sessions.
 
 ## Build requirements
 

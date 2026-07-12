@@ -114,11 +114,9 @@ fn main() -> anyhow::Result<()> {
             eprintln!("  1. Add your user to the 'input' group:");
             eprintln!("       sudo usermod -aG input $USER");
             eprintln!("     then log out and back in (or run: newgrp input).");
-            eprintln!("  2. A udev rule will be installed by the conduit package (Task 15).");
-            eprintln!("     For now you can create /etc/udev/rules.d/99-conduit.rules:");
-            eprintln!("       KERNEL==\"uinput\", GROUP=\"input\", MODE=\"0660\"");
-            eprintln!("       SUBSYSTEM==\"input\", GROUP=\"input\", MODE=\"0660\"");
-            eprintln!("     then run: sudo udevadm control --reload-rules && sudo udevadm trigger");
+            eprintln!("  2. Install the udev rule:");
+            eprintln!("       sudo cp packaging/99-conduit.rules /etc/udev/rules.d/ && \\");
+            eprintln!("       sudo udevadm control --reload && sudo udevadm trigger");
             std::process::exit(2);
         }
     }
@@ -168,11 +166,9 @@ fn main() -> anyhow::Result<()> {
         eprintln!("  1. Add your user to the 'input' group:");
         eprintln!("       sudo usermod -aG input $USER");
         eprintln!("     then log out and back in (or run: newgrp input).");
-        eprintln!("  2. A udev rule will be installed by the conduit package (Task 15).");
-        eprintln!("     For now you can create /etc/udev/rules.d/99-conduit.rules:");
-        eprintln!("       KERNEL==\"uinput\", GROUP=\"input\", MODE=\"0660\"");
-        eprintln!("       SUBSYSTEM==\"input\", GROUP=\"input\", MODE=\"0660\"");
-        eprintln!("     then run: sudo udevadm control --reload-rules && sudo udevadm trigger");
+        eprintln!("  2. Install the udev rule:");
+        eprintln!("       sudo cp packaging/99-conduit.rules /etc/udev/rules.d/ && \\");
+        eprintln!("       sudo udevadm control --reload && sudo udevadm trigger");
         std::process::exit(2);
     }
 
