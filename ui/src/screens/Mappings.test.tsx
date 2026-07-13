@@ -263,8 +263,8 @@ describe("MappingsScreen — focusDevicePath one-shot", () => {
     });
 
     // Verify mouse1 is STILL active (tab does not snap back to mouse2)
-    expect(mouse1Tab.getAttribute("aria-selected")).toBe("true");
-    expect(mouse2Tab.getAttribute("aria-selected")).toBe("false");
+    expect(mouse1Tab?.getAttribute("aria-selected")).toBe("true");
+    expect(mouse2Tab?.getAttribute("aria-selected")).toBe("false");
   });
 });
 
