@@ -11,6 +11,47 @@ use tauri::{AppHandle, Emitter};
 // ---- Re-export proto types as Tauri-serializable types ----
 // (conduit_proto already derives Serialize/Deserialize)
 
+// ---- Error payload ----
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ErrorPayload {
+    pub code: String,
+    pub message: String,
+    pub detail: String,
+}
+
+impl ErrorPayload {
+    fn new(code: &str, message: impl Into<String>, detail: impl Into<String>) -> Self {
+        ErrorPayload { code: code.into(), message: message.into(), detail: detail.into() }
+    }
+
+    fn from_io(context: &str, e: &std::io::Error) -> Self {
+        let code = match e.kind() {
+            std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound => {
+                "engine-not-running"
+            }
+            std::io::ErrorKind::PermissionDenied => "permission-denied",
+            _ => "internal",
+        };
+        ErrorPayload::new(code, context, e.to_string())
+    }
+}
+
+impl From<conduit_proto::Response> for ErrorPayload {
+    fn from(resp: conduit_proto::Response) -> Self {
+        match resp {
+            conduit_proto::Response::Err { code, message, detail, .. } => {
+                ErrorPayload::new(code.as_str(), message, detail)
+            }
+            other => ErrorPayload::new(
+                "internal",
+                "unexpected response",
+                format!("{other:?}"),
+            ),
+        }
+    }
+}
+
 // ---- Helpers ----
 
 /// Resolve the socket path from env or XDG default.
@@ -30,102 +71,100 @@ fn nix_uid() -> u32 {
 }
 
 /// Open a UnixStream to the daemon, send one Request, read one Response.
-fn one_shot(req: &Request) -> Result<Response, String> {
+fn one_shot(req: &Request) -> Result<Response, ErrorPayload> {
     let path = socket_path();
     let mut stream = UnixStream::connect(&path)
-        .map_err(|e| format!("connect {}: {}", path.display(), e))?;
-    let line = serde_json::to_string(req).map_err(|e| e.to_string())?;
+        .map_err(|e| ErrorPayload::from_io("connecting to Conduit's engine", &e))?;
+    let line = serde_json::to_string(req)
+        .map_err(|e| ErrorPayload::new("internal", "failed to serialize request", e.to_string()))?;
     stream
         .write_all(line.as_bytes())
         .and_then(|_| stream.write_all(b"\n"))
-        .map_err(|e| format!("write: {}", e))?;
+        .map_err(|e| ErrorPayload::new("internal", "failed to write to socket", e.to_string()))?;
     let mut reader = BufReader::new(&stream);
     let mut resp_line = String::new();
     reader
         .read_line(&mut resp_line)
-        .map_err(|e| format!("read: {}", e))?;
+        .map_err(|e| ErrorPayload::new("internal", "failed to read from socket", e.to_string()))?;
     serde_json::from_str::<Response>(resp_line.trim())
-        .map_err(|e| format!("parse response: {}", e))
+        .map_err(|e| ErrorPayload::new("internal", "failed to parse response", e.to_string()))
 }
 
 /// Extract an Err response into a Tauri command error.
-fn check_ok(resp: Response) -> Result<(), String> {
+fn check_ok(resp: Response) -> Result<(), ErrorPayload> {
     match resp {
         Response::Ok => Ok(()),
-        Response::Err { message } => Err(message),
-        other => Err(format!("unexpected response: {:?}", other)),
+        other => Err(ErrorPayload::from(other)),
     }
 }
 
 // ---- Tauri commands ----
 
 #[tauri::command]
-async fn get_status() -> Result<conduit_proto::Status, String> {
+async fn get_status() -> Result<conduit_proto::Status, ErrorPayload> {
     match one_shot(&Request::GetStatus)? {
         Response::Status(s) => Ok(s),
-        Response::Err { message } => Err(message),
-        other => Err(format!("unexpected: {:?}", other)),
+        other => Err(ErrorPayload::from(other)),
     }
 }
 
 #[tauri::command]
-async fn get_config() -> Result<String, String> {
+async fn get_config() -> Result<String, ErrorPayload> {
     match one_shot(&Request::GetConfig)? {
         Response::Config { toml } => Ok(toml),
-        Response::Err { message } => Err(message),
-        other => Err(format!("unexpected: {:?}", other)),
+        other => Err(ErrorPayload::from(other)),
     }
 }
 
 #[tauri::command]
-async fn set_config(toml: String) -> Result<(), String> {
-    let resp = one_shot(&Request::SetConfig { toml })?;
-    check_ok(resp)
+async fn set_config(toml: String) -> Result<u64, ErrorPayload> {
+    match one_shot(&Request::SetConfig { toml })? {
+        Response::ConfigApplied { version } => Ok(version),
+        Response::Ok => Ok(0), // pre-versioning daemon
+        other => Err(ErrorPayload::from(other)),
+    }
 }
 
 #[tauri::command]
-async fn list_devices() -> Result<Vec<conduit_proto::DeviceInfo>, String> {
+async fn list_devices() -> Result<Vec<conduit_proto::DeviceInfo>, ErrorPayload> {
     match one_shot(&Request::ListDevices)? {
         Response::Devices { devices } => Ok(devices),
-        Response::Err { message } => Err(message),
-        other => Err(format!("unexpected: {:?}", other)),
+        other => Err(ErrorPayload::from(other)),
     }
 }
 
 #[tauri::command]
-async fn list_windows() -> Result<Vec<conduit_proto::FocusInfo>, String> {
+async fn list_windows() -> Result<Vec<conduit_proto::FocusInfo>, ErrorPayload> {
     match one_shot(&Request::ListWindows)? {
         Response::Windows { windows } => Ok(windows),
-        Response::Err { message } => Err(message),
-        other => Err(format!("unexpected: {:?}", other)),
+        other => Err(ErrorPayload::from(other)),
     }
 }
 
 #[tauri::command]
-async fn suspend() -> Result<(), String> {
+async fn suspend() -> Result<(), ErrorPayload> {
     let resp = one_shot(&Request::Suspend)?;
     check_ok(resp)
 }
 
 #[tauri::command]
-async fn resume() -> Result<(), String> {
+async fn resume() -> Result<(), ErrorPayload> {
     let resp = one_shot(&Request::Resume)?;
     check_ok(resp)
 }
 
 #[tauri::command]
-async fn capture_next_key() -> Result<CapturedKey, String> {
+async fn capture_next_key() -> Result<CapturedKey, ErrorPayload> {
     match one_shot(&Request::CaptureNextKey)? {
         Response::CapturedKey { name, code } => Ok(CapturedKey { name, code }),
-        Response::Err { message } => Err(message),
-        other => Err(format!("unexpected: {:?}", other)),
+        other => Err(ErrorPayload::from(other)),
     }
 }
 
 /// Check system setup: if daemon is reachable return all-ok; otherwise
 /// locate the `conduit-daemon` binary, run `--check`, and parse its JSON.
 #[tauri::command]
-async fn check_setup() -> Result<SetupResult, String> {
+async fn check_setup() -> Result<SetupResult, ErrorPayload> {
     // If the daemon socket connects, we know everything is OK.
     if UnixStream::connect(socket_path()).is_ok() {
         return Ok(SetupResult {
@@ -152,7 +191,7 @@ async fn check_setup() -> Result<SetupResult, String> {
     let output = std::process::Command::new(&binary_path)
         .arg("--check")
         .output()
-        .map_err(|e| format!("failed to run conduit-daemon --check: {}", e))?;
+        .map_err(|e| ErrorPayload::new("internal", "failed to run conduit-daemon --check", e.to_string()))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let check: DaemonCheckOutput = serde_json::from_str(stdout.trim())
@@ -310,7 +349,7 @@ fn subscribe_loop(
         .map_err(|e| format!("parse ack: {}", e))?;
     match ack_resp {
         Response::Subscribed => {}
-        Response::Err { message } => return Err(message),
+        Response::Err { message, .. } => return Err(message),
         other => return Err(format!("unexpected ack: {:?}", other)),
     }
 
