@@ -1,0 +1,97 @@
+import { describe, expect, it } from "vitest";
+import type { DeviceInfo } from "./client";
+import { parseConfigToml } from "./config-model";
+import {
+  appProfileCount,
+  deviceOverrideCount,
+  groupPhysicalDevices,
+  rememberedDevices,
+  resolveDevice,
+} from "./device-registry";
+
+function node(over: Partial<DeviceInfo>): DeviceInfo {
+  return {
+    path: "/dev/input/event0", name: "Some Device", vendor: 0x1111,
+    product: 0x2222, is_keyboard: false, is_mouse: true, grabbed: false,
+    id: "1111:2222/Some Device", class: "mouse", phys: "", keys: [],
+    wheel: false, hwheel: false, ...over,
+  };
+}
+
+describe("resolveDevice", () => {
+  it("returns curated names for known hardware", () => {
+    expect(resolveDevice(0x046d, 0xc24a, "Logitech Gaming Mouse G600", "mouse"))
+      .toEqual({ name: "Logitech G600", archetype: "mmo-mouse" });
+    expect(resolveDevice(0x046d, 0x4099, "whatever", "mouse").name)
+      .toBe("Logitech G502 X");
+    expect(resolveDevice(0x31e3, 0x1402, "whatever", "keyboard"))
+      .toEqual({ name: "Wooting 80HE", archetype: "keyboard" });
+  });
+  it("falls back to the node name and class archetype", () => {
+    expect(resolveDevice(0x9999, 0x0001, "Acme SuperMouse", "mouse"))
+      .toEqual({ name: "Acme SuperMouse", archetype: "mouse" });
+    expect(resolveDevice(0x9999, 0x0002, "Acme Board", "keyboard").archetype)
+      .toBe("keyboard");
+  });
+});
+
+describe("groupPhysicalDevices", () => {
+  it("groups multi-node hardware into one card and keeps input-class devices only", () => {
+    const devices = [
+      node({ vendor: 0x046d, product: 0xc24a, class: "mouse", name: "Logitech Gaming Mouse G600", path: "/dev/input/event12" }),
+      node({ vendor: 0x046d, product: 0xc24a, class: "keyboard", name: "Logitech Gaming Mouse G600 Keyboard", path: "/dev/input/event13" }),
+      node({ vendor: 0x046d, product: 0xc24a, class: "other", name: "Logitech Gaming Mouse G600", path: "/dev/input/event14" }),
+      node({ vendor: 0x0000, product: 0x0001, class: "media", name: "Power Button" }),
+    ];
+    const phys = groupPhysicalDevices(devices);
+    expect(phys).toHaveLength(1);
+    expect(phys[0].key).toBe("046d:c24a");
+    expect(phys[0].name).toBe("Logitech G600");
+    expect(phys[0].nodes).toHaveLength(3); // "other" sibling rides along
+  });
+  it("excludes virtual/passthrough devices and non-input classes", () => {
+    const devices = [
+      node({ vendor: 0xbeef, product: 0xdead, class: "keyboard", name: "Keyboard passthrough" }),
+      node({ vendor: 0x2333, product: 0x6666, class: "gamepad", name: "ydotoold virtual device" }),
+      node({ vendor: 0x0000, product: 0x0000, class: "other", name: "HD-Audio Generic Line" }),
+    ];
+    expect(groupPhysicalDevices(devices)).toHaveLength(0);
+  });
+});
+
+describe("remembered + investment", () => {
+  const toml = `
+[profile.default.keys]
+capslock = "esc"
+
+[profile.firefox]
+match = { class = "firefox" }
+[profile.firefox.keys]
+f1 = "back"
+
+[profile.default.device."046d:c24a/G600".keys]
+mouse4 = "copy"
+mouse5 = "paste"
+`;
+  const model = parseConfigToml(toml);
+
+  it("lists device sections with no connected match as remembered", () => {
+    const rem = rememberedDevices(model, []);
+    expect(rem).toHaveLength(1);
+    expect(rem[0]).toMatchObject({
+      selector: '046d:c24a/G600', key: "046d:c24a",
+      name: "Logitech G600", archetype: "mmo-mouse",
+    });
+  });
+  it("does not list sections whose device is connected", () => {
+    const g600 = node({ vendor: 0x046d, product: 0xc24a, class: "mouse", name: "G600", id: "046d:c24a/G600" });
+    expect(rememberedDevices(model, [g600])).toHaveLength(0);
+  });
+  it("counts app profiles and device overrides", () => {
+    expect(appProfileCount(model)).toBe(1); // firefox
+    const g600 = groupPhysicalDevices([
+      node({ vendor: 0x046d, product: 0xc24a, class: "mouse", name: "G600", id: "046d:c24a/G600" }),
+    ])[0];
+    expect(deviceOverrideCount(model, g600)).toBe(2); // mouse4 + mouse5
+  });
+});
