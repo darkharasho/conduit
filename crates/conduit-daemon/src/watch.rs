@@ -17,6 +17,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::AtomicU64;
 use std::time::{Duration, SystemTime};
 
 use crossbeam_channel::Sender;
@@ -82,14 +83,15 @@ pub fn spawn(
     config_path: PathBuf,
     tx: Sender<Msg>,
     gate: Arc<Mutex<ReloadGate>>,
+    version: Arc<AtomicU64>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
         .name("conduit-watch".into())
-        .spawn(move || poll_loop(config_path, tx, gate))
+        .spawn(move || poll_loop(config_path, tx, gate, version))
         .expect("spawning watch thread")
 }
 
-fn poll_loop(config_path: PathBuf, tx: Sender<Msg>, gate: Arc<Mutex<ReloadGate>>) {
+fn poll_loop(config_path: PathBuf, tx: Sender<Msg>, gate: Arc<Mutex<ReloadGate>>, version: Arc<AtomicU64>) {
     let mut last_mtime: Option<SystemTime> = None;
 
     loop {
@@ -141,7 +143,8 @@ fn poll_loop(config_path: PathBuf, tx: Sender<Msg>, gate: Arc<Mutex<ReloadGate>>
 
         if reload {
             eprintln!("conduit/watch: reloading config from {}", config_path.display());
-            if tx.send(Msg::Reload(compiled)).is_err() {
+            let v = version.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            if tx.send(Msg::Reload(compiled, v)).is_err() {
                 // Run loop has shut down; exit the watcher.
                 break;
             }

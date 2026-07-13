@@ -194,17 +194,20 @@ pub fn start(config: DaemonConfig) -> anyhow::Result<DaemonHandle> {
         Arc::new(Mutex::new(g))
     };
 
+    // Shared monotonic config version counter.
+    let config_version = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+
     // IPC server.
     let sock_path = config
         .socket_path
         .unwrap_or_else(paths::socket_path);
-    let ipc_thread = ipc::spawn_at(sock_path.clone(), tx.clone(), config.config_path.clone(), Arc::clone(&gate))
+    let ipc_thread = ipc::spawn_at(sock_path.clone(), tx.clone(), config.config_path.clone(), Arc::clone(&gate), Arc::clone(&config_version))
         .context("spawning IPC server")?;
     detached.push(ipc_thread);
 
     // Optional config file watcher.
     if config.enable_watch {
-        let h = watch::spawn(config.config_path.clone(), tx.clone(), Arc::clone(&gate));
+        let h = watch::spawn(config.config_path.clone(), tx.clone(), Arc::clone(&gate), Arc::clone(&config_version));
         detached.push(h);
     }
 

@@ -24,6 +24,7 @@ use std::io::{BufRead, BufReader, Write as _};
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
 use crossbeam_channel::{bounded, Sender};
@@ -50,8 +51,9 @@ pub fn spawn(
     tx: Sender<Msg>,
     config_path: PathBuf,
     gate: Arc<Mutex<ReloadGate>>,
+    version: Arc<AtomicU64>,
 ) -> anyhow::Result<std::thread::JoinHandle<()>> {
-    spawn_at(crate::paths::socket_path(), tx, config_path, gate)
+    spawn_at(crate::paths::socket_path(), tx, config_path, gate, version)
 }
 
 /// Like `spawn` but binds to an explicit `sock_path` instead of reading from
@@ -62,6 +64,7 @@ pub fn spawn_at(
     tx: Sender<Msg>,
     config_path: PathBuf,
     gate: Arc<Mutex<ReloadGate>>,
+    version: Arc<AtomicU64>,
 ) -> anyhow::Result<std::thread::JoinHandle<()>> {
     // Remove stale socket (ignore error if it didn't exist).
     let _ = std::fs::remove_file(&sock_path);
@@ -78,7 +81,7 @@ pub fn spawn_at(
 
     let handle = std::thread::Builder::new()
         .name("conduit-ipc-accept".into())
-        .spawn(move || accept_loop(listener, tx, config_path, gate))
+        .spawn(move || accept_loop(listener, tx, config_path, gate, version))
         .map_err(|e| anyhow::anyhow!("IPC spawn: {e}"))?;
 
     Ok(handle)
@@ -91,6 +94,7 @@ fn accept_loop(
     tx: Sender<Msg>,
     config_path: PathBuf,
     gate: Arc<Mutex<ReloadGate>>,
+    version: Arc<AtomicU64>,
 ) {
     let mut conn_id: u64 = 0;
     for stream in listener.incoming() {
@@ -100,10 +104,11 @@ fn accept_loop(
                 let tx2 = tx.clone();
                 let cp2 = config_path.clone();
                 let gate2 = Arc::clone(&gate);
+                let ver2 = Arc::clone(&version);
                 let id = conn_id;
                 let _ = std::thread::Builder::new()
                     .name(format!("conduit-ipc-conn-{id}"))
-                    .spawn(move || handle_connection(s, tx2, cp2, gate2));
+                    .spawn(move || handle_connection(s, tx2, cp2, gate2, ver2));
             }
             Err(e) => {
                 eprintln!("conduit/ipc: accept error: {e}");
@@ -124,6 +129,7 @@ fn handle_connection(
     tx: Sender<Msg>,
     config_path: PathBuf,
     gate: Arc<Mutex<ReloadGate>>,
+    version: Arc<AtomicU64>,
 ) {
     // The read and write halves share the underlying fd; we need separate
     // handles.  `try_clone` gives us a second fd for writing.
@@ -162,7 +168,7 @@ fn handle_connection(
             }
         };
 
-        match dispatch(request, &tx, &config_path, &gate, &mut writer) {
+        match dispatch(request, &tx, &config_path, &gate, &version, &mut writer) {
             DispatchResult::Continue => {}
             DispatchResult::SubscribeLoop(rx) => {
                 // Forward Push frames until the channel disconnects or the
@@ -189,6 +195,7 @@ fn dispatch(
     tx: &Sender<Msg>,
     config_path: &PathBuf,
     gate: &Arc<Mutex<ReloadGate>>,
+    version: &Arc<AtomicU64>,
     writer: &mut impl Write,
 ) -> DispatchResult {
     match request {
@@ -217,7 +224,7 @@ fn dispatch(
 
         // ── SetConfig ────────────────────────────────────────────────────────
         Request::SetConfig { toml } => {
-            let resp = set_config(&toml, config_path, tx, gate);
+            let resp = set_config(&toml, config_path, tx, gate, version);
             if write_response(writer, &resp).is_err() {
                 return DispatchResult::WriteError;
             }
@@ -406,6 +413,7 @@ fn set_config(
     config_path: &PathBuf,
     tx: &Sender<Msg>,
     gate: &Arc<Mutex<ReloadGate>>,
+    version: &Arc<AtomicU64>,
 ) -> Response {
     let compiled = match config::compile(toml) {
         Ok(c) => c,
@@ -457,8 +465,9 @@ fn set_config(
         g.record(toml);
     }
 
-    let _ = tx.send(Msg::Reload(compiled));
-    Response::Ok
+    let v = version.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    let _ = tx.send(Msg::Reload(compiled, v));
+    Response::ConfigApplied { version: v }
 }
 
 // ── Integration tests ─────────────────────────────────────────────────────────
@@ -539,7 +548,8 @@ a = "d"
             // Spawn the IPC server at the fixture-specific socket path.
             // We use `spawn_at` to avoid touching the global CONDUIT_SOCKET env var.
             let gate = std::sync::Arc::new(std::sync::Mutex::new(crate::watch::ReloadGate::new()));
-            spawn_at(sock_path.clone(), tx_for_ipc, config_path.clone(), gate)
+            let version = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+            spawn_at(sock_path.clone(), tx_for_ipc, config_path.clone(), gate, version)
                 .expect("spawn ipc");
 
             // `spawn_at` returns only after the listener is bound, so the socket
@@ -617,7 +627,10 @@ a = "d"
                 toml: ALT_TOML.into(),
             },
         );
-        assert_eq!(resp, Response::Ok, "SetConfig should return Ok");
+        assert!(
+            matches!(resp, Response::ConfigApplied { version: v } if v >= 1),
+            "SetConfig should return ConfigApplied with version >= 1, got {resp:?}"
+        );
 
         // Verify the file was actually rewritten.
         let written = std::fs::read_to_string(&fx.config_path).unwrap();
@@ -722,8 +735,9 @@ a = "d"
         let path = dir.join("conduit.toml");
         let (tx, _rx) = crossbeam_channel::unbounded();
         let gate = std::sync::Arc::new(std::sync::Mutex::new(crate::watch::ReloadGate::new()));
+        let counter = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
 
-        let resp = set_config("this is [ not toml", &path, &tx, &gate);
+        let resp = set_config("this is [ not toml", &path, &tx, &gate, &counter);
         match resp {
             Response::Err { code, detail, .. } => {
                 assert_eq!(code, conduit_proto::ErrorCode::ConfigInvalid);
@@ -732,5 +746,35 @@ a = "d"
             other => panic!("expected Err, got {other:?}"),
         }
         assert!(!path.exists(), "invalid config must not be written");
+    }
+
+    #[test]
+    fn set_config_returns_monotonic_version() {
+        let dir = std::env::temp_dir().join(format!("conduit-ver-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("conduit.toml");
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let gate = std::sync::Arc::new(std::sync::Mutex::new(crate::watch::ReloadGate::new()));
+        let counter = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+
+        let valid = "[profile.default.keys]\n";
+        let r1 = set_config(valid, &path, &tx, &gate, &counter);
+        let r2 = set_config(valid, &path, &tx, &gate, &counter);
+        match (r1, r2) {
+            (
+                Response::ConfigApplied { version: v1 },
+                Response::ConfigApplied { version: v2 },
+            ) => assert!(v2 > v1 && v1 >= 1),
+            other => panic!("expected ConfigApplied pair, got {other:?}"),
+        }
+        // Reload messages carry the same versions.
+        let mut versions = vec![];
+        while let Ok(msg) = rx.try_recv() {
+            if let crate::runloop::Msg::Reload(_, v) = msg {
+                versions.push(v);
+            }
+        }
+        assert_eq!(versions.len(), 2);
+        assert!(versions[1] > versions[0]);
     }
 }

@@ -82,6 +82,7 @@ pub enum Response {
     Windows { windows: Vec<FocusInfo> },
     CapturedKey { name: String, code: u16 },
     Subscribed,
+    ConfigApplied { version: u64 },
 }
 
 impl Response {
@@ -116,6 +117,10 @@ pub struct Status {
     pub focus: Option<FocusInfo>,
     pub grabbed_devices: Vec<String>,
     pub version: String,
+    /// Monotonic count of applied config reloads this daemon session.
+    /// 0 until the first reload. Lets the UI confirm an apply landed.
+    #[serde(default)]
+    pub config_version: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -260,6 +265,19 @@ mod tests {
             serde_json::to_string(&ev).unwrap(),
             r#"{"type":"event","phase":"pre","key_name":"a","code":30,"state":"press","time_us":5,"device":""}"#
         );
+    }
+
+    #[test]
+    fn config_applied_and_status_version_wire_shapes() {
+        assert_eq!(
+            serde_json::to_string(&Response::ConfigApplied { version: 7 }).unwrap(),
+            r#"{"type":"config_applied","version":7}"#
+        );
+        // Old daemons omit config_version: defaults to 0.
+        let s: Status = serde_json::from_str(
+            r#"{"active_profile":"default","active_layers":[],"suspended":false,"focus":null,"grabbed_devices":[],"version":"0.1.0"}"#,
+        ).unwrap();
+        assert_eq!(s.config_version, 0);
     }
 
     #[test]

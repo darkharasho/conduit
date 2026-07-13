@@ -63,7 +63,7 @@ pub enum Msg {
     /// context (tests, IPC); only global mapping tables apply.
     Input(Event, Option<u16>),
     Focus(FocusInfo),
-    Reload(CompiledConfig),
+    Reload(CompiledConfig, u64),
     Suspend,
     Resume,
     DeviceAdded(PathBuf),
@@ -205,6 +205,7 @@ pub fn run(
         readers.keys().map(|p| p.display().to_string()).collect();
     grabbed_devices.sort();
     let mut slots = compute_slots(&sources, &device_selectors);
+    let mut config_version: u64 = 0;
 
     loop {
         // Sleep until the next message or the engine's next tap-hold deadline.
@@ -250,10 +251,11 @@ pub fn run(
                 let slot = src.and_then(|s| slots.get(&s).copied().flatten());
                 engine.handle_on(ev, slot).to_vec()
             }
-            Some(Msg::Reload(cfg)) => {
+            Some(Msg::Reload(cfg, ver)) => {
                 // swap_config needs the current focus so buffered events
                 // replay under the right profile — handled here, not in
                 // drive(), because only run() knows the focus.
+                config_version = ver;
                 let new_settings = cfg.settings.clone();
                 device_selectors = cfg.device_selectors.clone();
                 let evs = {
@@ -267,7 +269,7 @@ pub fn run(
                 };
                 settings = new_settings;
                 slots = compute_slots(&sources, &device_selectors);
-                push_status(&engine, &current_focus, &grabbed_devices, &mut status_subs);
+                push_status(&engine, &current_focus, &grabbed_devices, config_version, &mut status_subs);
                 evs
             }
             Some(Msg::DeviceAdded(p)) => {
@@ -281,7 +283,7 @@ pub fn run(
                     &mut sources,
                 );
                 slots = compute_slots(&sources, &device_selectors);
-                push_status(&engine, &current_focus, &grabbed_devices, &mut status_subs);
+                push_status(&engine, &current_focus, &grabbed_devices, config_version, &mut status_subs);
                 Vec::new()
             }
             Some(Msg::DeviceRemoved(p)) => {
@@ -293,7 +295,7 @@ pub fn run(
                 let s = p.display().to_string();
                 grabbed_devices.retain(|g| g != &s);
                 eprintln!("conduit: released {}", p.display());
-                push_status(&engine, &current_focus, &grabbed_devices, &mut status_subs);
+                push_status(&engine, &current_focus, &grabbed_devices, config_version, &mut status_subs);
                 Vec::new()
             }
             Some(Msg::Subscribe(kind, tx)) => {
@@ -309,6 +311,7 @@ pub fn run(
                         &engine,
                         &current_focus,
                         &grabbed_devices,
+                        config_version,
                     )),
                     QueryKind::Devices => {
                         // Probe each grabbed path to build DeviceInfo entries.
@@ -359,7 +362,7 @@ pub fn run(
                 }
                 let evs = drive(&mut engine, other, now);
                 if status_changed {
-                    push_status(&engine, &current_focus, &grabbed_devices, &mut status_subs);
+                    push_status(&engine, &current_focus, &grabbed_devices, config_version, &mut status_subs);
                 }
                 evs
             }
@@ -483,7 +486,7 @@ fn try_push(tx: &Sender<Push>, push: &Push) -> bool {
     )
 }
 
-fn build_status(engine: &Engine, focus: &Option<FocusInfo>, grabbed: &[String]) -> Status {
+fn build_status(engine: &Engine, focus: &Option<FocusInfo>, grabbed: &[String], config_version: u64) -> Status {
     Status {
         active_profile: engine.active_profile_name().to_string(),
         active_layers: engine
@@ -495,6 +498,7 @@ fn build_status(engine: &Engine, focus: &Option<FocusInfo>, grabbed: &[String]) 
         focus: focus.clone(),
         grabbed_devices: grabbed.to_vec(),
         version: env!("CARGO_PKG_VERSION").to_string(),
+        config_version,
     }
 }
 
@@ -502,12 +506,13 @@ fn push_status(
     engine: &Engine,
     focus: &Option<FocusInfo>,
     grabbed: &[String],
+    config_version: u64,
     subs: &mut Vec<Sender<Push>>,
 ) {
     if subs.is_empty() {
         return;
     }
-    let push = Push::Status(build_status(engine, focus, grabbed));
+    let push = Push::Status(build_status(engine, focus, grabbed, config_version));
     subs.retain(|tx| try_push(tx, &push));
 }
 
