@@ -29,7 +29,7 @@ use std::time::Duration;
 use crossbeam_channel::{bounded, Sender};
 
 use conduit_core::config;
-use conduit_proto::{Push, Request, Response};
+use conduit_proto::{ErrorCode, Push, Request, Response};
 
 use crate::runloop::{Msg, QueryKind, SubscribeKind};
 use crate::watch::ReloadGate;
@@ -150,9 +150,11 @@ fn handle_connection(
         let request: Request = match serde_json::from_str(&line) {
             Ok(r) => r,
             Err(e) => {
-                let resp = Response::Err {
-                    message: format!("malformed JSON: {e}"),
-                };
+                let resp = Response::error_detail(
+                    ErrorCode::MalformedRequest,
+                    "malformed request",
+                    e.to_string(),
+                );
                 if write_response(&mut writer, &resp).is_err() {
                     break;
                 }
@@ -202,9 +204,11 @@ fn dispatch(
         Request::GetConfig => {
             let resp = match std::fs::read_to_string(config_path) {
                 Ok(toml) => Response::Config { toml },
-                Err(e) => Response::Err {
-                    message: format!("reading config: {e}"),
-                },
+                Err(e) => Response::error_detail(
+                    ErrorCode::ApplyFailed,
+                    "could not read config file",
+                    e.to_string(),
+                ),
             };
             if write_response(writer, &resp).is_err() {
                 return DispatchResult::WriteError;
@@ -279,9 +283,7 @@ fn dispatch(
             let _ = tx.send(Msg::CaptureNextKey(reply_tx));
             let resp = match reply_rx.recv_timeout(Duration::from_secs(30)) {
                 Ok(r) => r,
-                Err(_) => Response::Err {
-                    message: "capture_next_key timed out after 30 s".into(),
-                },
+                Err(_) => Response::error(ErrorCode::Timeout, "no key pressed within 30s"),
             };
             if write_response(writer, &resp).is_err() {
                 return DispatchResult::WriteError;
@@ -315,9 +317,11 @@ fn list_devices_response(tx: &Sender<Msg>) -> Response {
     let discovered = match crate::devices::discover() {
         Ok(devs) => devs,
         Err(e) => {
-            return Response::Err {
-                message: format!("discover devices: {e}"),
-            };
+            return Response::error_detail(
+                ErrorCode::Internal,
+                "discover devices failed",
+                e.to_string(),
+            );
         }
     };
 
@@ -352,19 +356,17 @@ fn list_devices_response(tx: &Sender<Msg>) -> Response {
 fn query(tx: &Sender<Msg>, kind: QueryKind) -> Response {
     let (reply_tx, reply_rx) = bounded::<Response>(1);
     if tx.send(Msg::Query(kind, reply_tx)).is_err() {
-        return Response::Err {
-            message: "engine thread unavailable".into(),
-        };
+        return Response::error(ErrorCode::EngineNotRunning, "engine thread unavailable");
     }
-    reply_rx.recv().unwrap_or(Response::Err {
-        message: "engine did not reply".into(),
-    })
+    reply_rx
+        .recv()
+        .unwrap_or_else(|_| Response::error(ErrorCode::EngineNotRunning, "engine thread unavailable"))
 }
 
 /// Write a `Response` as a JSON line.  Returns `Err` if the write fails.
 fn write_response(writer: &mut impl std::io::Write, resp: &Response) -> std::io::Result<()> {
     let json = serde_json::to_string(resp)
-        .unwrap_or_else(|_| r#"{"type":"err","message":"serialization error"}"#.into());
+        .unwrap_or_else(|_| r#"{"type":"err","code":"internal","message":"serialization error"}"#.into());
     writer.write_all(json.as_bytes())?;
     writer.write_all(b"\n")?;
     writer.flush()
@@ -408,9 +410,7 @@ fn set_config(
     let compiled = match config::compile(toml) {
         Ok(c) => c,
         Err(e) => {
-            return Response::Err {
-                message: e.to_string(),
-            };
+            return Response::error_detail(ErrorCode::ConfigInvalid, "config rejected", e.to_string());
         }
     };
 
@@ -418,9 +418,11 @@ fn set_config(
     let dir = match config_path.parent() {
         Some(d) => d,
         None => {
-            return Response::Err {
-                message: "config path has no parent directory".into(),
-            };
+            return Response::error_detail(
+                ErrorCode::ApplyFailed,
+                "writing config failed",
+                "config path has no parent directory".to_string(),
+            );
         }
     };
 
@@ -445,9 +447,7 @@ fn set_config(
         Ok(())
     })() {
         let _ = std::fs::remove_file(&tmp_path);
-        return Response::Err {
-            message: format!("writing config: {e}"),
-        };
+        return Response::error_detail(ErrorCode::ApplyFailed, "writing config failed", e.to_string());
     }
 
     // Record the content hash so the watcher skips the mtime-change reload
@@ -595,7 +595,7 @@ a = "d"
             },
         );
         match resp {
-            Response::Err { message } => {
+            Response::Err { message, .. } => {
                 assert!(!message.is_empty(), "Err message should not be empty");
             }
             other => panic!("expected Err, got {other:?}"),
@@ -713,5 +713,24 @@ a = "d"
             }
             other => panic!("expected Config, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn set_config_invalid_toml_returns_config_invalid_code() {
+        let dir = std::env::temp_dir().join(format!("conduit-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("conduit.toml");
+        let (tx, _rx) = crossbeam_channel::unbounded();
+        let gate = std::sync::Arc::new(std::sync::Mutex::new(crate::watch::ReloadGate::new()));
+
+        let resp = set_config("this is [ not toml", &path, &tx, &gate);
+        match resp {
+            Response::Err { code, detail, .. } => {
+                assert_eq!(code, conduit_proto::ErrorCode::ConfigInvalid);
+                assert!(!detail.is_empty(), "detail must carry the compiler error");
+            }
+            other => panic!("expected Err, got {other:?}"),
+        }
+        assert!(!path.exists(), "invalid config must not be written");
     }
 }
