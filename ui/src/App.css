@@ -70,8 +70,15 @@ button {
 
 .app-shell {
   display: grid;
-  grid-template-rows: 34px 1fr 26px;
+  grid-template-rows: 34px 1fr;
   height: 100vh;
+  overflow: hidden;
+}
+
+.app-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -145,6 +152,8 @@ button {
   display: grid;
   grid-template-columns: 216px 1fr;
   min-height: 0;
+  flex: 1;
+  overflow: hidden;
 }
 
 /* ── Left rail ── */
@@ -1988,3 +1997,9 @@ button {
 .home-shell__back { background: none; border: none; color: var(--text-mid); font: inherit; font-size: 13px; cursor: pointer; padding: 12px 16px; text-align: left; }
 .home-shell__help { display: flex; flex-direction: column; overflow-y: auto; }
 .home-shell__recovery { display: flex; align-items: center; justify-content: center; height: 100%; }
+
+/* ── Pause control + banner ──────────────────────────────────────────── */
+.titlebar__pause { background: none; border: 1px solid transparent; border-radius: var(--r4); padding: 3px 10px; font: inherit; font-size: 12px; color: var(--text-mid); cursor: pointer; }
+.titlebar__pause:hover { border-color: var(--border-control); background: var(--bg-key); }
+.titlebar__pause:disabled { opacity: .5; cursor: default; }
+.pause-banner { display: flex; align-items: center; gap: 14px; justify-content: center; padding: 8px 16px; background: var(--amber-border); color: var(--text-hi); font-size: 13px; }

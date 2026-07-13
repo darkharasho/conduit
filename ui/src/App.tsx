@@ -5,6 +5,7 @@ import {
   getConfig,
   setConfig,
   getStatus,
+  resume,
   listWindows,
 } from "./lib/client";
 import type { Status, FocusInfo } from "./lib/client";
@@ -133,8 +134,15 @@ function App() {
 
   return (
     <div className="app-shell">
-      <Titlebar connected={connected} />
-      <div className={`app-cols${isDeviceView ? "" : " app--no-rail"}`}>
+      <Titlebar />
+      <div className="app-body">
+        {status?.suspended === true && (
+          <div className="pause-banner" role="status">
+            <span>Conduit is paused — your buttons have their normal behavior.</span>
+            <button className="btn" onClick={() => resume().catch(() => {})}>Resume</button>
+          </div>
+        )}
+        <div className={`app-cols${isDeviceView ? "" : " app--no-rail"}`}>
         {/* Left rail — only in device view */}
         {isDeviceView && view.kind === "device" && (
           <aside className="rail" aria-label="Navigation">
@@ -221,6 +229,7 @@ function App() {
             </div>
           )}
         </div>
+      </div>
       </div>
 
       {/* Profile add modal (lifted from MappingsScreen) */}

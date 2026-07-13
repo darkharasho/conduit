@@ -2,6 +2,16 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import App from "./App";
 
+const sampleStatus = {
+  active_profile: "default",
+  active_layers: ["base"],
+  suspended: false,
+  focus: { process: "sai", class: "sai", title: "SAI" },
+  grabbed_devices: ["/dev/input/event2"],
+  version: "0.1.0",
+  config_version: 0,
+};
+
 // Tests rewritten for home-first navigation (Phase 2 shell rework).
 // Deleted tests:
 //   - "seeds grabbed count and daemon-ok from getStatus on mount"
@@ -61,6 +71,28 @@ describe("App shell — home-first navigation", () => {
     expect(document.querySelector(".status-bar")).toBeNull();
     expect(document.querySelector(".status-bar__dot--ok")).toBeNull();
     expect(document.querySelector(".status-bar__dot--err")).toBeNull();
+  });
+
+  it("opens on the home screen with no daemon jargon", async () => {
+    render(<App />);
+    await screen.findByText("Your devices");
+    expect(screen.queryByText(/daemon/i)).toBeNull();
+  });
+
+  it("shows the pause control and no connection dot in the titlebar", async () => {
+    render(<App />);
+    expect(await screen.findByRole("button", { name: /Pause Conduit/ })).toBeInTheDocument();
+    expect(document.querySelector(".titlebar__daemon")).toBeNull();
+  });
+
+  it("shows an unmissable banner when paused", async () => {
+    const { getStatus } = await import("./lib/client");
+    const mockGetStatus = vi.mocked(getStatus);
+    mockGetStatus.mockResolvedValue({ ...sampleStatus, suspended: true });
+    render(<App />);
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Conduit is paused — your buttons have their normal behavior.",
+    );
   });
 
   it("navigates home → device editor → back", async () => {
