@@ -2003,3 +2003,10 @@ button {
 .titlebar__pause:hover { border-color: var(--border-control); background: var(--bg-key); }
 .titlebar__pause:disabled { opacity: .5; cursor: default; }
 .pause-banner { display: flex; align-items: center; gap: 14px; justify-content: center; padding: 8px 16px; background: var(--amber-border); color: var(--text-hi); font-size: 13px; }
+
+/* ── Help screen ─────────────────────────────────────────────────────── */
+.help { display: flex; flex-direction: column; min-height: 0; }
+.help__tabs { display: flex; gap: 4px; padding: 8px 16px 0; border-bottom: 1px solid var(--border-structural); }
+.help__tab { background: none; border: none; border-bottom: 2px solid transparent; padding: 8px 12px; font: inherit; font-size: 13px; color: var(--text-lo); cursor: pointer; }
+.help__tab--sel { color: var(--text-hi); border-bottom-color: var(--teal); }
+.help__body { flex: 1; overflow-y: auto; min-height: 0; }

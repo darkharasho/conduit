@@ -19,9 +19,9 @@ import {
   addProfile,
 } from "./lib/config-model";
 import type { ConfigModel } from "./lib/config-model";
-import { StatusScreen } from "./screens/Status";
 import { MappingsScreen } from "./screens/Mappings";
 import { HomeScreen } from "./screens/Home";
+import { HelpScreen } from "./screens/Help";
 import type { PhysicalDevice } from "./lib/device-registry";
 
 type View =
@@ -225,7 +225,7 @@ function App() {
           {view.kind === "help" && (
             <div className="home-shell__help">
               <button className="home-shell__back" onClick={() => setView({ kind: "home" })}>‹ Your devices</button>
-              <StatusScreen />
+              <HelpScreen />
             </div>
           )}
         </div>
