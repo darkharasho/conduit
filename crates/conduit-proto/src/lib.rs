@@ -1,5 +1,41 @@
 use serde::{Deserialize, Serialize};
 
+/// Stable, UI-facing error classification. Wire strings are kebab-case and
+/// are a public contract: the UI's plain-language table keys off them.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ErrorCode {
+    EngineNotRunning,
+    PermissionDenied,
+    DeviceMissing,
+    ConfigInvalid,
+    ApplyFailed,
+    MalformedRequest,
+    Timeout,
+    Internal,
+}
+
+impl Default for ErrorCode {
+    fn default() -> Self {
+        ErrorCode::Internal
+    }
+}
+
+impl ErrorCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ErrorCode::EngineNotRunning => "engine-not-running",
+            ErrorCode::PermissionDenied => "permission-denied",
+            ErrorCode::DeviceMissing => "device-missing",
+            ErrorCode::ConfigInvalid => "config-invalid",
+            ErrorCode::ApplyFailed => "apply-failed",
+            ErrorCode::MalformedRequest => "malformed-request",
+            ErrorCode::Timeout => "timeout",
+            ErrorCode::Internal => "internal",
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct FocusInfo {
     pub process: String,
@@ -28,11 +64,48 @@ pub enum Response {
     Status(Status),
     Config { toml: String },
     Ok,
-    Err { message: String },
+    Err {
+        /// Stable classification; defaults to `internal` when absent so
+        /// old peers still parse.
+        #[serde(default)]
+        code: ErrorCode,
+        /// Short technical summary (not shown to end users by default).
+        message: String,
+        /// Raw underlying error for "Show technical details".
+        #[serde(default)]
+        detail: String,
+        /// Optional structured values (e.g. device name) for UI interpolation.
+        #[serde(default)]
+        params: std::collections::BTreeMap<String, String>,
+    },
     Devices { devices: Vec<DeviceInfo> },
     Windows { windows: Vec<FocusInfo> },
     CapturedKey { name: String, code: u16 },
     Subscribed,
+}
+
+impl Response {
+    pub fn error(code: ErrorCode, message: impl Into<String>) -> Self {
+        Response::Err {
+            code,
+            message: message.into(),
+            detail: String::new(),
+            params: Default::default(),
+        }
+    }
+
+    pub fn error_detail(
+        code: ErrorCode,
+        message: impl Into<String>,
+        detail: impl Into<String>,
+    ) -> Self {
+        Response::Err {
+            code,
+            message: message.into(),
+            detail: detail.into(),
+            params: Default::default(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -187,5 +260,39 @@ mod tests {
             serde_json::to_string(&ev).unwrap(),
             r#"{"type":"event","phase":"pre","key_name":"a","code":30,"state":"press","time_us":5,"device":""}"#
         );
+    }
+
+    #[test]
+    fn error_code_wire_strings_are_kebab_case() {
+        assert_eq!(
+            serde_json::to_string(&ErrorCode::EngineNotRunning).unwrap(),
+            r#""engine-not-running""#
+        );
+        assert_eq!(ErrorCode::ConfigInvalid.as_str(), "config-invalid");
+        assert_eq!(ErrorCode::default(), ErrorCode::Internal);
+    }
+
+    #[test]
+    fn err_envelope_round_trips_and_tolerates_old_shape() {
+        let e = Response::error_detail(
+            ErrorCode::ConfigInvalid,
+            "config rejected",
+            "expected ']' at line 3",
+        );
+        let json = serde_json::to_string(&e).unwrap();
+        assert!(json.contains(r#""code":"config-invalid""#));
+        let back: Response = serde_json::from_str(&json).unwrap();
+        assert_eq!(e, back);
+
+        // Old daemons send only {type, message}: code defaults to internal.
+        let old: Response =
+            serde_json::from_str(r#"{"type":"err","message":"boom"}"#).unwrap();
+        match old {
+            Response::Err { code, message, .. } => {
+                assert_eq!(code, ErrorCode::Internal);
+                assert_eq!(message, "boom");
+            }
+            other => panic!("expected Err, got {other:?}"),
+        }
     }
 }
