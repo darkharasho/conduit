@@ -1,6 +1,64 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
+// ---- Error types ----
+
+export type ErrorCode =
+  | "engine-not-running"
+  | "permission-denied"
+  | "device-missing"
+  | "config-invalid"
+  | "apply-failed"
+  | "malformed-request"
+  | "timeout"
+  | "internal"
+  | "unknown";
+
+const KNOWN_CODES: ReadonlySet<string> = new Set([
+  "engine-not-running",
+  "permission-denied",
+  "device-missing",
+  "config-invalid",
+  "apply-failed",
+  "malformed-request",
+  "timeout",
+  "internal",
+]);
+
+export class ConduitError extends Error {
+  code: ErrorCode;
+  detail: string;
+  constructor(code: ErrorCode, message: string, detail = "") {
+    super(message);
+    this.name = "ConduitError";
+    this.code = code;
+    this.detail = detail;
+  }
+}
+
+function toConduitError(e: unknown): ConduitError {
+  if (e instanceof ConduitError) return e;
+  if (typeof e === "object" && e !== null && "code" in e && "message" in e) {
+    const p = e as { code: string; message: string; detail?: string };
+    const code = (KNOWN_CODES.has(p.code) ? p.code : "unknown") as ErrorCode;
+    return new ConduitError(code, p.message, p.detail ?? "");
+  }
+  return new ConduitError("unknown", String(e));
+}
+
+async function call<T>(
+  cmd: string,
+  args?: Record<string, unknown>
+): Promise<T> {
+  try {
+    return args !== undefined
+      ? await invoke<T>(cmd, args)
+      : await invoke<T>(cmd);
+  } catch (e) {
+    throw toConduitError(e);
+  }
+}
+
 // ---- TypeScript interfaces mirroring proto JSON shapes (snake_case) ----
 
 export interface FocusInfo {
@@ -16,6 +74,8 @@ export interface Status {
   focus: FocusInfo | null;
   grabbed_devices: string[];
   version: string;
+  /** Applied config version counter; old daemons yield 0 via serde default */
+  config_version: number;
 }
 
 export interface DeviceInfo {
@@ -56,35 +116,35 @@ export interface CapturedKey {
 // ---- One-shot command wrappers ----
 
 export async function getStatus(): Promise<Status> {
-  return invoke<Status>("get_status");
+  return call<Status>("get_status");
 }
 
 export async function getConfig(): Promise<string> {
-  return invoke<string>("get_config");
+  return call<string>("get_config");
 }
 
-export async function setConfig(toml: string): Promise<void> {
-  return invoke<void>("set_config", { toml });
+export async function setConfig(toml: string): Promise<number> {
+  return call<number>("set_config", { toml });
 }
 
 export async function listDevices(): Promise<DeviceInfo[]> {
-  return invoke<DeviceInfo[]>("list_devices");
+  return call<DeviceInfo[]>("list_devices");
 }
 
 export async function listWindows(): Promise<FocusInfo[]> {
-  return invoke<FocusInfo[]>("list_windows");
+  return call<FocusInfo[]>("list_windows");
 }
 
 export async function suspend(): Promise<void> {
-  return invoke<void>("suspend");
+  return call<void>("suspend");
 }
 
 export async function resume(): Promise<void> {
-  return invoke<void>("resume");
+  return call<void>("resume");
 }
 
 export async function captureNextKey(): Promise<CapturedKey> {
-  return invoke<CapturedKey>("capture_next_key");
+  return call<CapturedKey>("capture_next_key");
 }
 
 export interface SetupResult {
@@ -95,7 +155,7 @@ export interface SetupResult {
 }
 
 export async function checkSetup(): Promise<SetupResult> {
-  return invoke<SetupResult>("check_setup");
+  return call<SetupResult>("check_setup");
 }
 
 // ---- Subscription event listeners ----

@@ -14,6 +14,7 @@ import { listen } from "@tauri-apps/api/event";
 import {
   getStatus,
   getConfig,
+  setConfig,
   listDevices,
   listWindows,
   suspend,
@@ -22,6 +23,7 @@ import {
   onStatus,
   onKeyEvent,
   onConnection,
+  ConduitError,
 } from "./client";
 import type { Status, DeviceInfo, WireEvent } from "./client";
 
@@ -43,6 +45,7 @@ const sampleStatus: Status = {
   },
   grabbed_devices: ["/dev/input/event0"],
   version: "0.1.0",
+  config_version: 0,
 };
 
 describe("getStatus", () => {
@@ -222,5 +225,32 @@ describe("onConnection", () => {
       "conduit://disconnected",
       expect.any(Function)
     );
+  });
+});
+
+describe("typed errors", () => {
+  it("wraps structured payload rejections in ConduitError", async () => {
+    mockInvoke.mockRejectedValueOnce({
+      code: "config-invalid",
+      message: "config rejected",
+      detail: "expected ']' at line 3",
+    });
+    const err = await setConfig("bad").catch((e) => e);
+    expect(err).toBeInstanceOf(ConduitError);
+    expect(err.code).toBe("config-invalid");
+    expect(err.detail).toContain("line 3");
+  });
+
+  it("maps unknown rejection shapes to code unknown", async () => {
+    mockInvoke.mockRejectedValueOnce("socket exploded");
+    const err = await getStatus().catch((e) => e);
+    expect(err).toBeInstanceOf(ConduitError);
+    expect(err.code).toBe("unknown");
+    expect(err.message).toBe("socket exploded");
+  });
+
+  it("setConfig resolves with the applied version", async () => {
+    mockInvoke.mockResolvedValueOnce(42);
+    await expect(setConfig("[profile.default.keys]\n")).resolves.toBe(42);
   });
 });
