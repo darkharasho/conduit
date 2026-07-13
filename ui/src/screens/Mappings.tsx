@@ -100,13 +100,15 @@ export function MappingsScreen({
     };
   }, [loadConfig, loadDevices]);
 
-  // One-shot: when focusDevicePath is provided and devices have loaded, select it
+  // One-shot: when focusDevicePath is provided and devices have loaded,
+  // select it once and never again, even if devices reload or connection restarts
+  const didFocus = useRef(false);
   useEffect(() => {
-    if (!focusDevicePath) return;
+    if (!focusDevicePath || didFocus.current) return;
     if (devices.some((d) => d.path === focusDevicePath)) {
       setActiveDevPath(focusDevicePath);
+      didFocus.current = true;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [devices, focusDevicePath]);
 
   // When rail selects a different profile, reset layer & editing

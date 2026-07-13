@@ -167,6 +167,100 @@ describe("MappingsScreen — Detect button", () => {
   });
 });
 
+describe("MappingsScreen — focusDevicePath one-shot", () => {
+  it("focuses the device tab once on load with focusDevicePath, and does not snap back on device list refresh", async () => {
+    const mouse1 = {
+      path: "/dev/input/event11",
+      name: "Mouse 1",
+      vendor: 0x046d,
+      product: 0x4099,
+      is_keyboard: false,
+      is_mouse: true,
+      grabbed: true,
+      id: "046d:4099/Mouse1",
+      class: "mouse",
+      phys: "usb-1",
+      keys: [],
+      wheel: true,
+      hwheel: true,
+    };
+    const mouse2 = {
+      path: "/dev/input/event12",
+      name: "Mouse 2",
+      vendor: 0x046d,
+      product: 0x409a,
+      is_keyboard: false,
+      is_mouse: true,
+      grabbed: true,
+      id: "046d:409a/Mouse2",
+      class: "mouse",
+      phys: "usb-2",
+      keys: [],
+      wheel: true,
+      hwheel: true,
+    };
+
+    // Start with both devices, listen callback to trigger refresh
+    let connectionCallback: ((connected: boolean) => void) | null = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockInvoke.mockImplementation((async (cmd: string) => {
+      if (cmd === "get_config") return MINIMAL_TOML;
+      if (cmd === "list_devices") return [mouse1, mouse2];
+      return undefined;
+    }) as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockListen.mockImplementation((async (event: string, cb: (e: { payload: unknown }) => void) => {
+      if (event === "conduit://connection") {
+        connectionCallback = cb as (connected: boolean) => void;
+      }
+      return vi.fn();
+    }) as any);
+
+    // Render with focusDevicePath set to mouse2
+    const { container } = render(
+      <MappingsScreen
+        railActiveProfile="default"
+        onProfilesChange={() => {}}
+        focusDevicePath="/dev/input/event12"
+      />
+    );
+
+    // Wait for initial load
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); });
+
+    // Verify mouse2 tab is active (has aria-selected=true)
+    // The device tabs container has role="tablist" aria-label="Devices"
+    const deviceTabsContainer = container.querySelector('[role="tablist"][aria-label="Devices"]');
+    expect(deviceTabsContainer).toBeTruthy();
+
+    const allDeviceTabs = Array.from(deviceTabsContainer?.querySelectorAll('[role="tab"]') || []);
+    const mouse2Tab = allDeviceTabs.find((btn) => btn.textContent?.includes("Mouse 2")) as HTMLButtonElement | undefined;
+    expect(mouse2Tab).toBeTruthy();
+    expect(mouse2Tab?.getAttribute("aria-selected")).toBe("true");
+
+    // User manually switches to mouse1
+    const mouse1Tab = allDeviceTabs.find((btn) => btn.textContent?.includes("Mouse 1")) as HTMLButtonElement | undefined;
+    expect(mouse1Tab).toBeTruthy();
+    await act(async () => { mouse1Tab?.click(); });
+
+    // Verify mouse1 is now active
+    expect(mouse1Tab?.getAttribute("aria-selected")).toBe("true");
+    expect(mouse2Tab?.getAttribute("aria-selected")).toBe("false");
+
+    // Simulate device list refresh (e.g., daemon reconnect firing onConnection callback)
+    // This should NOT snap the tab back to mouse2
+    await act(async () => {
+      connectionCallback?.(true);
+      await Promise.resolve();
+    });
+
+    // Verify mouse1 is STILL active (tab does not snap back to mouse2)
+    expect(mouse1Tab.getAttribute("aria-selected")).toBe("true");
+    expect(mouse2Tab.getAttribute("aria-selected")).toBe("false");
+  });
+});
+
 describe("MappingsScreen — plain-language assignment", () => {
   it("'Use default' removes the mapping and persists", async () => {
     const MAPPED_TOML = '[profile.default.keys]\na = "b"';
