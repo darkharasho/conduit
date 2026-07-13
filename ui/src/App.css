@@ -1941,3 +1941,39 @@ button {
   fill: var(--teal);
   font: 11.5px var(--font-ui);
 }
+
+/* ── Home screen ─────────────────────────────────────────────────────── */
+.home { padding: 36px 48px; overflow-y: auto; }
+.home__title { font-size: 20px; font-weight: 650; color: var(--text-hi); }
+.home__sub { margin-top: 5px; font-size: 13px; color: var(--text-lo); }
+.home__grid { margin-top: 24px; display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+.device-card {
+  display: flex; align-items: center; gap: 20px; text-align: left;
+  padding: 20px; background: var(--bg-rail); border: 1px solid var(--border-structural);
+  border-radius: var(--r6); cursor: pointer; position: relative;
+  font: inherit; color: inherit;
+}
+.device-card:hover { border-color: var(--border-control); background: var(--bg-key); }
+.device-card__art { flex-shrink: 0; display: flex; }
+.device-card__info { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.device-card__name { font-size: 15px; font-weight: 600; color: var(--text-hi); }
+.device-card__state { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-mid); }
+.device-card__dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-dim); }
+.device-card__dot--ok { background: var(--teal); }
+.device-card__meta { font-size: 12px; color: var(--text-lo); }
+.device-card__chev { position: absolute; right: 16px; color: var(--text-dim); font-size: 16px; }
+.home__remembered { margin-top: 36px; }
+.home__remembered-title { font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--text-dim); }
+.remembered-row {
+  margin-top: 10px; display: flex; align-items: center; gap: 14px;
+  padding: 12px 16px; border: 1px dashed var(--border-structural);
+  border-radius: var(--r6); max-width: 520px;
+}
+.device-art--dim { opacity: .45; display: flex; }
+.remembered-row__name { display: block; font-size: 13px; font-weight: 550; color: var(--text-mid); }
+.remembered-row__note { display: block; margin-top: 2px; font-size: 12px; color: var(--text-lo); }
+.home__empty { margin-top: 48px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.home__empty-text { font-size: 14px; color: var(--text-mid); }
+.home__error { margin-top: 20px; padding: 14px 18px; border: 1px solid var(--amber-border); border-radius: var(--r6); max-width: 520px; }
+.home__error-title { font-size: 14px; font-weight: 600; color: var(--text-hi); }
+.home__error-body { margin-top: 4px; font-size: 13px; color: var(--text-mid); }
