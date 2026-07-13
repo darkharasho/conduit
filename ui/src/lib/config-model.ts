@@ -18,6 +18,7 @@ import { parse, stringify } from "smol-toml";
 
 export type ActionModel =
   | { kind: "key"; key: string }
+  | { kind: "chord"; keys: string[] }
   | { kind: "taphold"; tap: string; hold: string; timeoutMs?: number }
   | { kind: "layer_toggle"; layer: string }
   | { kind: "disabled" }
@@ -67,6 +68,8 @@ function actionToRaw(action: ActionModel): RawActionModel {
   switch (action.kind) {
     case "key":
       return action.key;
+    case "chord":
+      return action.keys.join("+");
     case "disabled":
       return "disabled";
     case "passthrough":
@@ -90,6 +93,10 @@ function rawToAction(raw: RawActionModel): ActionModel {
     if (raw === "passthrough") return { kind: "passthrough" };
     if (raw.startsWith("layer:")) {
       return { kind: "layer_toggle", layer: raw.slice(6) };
+    }
+    if (raw.includes("+")) {
+      const keys = raw.split("+").filter((t) => t.length > 0);
+      if (keys.length >= 2) return { kind: "chord", keys };
     }
     return { kind: "key", key: raw };
   }
@@ -728,6 +735,9 @@ export function actionToTomlLine(
   switch (action.kind) {
     case "key":
       valueStr = `"${action.key}"`;
+      break;
+    case "chord":
+      valueStr = `"${action.keys.join("+")}"`;
       break;
     case "disabled":
       valueStr = `"disabled"`;

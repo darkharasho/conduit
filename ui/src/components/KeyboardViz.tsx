@@ -34,6 +34,8 @@ export function actionHint(action: ActionModel | null): string {
         : holdRaw.slice(0, 4);
       return `${tap}⁄${hold}`;
     }
+    case "chord":
+      return action.keys.join("+").slice(0, 6);
     case "layer_toggle":
       return `L:${action.layer.slice(0, 4)}`;
     case "disabled":

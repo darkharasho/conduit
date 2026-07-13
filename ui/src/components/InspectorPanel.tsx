@@ -117,6 +117,9 @@ export function InspectorPanel({
         return { kind: "disabled" };
       case "passthrough":
         return { kind: "passthrough" };
+      case "chord":
+        // Task 4 replaces this with a chord editor
+        return null;
     }
   }, [kind, remapKey, tapKey, holdKey, holdIsLayer, holdLayerName, timeoutMs, toggleLayer]);
 

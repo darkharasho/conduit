@@ -100,6 +100,9 @@ export function actionLabel(action: ActionModel | null): string {
       }
       return `${tap} when tapped, ${keyLabel(action.hold)} when held`;
     }
+    case "chord":
+      // Task 4 replaces this with catalog lookup
+      return action.keys.join("+");
     case "layer_toggle":
       return `Switches the ${action.layer} layer on/off`;
   }

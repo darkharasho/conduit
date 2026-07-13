@@ -713,3 +713,30 @@ describe("removeAction", () => {
     expect(getAction(m, "default", "base", "mouse4")).toEqual({ kind: "key", key: "back" });
   });
 });
+
+describe("chord actions", () => {
+  it("round-trips a chord through TOML", () => {
+    const m = parseConfigToml('[profile.default.keys]\nmouse4 = "leftctrl+c"');
+    const a = getAction(m, "default", "base", "mouse4");
+    expect(a).toEqual({ kind: "chord", keys: ["leftctrl", "c"] });
+    expect(serializeConfigToml(m)).toContain('mouse4 = "leftctrl+c"');
+  });
+
+  it("setAction writes a chord and actionToTomlLine echoes it", () => {
+    const m = parseConfigToml("[profile.default.keys]\n");
+    const updated = setAction(m, "default", "base", "mouse5", {
+      kind: "chord",
+      keys: ["leftctrl", "leftshift", "t"],
+    });
+    expect(getAction(updated, "default", "base", "mouse5")).toEqual({
+      kind: "chord",
+      keys: ["leftctrl", "leftshift", "t"],
+    });
+    expect(
+      actionToTomlLine("default", "base", "mouse5", {
+        kind: "chord",
+        keys: ["leftctrl", "leftshift", "t"],
+      }),
+    ).toContain('mouse5 = "leftctrl+leftshift+t"');
+  });
+});
