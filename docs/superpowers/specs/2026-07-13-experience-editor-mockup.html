@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Conduit — Device editor / assignment flow mockup</title>
+<style>
+  :root {
+    --bg: #0d0f12; --panel: #14171c; --panel-hi: #1a1e25; --line: #232830;
+    --text: #e8ebef; --text-mid: #9aa3ad; --text-lo: #5f6873;
+    --accent: #38bdf8; --accent-dim: rgba(56,189,248,.12); --ok: #34d399;
+    font-size: 15px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+  }
+  .titlebar {
+    height: 44px; display: flex; align-items: center;
+    padding: 0 16px; gap: 10px; border-bottom: 1px solid var(--line); flex-shrink: 0;
+  }
+  .logo { width: 20px; height: 20px; border-radius: 6px; background: linear-gradient(135deg,#38bdf8,#6366f1); }
+  .app-name { font-size: 13px; font-weight: 600; }
+  .spacer { flex: 1; }
+  .pause-btn { display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--text-mid); background:none; border:1px solid transparent; padding:5px 11px; border-radius:8px; font-family:inherit; }
+  .win-btns { display:flex; gap:14px; color:var(--text-lo); font-size:13px; margin-left:8px; }
+  .subhead {
+    display: flex; align-items: center; gap: 18px;
+    padding: 14px 28px; border-bottom: 1px solid var(--line); flex-shrink: 0;
+  }
+  .back { display: flex; align-items: center; gap: 6px; color: var(--text-mid); font-size: 13.5px; cursor: pointer; padding: 6px 10px; border-radius: 8px; }
+  .dev-title { font-size: 16px; font-weight: 650; }
+  .app-bar { display: flex; gap: 8px; margin-left: auto; align-items: center; }
+  .app-bar .label { font-size: 12.5px; color: var(--text-lo); margin-right: 4px; }
+  .app-pill { display: flex; align-items: center; gap: 7px; font-size: 13px; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line); color: var(--text-mid); cursor: pointer; }
+  .app-pill.active { background: var(--accent-dim); border-color: rgba(56,189,248,.45); color: var(--text); }
+  .app-pill .ico { width: 14px; height: 14px; border-radius: 4px; }
+  .app-pill.ffx .ico { background: radial-gradient(circle at 35% 35%, #ff9500, #ff3b30); }
+  .app-pill.add { border-style: dashed; color: var(--text-lo); }
+
+  main { flex: 1; display: flex; overflow: hidden; }
+  .viz { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .stage { position: relative; width: 620px; height: 520px; }
+  .stage svg.mouse { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -52%); overflow: visible; }
+  .hint { margin-top: 4px; padding-bottom: 18px; text-align: center; font-size: 13px; color: var(--text-lo); }
+  .hint kbd { font-family: inherit; background: var(--panel-hi); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; font-size: 12px; color: var(--text-mid); }
+
+  .assign {
+    width: 400px; border-left: 1px solid var(--line);
+    display: flex; flex-direction: column; padding: 26px 26px 20px;
+    background: var(--panel); overflow-y: auto; flex-shrink: 0;
+  }
+  .assign .btn-name { font-size: 17px; font-weight: 650; }
+  .assign .current { margin-top: 6px; font-size: 13px; color: var(--text-mid); }
+  .assign .current b { color: var(--accent); font-weight: 600; }
+  .search { margin-top: 18px; display: flex; align-items: center; gap: 9px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 9px 13px; color: var(--text-lo); font-size: 13.5px; }
+  .cats { display: flex; gap: 7px; margin-top: 14px; flex-wrap: wrap; }
+  .cat { font-size: 12.5px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); color: var(--text-mid); cursor: pointer; }
+  .cat.active { background: var(--accent-dim); border-color: rgba(56,189,248,.45); color: var(--text); }
+  .actions { margin-top: 16px; display: flex; flex-direction: column; gap: 4px; }
+  .action { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; cursor: pointer; font-size: 14px; }
+  .action:hover { background: var(--panel-hi); }
+  .action.selected { background: var(--accent-dim); outline: 1px solid rgba(56,189,248,.4); }
+  .action .a-ico { width: 30px; height: 30px; border-radius: 8px; background: var(--panel-hi); display: flex; align-items: center; justify-content: center; font-size: 13px; color: var(--text-mid); flex-shrink: 0; border: 1px solid var(--line); }
+  .action .a-sub { font-size: 12px; color: var(--text-lo); margin-top: 2px; }
+  .assign-footer { margin-top: auto; padding-top: 18px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; }
+  .quiet-btn { font-size: 13.5px; color: var(--text-mid); padding: 8px 10px; border-radius: 8px; cursor: pointer; background: none; border: none; text-align: left; font-family: inherit; display: flex; gap: 10px; align-items: center; }
+  .quiet-btn:hover { background: var(--panel-hi); }
+  .quiet-btn.adv { color: var(--text-lo); font-size: 12.5px; margin-top: 6px; }
+
+  .callout {
+    position: absolute; font-size: 12.5px; color: var(--text-mid);
+    background: var(--panel); border: 1px solid var(--line);
+    padding: 5px 11px; border-radius: 8px; cursor: pointer; white-space: nowrap;
+  }
+  .callout.sel { background: var(--accent-dim); border-color: rgba(56,189,248,.55); color: var(--text); }
+  .callout .k { color: var(--text-lo); font-size: 11px; margin-left: 6px; }
+  .callout.sel .k { color: var(--accent); }
+
+  .toast {
+    position: fixed; bottom: 60px; right: 424px;
+    background: #1c222b; border: 1px solid #2e3742; border-radius: 12px;
+    padding: 11px 16px; font-size: 13.5px; display: flex; gap: 16px; align-items: center;
+    box-shadow: 0 8px 30px rgba(0,0,0,.45);
+  }
+  .toast .check { color: var(--ok); }
+  .toast .undo { color: var(--accent); cursor: pointer; font-weight: 600; }
+</style>
+</head>
+<body>
+  <div class="titlebar">
+    <div class="logo"></div><span class="app-name">Conduit</span>
+    <div class="spacer"></div>
+    <button class="pause-btn"><svg width="11" height="11" viewBox="0 0 11 11"><rect x="1" y="1" width="3" height="9" rx="1" fill="currentColor"/><rect x="7" y="1" width="3" height="9" rx="1" fill="currentColor"/></svg>Pause Conduit</button>
+    <div class="win-btns"><span>—</span><span>▢</span><span>✕</span></div>
+  </div>
+
+  <div class="subhead">
+    <div class="back">‹ Your devices</div>
+    <div class="dev-title">Logitech G502 X</div>
+    <div class="app-bar">
+      <span class="label">Buttons work like this</span>
+      <div class="app-pill active">Everywhere</div>
+      <div class="app-pill ffx"><span class="ico"></span>Firefox</div>
+      <div class="app-pill add">+ In an app…</div>
+    </div>
+  </div>
+
+  <main>
+    <div class="viz">
+      <div class="stage">
+        <svg class="mouse" width="230" height="320" viewBox="0 0 96 134">
+          <defs>
+            <linearGradient id="mbody" x1="0.2" y1="0" x2="0.9" y2="1">
+              <stop offset="0" stop-color="#323a46"/><stop offset=".55" stop-color="#232932"/><stop offset="1" stop-color="#161a20"/>
+            </linearGradient>
+            <linearGradient id="rgb" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#818cf8"/>
+            </linearGradient>
+            <linearGradient id="btnL" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#3d4653"/><stop offset="1" stop-color="#272e38"/>
+            </linearGradient>
+          </defs>
+          <path d="M17 62 C 8 64 4 72 5 80 C 6 90 12 96 19 98 L 22 78 Z" fill="#181c22" stroke="#3a424e" stroke-width="1.2"/>
+          <path d="M48 4 C 66 4 78 15 81 32 C 83 44 79 52 80 62 C 82 82 84 100 74 115 C 67 126 56 130 48 130 C 38 130 28 125 22 114 C 14 99 16 82 18 64 C 19 52 14 44 16 32 C 19 15 31 4 48 4 Z" fill="url(#mbody)" stroke="#3f4854" stroke-width="1.4"/>
+          <path d="M48 4 L 48 22" stroke="#0e1116" stroke-width="2"/>
+          <path d="M17 34 C 30 40 42 41 48 41 C 54 41 66 40 79 34" stroke="#0e1116" stroke-width="2" fill="none"/>
+          <path d="M48 6 C 34 6 23 15 19 30 C 30 37 42 39 48 39 Z" fill="url(#btnL)" opacity=".55"/>
+          <path d="M48 6 C 62 6 73 15 77 30 C 66 37 54 39 48 39 Z" fill="url(#btnL)" opacity=".35"/>
+          <rect x="42" y="16" width="12" height="24" rx="6" fill="#0b0e12"/>
+          <rect x="44" y="18" width="8" height="20" rx="4" fill="#1c222a" stroke="#38bdf8" stroke-width="1"/>
+          <rect x="44" y="46" width="8" height="10" rx="3" fill="#12151a" stroke="#333b46" stroke-width="1"/>
+          <path d="M19 50 L 26 48 L 27 56 L 20 58 Z" fill="rgba(56,189,248,.35)" stroke="#38bdf8" stroke-width="1.6"/>
+          <path d="M20 61 L 27 59 L 28 67 L 21 69 Z" fill="#12151a" stroke="#38bdf8" stroke-width="1" opacity=".7"/>
+          <path d="M32 104 L 48 96 L 64 104" stroke="url(#rgb)" stroke-width="2" fill="none" stroke-linecap="round" opacity=".9"/>
+          <path d="M35 112 L 48 105 L 61 112" stroke="url(#rgb)" stroke-width="2" fill="none" stroke-linecap="round" opacity=".5"/>
+          <line x1="30" y1="16" x2="-40" y2="-14" stroke="#333b46" stroke-width="1"/>
+          <line x1="66" y1="16" x2="136" y2="-14" stroke="#333b46" stroke-width="1"/>
+          <line x1="54" y1="28" x2="136" y2="30" stroke="#333b46" stroke-width="1"/>
+          <line x1="22" y1="53" x2="-40" y2="53" stroke="#38bdf8" stroke-width="1.2"/>
+          <line x1="23" y1="65" x2="-40" y2="94" stroke="#333b46" stroke-width="1"/>
+          <line x1="52" y1="51" x2="136" y2="76" stroke="#333b46" stroke-width="1"/>
+        </svg>
+        <div class="callout" style="left: 116px; top: 52px; transform: translateX(-100%);">Left click</div>
+        <div class="callout" style="left: 506px; top: 52px;">Right click</div>
+        <div class="callout" style="left: 506px; top: 158px;">Scroll wheel<span class="k">Middle click</span></div>
+        <div class="callout sel" style="left: 116px; top: 214px; transform: translate(-100%, -50%);">Side button (front)<span class="k">Copy</span></div>
+        <div class="callout" style="left: 116px; top: 312px; transform: translate(-100%, -50%);">Side button (back)<span class="k">Paste</span></div>
+        <div class="callout" style="left: 506px; top: 268px;">Sensitivity button<span class="k">Default</span></div>
+      </div>
+      <div class="hint">Or just <kbd>press the button on your mouse</kbd> to select it</div>
+    </div>
+
+    <div class="assign">
+      <div class="btn-name">Side button (front)</div>
+      <div class="current">Right now it does: <b>Copy</b></div>
+      <div class="search">
+        <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="5.5" cy="5.5" r="4.5" stroke="currentColor" stroke-width="1.4"/><path d="M9 9 L12 12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        Search anything — “screenshot”, “ctrl+z”, “mute”…
+      </div>
+      <div class="cats">
+        <div class="cat active">Popular</div>
+        <div class="cat">Shortcuts</div>
+        <div class="cat">Keys</div>
+        <div class="cat">Media &amp; volume</div>
+        <div class="cat">System</div>
+      </div>
+      <div class="actions">
+        <div class="action selected"><div class="a-ico">⌘</div><div><div>Copy</div><div class="a-sub">Ctrl + C</div></div></div>
+        <div class="action"><div class="a-ico">⌘</div><div><div>Paste</div><div class="a-sub">Ctrl + V</div></div></div>
+        <div class="action"><div class="a-ico">↩</div><div><div>Undo</div><div class="a-sub">Ctrl + Z</div></div></div>
+        <div class="action"><div class="a-ico">▣</div><div><div>Take a screenshot</div><div class="a-sub">Region screenshot</div></div></div>
+        <div class="action"><div class="a-ico">🔇</div><div><div>Mute microphone</div><div class="a-sub">System-wide</div></div></div>
+      </div>
+      <div class="assign-footer">
+        <button class="quiet-btn">↺&nbsp; Use the button's normal behavior</button>
+        <button class="quiet-btn">⊘&nbsp; Do nothing when pressed</button>
+        <button class="quiet-btn adv">Advanced: different action on hold, macros… ›</button>
+      </div>
+    </div>
+  </main>
+
+  <div class="toast">
+    <span class="check">✓</span>
+    <span>Side button (front) now does <b>Copy</b></span>
+    <span class="undo">Undo</span>
+  </div>
+</body>
+</html>

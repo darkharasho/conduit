@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Conduit — Home (Your devices) mockup</title>
+<style>
+  :root {
+    --bg: #0d0f12;
+    --panel: #14171c;
+    --panel-hi: #1a1e25;
+    --line: #232830;
+    --text: #e8ebef;
+    --text-mid: #9aa3ad;
+    --text-lo: #5f6873;
+    --accent: #38bdf8;
+    --ok: #34d399;
+    --radius: 14px;
+    font-size: 15px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .titlebar {
+    height: 44px;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 10px;
+    border-bottom: 1px solid var(--line);
+    flex-shrink: 0;
+  }
+  .logo {
+    width: 20px; height: 20px; border-radius: 6px;
+    background: linear-gradient(135deg, #38bdf8, #6366f1);
+  }
+  .titlebar .app-name { font-size: 13px; font-weight: 600; letter-spacing: .02em; }
+  .titlebar .spacer { flex: 1; }
+  .pause-btn {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 12.5px; color: var(--text-mid);
+    background: none; border: 1px solid transparent;
+    padding: 5px 11px; border-radius: 8px; cursor: pointer;
+    font-family: inherit;
+  }
+  .pause-btn:hover { border-color: var(--line); background: var(--panel); }
+  .win-btns { display: flex; gap: 14px; color: var(--text-lo); font-size: 13px; margin-left: 8px; }
+  main { flex: 1; padding: 40px 56px; overflow-y: auto; }
+  h1 { font-size: 22px; font-weight: 650; letter-spacing: -0.01em; }
+  .sub { color: var(--text-mid); font-size: 14px; margin-top: 6px; }
+  .device-grid {
+    margin-top: 28px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+  .device-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 26px 26px 22px;
+    display: flex;
+    gap: 24px;
+    align-items: center;
+    cursor: pointer;
+    transition: border-color .15s, background .15s, transform .15s;
+    position: relative;
+  }
+  .device-card:hover {
+    border-color: #2e3742;
+    background: var(--panel-hi);
+    transform: translateY(-1px);
+  }
+  .device-art {
+    width: 116px; height: 136px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .device-info { flex: 1; min-width: 0; }
+  .device-name { font-size: 16.5px; font-weight: 600; }
+  .device-state {
+    display: flex; align-items: center; gap: 7px;
+    margin-top: 8px; font-size: 13px; color: var(--text-mid);
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+  .device-meta {
+    margin-top: 14px; font-size: 12.5px; color: var(--text-lo);
+    display: flex; gap: 14px;
+  }
+  .chev {
+    position: absolute; right: 20px; top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-lo); font-size: 18px;
+  }
+  .remembered { margin-top: 44px; }
+  .remembered h2 {
+    font-size: 12px; font-weight: 600; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--text-lo);
+  }
+  .remembered-row {
+    margin-top: 14px;
+    display: flex; align-items: center; gap: 16px;
+    padding: 14px 18px;
+    border: 1px dashed var(--line);
+    border-radius: 12px;
+    max-width: 560px;
+  }
+  .remembered-row .mini-art { opacity: .45; flex-shrink: 0; }
+  .remembered-row .r-name { font-size: 14px; font-weight: 550; color: var(--text-mid); }
+  .remembered-row .r-note { font-size: 12.5px; color: var(--text-lo); margin-top: 3px; }
+</style>
+</head>
+<body>
+  <div class="titlebar">
+    <div class="logo"></div>
+    <span class="app-name">Conduit</span>
+    <div class="spacer"></div>
+    <button class="pause-btn">
+      <svg width="11" height="11" viewBox="0 0 11 11"><rect x="1" y="1" width="3" height="9" rx="1" fill="currentColor"/><rect x="7" y="1" width="3" height="9" rx="1" fill="currentColor"/></svg>
+      Pause Conduit
+    </button>
+    <div class="win-btns"><span>—</span><span>▢</span><span>✕</span></div>
+  </div>
+
+  <main>
+    <h1>Your devices</h1>
+    <div class="sub">Click a device to change what its buttons do.</div>
+
+    <div class="device-grid">
+      <!-- Mouse card: modern angular gaming mouse, top view -->
+      <div class="device-card">
+        <div class="device-art">
+          <svg width="96" height="134" viewBox="0 0 96 134">
+            <defs>
+              <linearGradient id="mbody" x1="0.2" y1="0" x2="0.9" y2="1">
+                <stop offset="0" stop-color="#323a46"/>
+                <stop offset=".55" stop-color="#232932"/>
+                <stop offset="1" stop-color="#161a20"/>
+              </linearGradient>
+              <linearGradient id="rgb" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#38bdf8"/>
+                <stop offset="1" stop-color="#818cf8"/>
+              </linearGradient>
+              <linearGradient id="btnL" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#3d4653"/>
+                <stop offset="1" stop-color="#272e38"/>
+              </linearGradient>
+            </defs>
+            <path d="M17 62 C 8 64 4 72 5 80 C 6 90 12 96 19 98 L 22 78 Z" fill="#181c22" stroke="#3a424e" stroke-width="1.2"/>
+            <path d="M48 4
+                     C 66 4 78 15 81 32
+                     C 83 44 79 52 80 62
+                     C 82 82 84 100 74 115
+                     C 67 126 56 130 48 130
+                     C 38 130 28 125 22 114
+                     C 14 99 16 82 18 64
+                     C 19 52 14 44 16 32
+                     C 19 15 31 4 48 4 Z"
+                  fill="url(#mbody)" stroke="#3f4854" stroke-width="1.4"/>
+            <path d="M48 4 L 48 22" stroke="#0e1116" stroke-width="2"/>
+            <path d="M17 34 C 30 40 42 41 48 41 C 54 41 66 40 79 34" stroke="#0e1116" stroke-width="2" fill="none"/>
+            <path d="M48 6 C 34 6 23 15 19 30 C 30 37 42 39 48 39 Z" fill="url(#btnL)" opacity=".55"/>
+            <path d="M48 6 C 62 6 73 15 77 30 C 66 37 54 39 48 39 Z" fill="url(#btnL)" opacity=".35"/>
+            <rect x="42" y="16" width="12" height="24" rx="6" fill="#0b0e12"/>
+            <rect x="44" y="18" width="8" height="20" rx="4" fill="#1c222a" stroke="#38bdf8" stroke-width="1"/>
+            <line x1="48" y1="22" x2="48" y2="24" stroke="#38bdf8" stroke-width="1.4" opacity=".8"/>
+            <line x1="48" y1="27" x2="48" y2="29" stroke="#38bdf8" stroke-width="1.4" opacity=".5"/>
+            <line x1="48" y1="32" x2="48" y2="34" stroke="#38bdf8" stroke-width="1.4" opacity=".3"/>
+            <rect x="44" y="46" width="8" height="10" rx="3" fill="#12151a" stroke="#333b46" stroke-width="1"/>
+            <path d="M19 50 L 26 48 L 27 56 L 20 58 Z" fill="#12151a" stroke="#38bdf8" stroke-width="1" opacity=".9"/>
+            <path d="M20 61 L 27 59 L 28 67 L 21 69 Z" fill="#12151a" stroke="#38bdf8" stroke-width="1" opacity=".7"/>
+            <path d="M32 104 L 48 96 L 64 104" stroke="url(#rgb)" stroke-width="2" fill="none" stroke-linecap="round" opacity=".9"/>
+            <path d="M35 112 L 48 105 L 61 112" stroke="url(#rgb)" stroke-width="2" fill="none" stroke-linecap="round" opacity=".5"/>
+            <path d="M79 40 C 81 52 80 60 81 70" stroke="url(#rgb)" stroke-width="1.6" fill="none" stroke-linecap="round" opacity=".55"/>
+            <path d="M17 40 C 15 52 16 60 15 70" stroke="url(#rgb)" stroke-width="1.6" fill="none" stroke-linecap="round" opacity=".55"/>
+          </svg>
+        </div>
+        <div class="device-info">
+          <div class="device-name">Logitech G502 X</div>
+          <div class="device-state"><span class="dot"></span>Working</div>
+          <div class="device-meta"><span>13 buttons</span><span>3 app profiles</span></div>
+        </div>
+        <span class="chev">›</span>
+      </div>
+
+      <!-- Keyboard card -->
+      <div class="device-card">
+        <div class="device-art">
+          <svg width="120" height="60" viewBox="0 0 120 60">
+            <rect x="2" y="8" width="116" height="44" rx="7" fill="#1f242c" stroke="#3a424e" stroke-width="1.5"/>
+            <g fill="#12151a" stroke="#333b46" stroke-width=".8">
+              <rect x="9" y="15" width="9" height="8" rx="2"/><rect x="21" y="15" width="9" height="8" rx="2"/><rect x="33" y="15" width="9" height="8" rx="2"/><rect x="45" y="15" width="9" height="8" rx="2"/><rect x="57" y="15" width="9" height="8" rx="2"/><rect x="69" y="15" width="9" height="8" rx="2"/><rect x="81" y="15" width="9" height="8" rx="2"/><rect x="93" y="15" width="9" height="8" rx="2"/><rect x="105" y="15" width="6" height="8" rx="2"/>
+              <rect x="9" y="26" width="11" height="8" rx="2"/><rect x="23" y="26" width="9" height="8" rx="2"/><rect x="35" y="26" width="9" height="8" rx="2"/><rect x="47" y="26" width="9" height="8" rx="2"/><rect x="59" y="26" width="9" height="8" rx="2"/><rect x="71" y="26" width="9" height="8" rx="2"/><rect x="83" y="26" width="9" height="8" rx="2"/><rect x="95" y="26" width="16" height="8" rx="2"/>
+              <rect x="9" y="37" width="14" height="8" rx="2"/><rect x="26" y="37" width="52" height="8" rx="2"/><rect x="81" y="37" width="9" height="8" rx="2"/><rect x="93" y="37" width="9" height="8" rx="2"/><rect x="105" y="37" width="6" height="8" rx="2"/>
+            </g>
+            <path d="M9 54 L 111 54" stroke="url(#rgbk)" stroke-width="1.6" stroke-linecap="round" opacity=".6"/>
+            <defs><linearGradient id="rgbk" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#818cf8"/></linearGradient></defs>
+          </svg>
+        </div>
+        <div class="device-info">
+          <div class="device-name">Keychron K2</div>
+          <div class="device-state"><span class="dot"></span>Working</div>
+          <div class="device-meta"><span>4 remapped keys</span><span>1 app profile</span></div>
+        </div>
+        <span class="chev">›</span>
+      </div>
+    </div>
+
+    <div class="remembered">
+      <h2>Remembered devices</h2>
+      <div class="remembered-row">
+        <svg class="mini-art" width="26" height="36" viewBox="0 0 96 134">
+          <path d="M48 4 C 66 4 78 15 81 32 C 83 44 79 52 80 62 C 82 82 84 100 74 115 C 67 126 56 130 48 130 C 38 130 28 125 22 114 C 14 99 16 82 18 64 C 19 52 14 44 16 32 C 19 15 31 4 48 4 Z" fill="#2b323c" stroke="#3a424e" stroke-width="3"/>
+        </svg>
+        <div>
+          <div class="r-name">Logitech G600 — not connected</div>
+          <div class="r-note">Its settings are saved and will come back when you plug it in.</div>
+        </div>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

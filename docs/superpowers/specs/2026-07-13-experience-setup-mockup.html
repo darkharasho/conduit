@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Conduit — First-run setup mockup</title>
+<style>
+  :root {
+    --bg: #0d0f12; --panel: #14171c; --panel-hi: #1a1e25; --line: #232830;
+    --text: #e8ebef; --text-mid: #9aa3ad; --text-lo: #5f6873;
+    --accent: #38bdf8; --accent-dim: rgba(56,189,248,.12); --ok: #34d399; --warn: #fbbf24;
+    font-size: 15px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: "Inter","Segoe UI",system-ui,sans-serif; -webkit-font-smoothing: antialiased; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+  .titlebar { height: 44px; display: flex; align-items: center; padding: 0 16px; gap: 10px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+  .logo { width: 20px; height: 20px; border-radius: 6px; background: linear-gradient(135deg,#38bdf8,#6366f1); }
+  .app-name { font-size: 13px; font-weight: 600; }
+  .spacer { flex: 1; }
+  .win-btns { display:flex; gap:14px; color:var(--text-lo); font-size:13px; }
+  main { flex: 1; display: flex; align-items: center; justify-content: center; }
+  .setup { width: 560px; }
+  .hero-art { display: flex; justify-content: center; margin-bottom: 28px; }
+  h1 { font-size: 24px; font-weight: 650; text-align: center; letter-spacing: -0.01em; }
+  .sub { color: var(--text-mid); font-size: 14.5px; text-align: center; margin-top: 10px; line-height: 1.5; }
+  .steps { margin-top: 32px; display: flex; flex-direction: column; gap: 10px; }
+  .step {
+    display: flex; align-items: center; gap: 16px;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 15px 18px;
+  }
+  .step .st-ico { width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 13px; }
+  .step.done .st-ico { background: rgba(52,211,153,.12); color: var(--ok); }
+  .step.active .st-ico { background: var(--accent-dim); color: var(--accent); }
+  .step.pending .st-ico { background: var(--panel-hi); color: var(--text-lo); }
+  .step .st-body { flex: 1; }
+  .step .st-name { font-size: 14.5px; font-weight: 550; }
+  .step.pending .st-name { color: var(--text-mid); }
+  .step .st-note { font-size: 12.5px; color: var(--text-lo); margin-top: 3px; }
+  .spinner {
+    width: 14px; height: 14px; border-radius: 50%;
+    border: 2px solid rgba(56,189,248,.25); border-top-color: var(--accent);
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .cta { margin-top: 28px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  .primary {
+    background: var(--accent); color: #06202e; font-weight: 650; font-size: 14.5px;
+    border: none; border-radius: 11px; padding: 12px 34px; cursor: pointer; font-family: inherit;
+    opacity: .45;
+  }
+  .cta .note { font-size: 12.5px; color: var(--text-lo); display: flex; align-items: center; gap: 7px; }
+  .details { margin-top: 26px; text-align: center; }
+  .details a { font-size: 12.5px; color: var(--text-lo); text-decoration: none; border-bottom: 1px dotted var(--text-lo); cursor: pointer; }
+</style>
+</head>
+<body>
+  <div class="titlebar">
+    <div class="logo"></div><span class="app-name">Conduit</span>
+    <div class="spacer"></div>
+    <div class="win-btns"><span>—</span><span>▢</span><span>✕</span></div>
+  </div>
+
+  <main>
+    <div class="setup">
+      <div class="hero-art">
+        <svg width="120" height="90" viewBox="0 0 120 90">
+          <defs>
+            <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#818cf8"/>
+            </linearGradient>
+          </defs>
+          <path d="M38 10 C 50 10 56 18 58 28 C 59 36 56 42 57 48 C 58 62 59 72 52 80 C 48 86 42 88 38 88 C 32 88 26 85 23 78 C 18 68 20 58 21 46 C 22 38 19 33 20 26 C 22 15 29 10 38 10 Z" fill="#1c2129" stroke="#3a424e" stroke-width="1.5"/>
+          <rect x="35" y="18" width="7" height="14" rx="3.5" fill="#12151a" stroke="url(#g)" stroke-width="1.2"/>
+          <rect x="74" y="30" width="40" height="26" rx="5" fill="#1c2129" stroke="#3a424e" stroke-width="1.5"/>
+          <g fill="#12151a" stroke="#333b46" stroke-width=".7">
+            <rect x="78" y="35" width="6" height="5" rx="1.5"/><rect x="86" y="35" width="6" height="5" rx="1.5"/><rect x="94" y="35" width="6" height="5" rx="1.5"/><rect x="102" y="35" width="8" height="5" rx="1.5"/>
+            <rect x="78" y="43" width="10" height="5" rx="1.5"/><rect x="90" y="43" width="14" height="5" rx="1.5"/><rect x="106" y="43" width="4" height="5" rx="1.5"/>
+          </g>
+          <path d="M58 46 C 66 46 66 43 74 43" stroke="url(#g)" stroke-width="1.8" fill="none" stroke-linecap="round" opacity=".8"/>
+          <circle cx="66" cy="44.5" r="2.2" fill="url(#g)"/>
+        </svg>
+      </div>
+      <h1>Let's get Conduit running</h1>
+      <div class="sub">Conduit needs a couple of one-time permissions to remap your<br>devices. You'll be asked for your password once.</div>
+
+      <div class="steps">
+        <div class="step done">
+          <div class="st-ico">✓</div>
+          <div class="st-body">
+            <div class="st-name">Background service installed</div>
+            <div class="st-note">Starts with your computer, stays out of the way</div>
+          </div>
+        </div>
+        <div class="step active">
+          <div class="st-ico"><div class="spinner"></div></div>
+          <div class="st-body">
+            <div class="st-name">Allowing Conduit to press keys for you</div>
+            <div class="st-note">Waiting for your password in the system dialog…</div>
+          </div>
+        </div>
+        <div class="step pending">
+          <div class="st-ico">3</div>
+          <div class="st-body">
+            <div class="st-name">Access to your mice and keyboards</div>
+            <div class="st-note">May need you to log out and back in — we'll tell you if so</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cta">
+        <button class="primary">Start using Conduit</button>
+        <div class="note">Setting up… nothing else to do right now</div>
+      </div>
+
+      <div class="details">
+        <a>Show technical details</a>
+      </div>
+    </div>
+  </main>
+</body>
+</html>
