@@ -209,14 +209,7 @@ fn dispatch(
 
         // ── GetConfig ────────────────────────────────────────────────────────
         Request::GetConfig => {
-            let resp = match std::fs::read_to_string(config_path) {
-                Ok(toml) => Response::Config { toml },
-                Err(e) => Response::error_detail(
-                    ErrorCode::ApplyFailed,
-                    "could not read config file",
-                    e.to_string(),
-                ),
-            };
+            let resp = read_config_response(config_path);
             if write_response(writer, &resp).is_err() {
                 return DispatchResult::WriteError;
             }
@@ -306,6 +299,21 @@ fn dispatch(
 /// Alias so the dispatch function signature is cleaner.
 trait Write: std::io::Write {}
 impl<T: std::io::Write> Write for T {}
+
+/// Read the config file for a GetConfig request. A read failure is an
+/// internal fault (the daemon creates the file at startup), not an
+/// apply failure — the UI copy for `apply-failed` claims "the change
+/// couldn't be saved", which is wrong here.
+fn read_config_response(config_path: &std::path::Path) -> Response {
+    match std::fs::read_to_string(config_path) {
+        Ok(toml) => Response::Config { toml },
+        Err(e) => Response::error_detail(
+            ErrorCode::Internal,
+            "could not read config file",
+            e.to_string(),
+        ),
+    }
+}
 
 /// Build the `Response::Devices` answer for a `ListDevices` request.
 ///
@@ -843,6 +851,18 @@ a = "d"
                 );
             }
             other => panic!("expected Status, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn get_config_read_failure_is_internal_not_apply_failed() {
+        let missing = std::path::Path::new("/nonexistent/conduit-test/conduit.toml");
+        match read_config_response(missing) {
+            Response::Err { code, detail, .. } => {
+                assert_eq!(code, conduit_proto::ErrorCode::Internal);
+                assert!(!detail.is_empty());
+            }
+            other => panic!("expected Err, got {other:?}"),
         }
     }
 }
