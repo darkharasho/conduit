@@ -1,10 +1,10 @@
 use std::collections::{HashMap, HashSet};
-use crate::config::{Action, CompiledConfig, HoldAction};
+use crate::config::{Action, Chord, CompiledConfig, HoldAction};
 use crate::event::{Event, Key, KeyState};
 
 #[derive(Clone, Copy, Debug)]
 #[allow(dead_code)]
-enum HeldEntry { OutKey(Key), LayerHeld(u8), Swallowed }
+enum HeldEntry { OutKey(Key), OutChord(Chord), LayerHeld(u8), Swallowed }
 
 struct Pending {
     phys: Key,
@@ -219,15 +219,20 @@ impl Engine {
                     }
                     self.held.insert(ev.key, HeldEntry::Swallowed);
                 }
-                // Chord emission lands in the next commit; until then a chord
-                // behaves as Disabled so the crate compiles. Replaced by the
-                // full press/release implementation immediately after.
-                Action::Chord(_) => {
-                    self.held.insert(ev.key, HeldEntry::Swallowed);
+                Action::Chord(ch) => {
+                    self.held.insert(ev.key, HeldEntry::OutChord(ch));
+                    for k in ch.keys() {
+                        self.out.push(Event { key: *k, state: KeyState::Press, time_us: ev.time_us });
+                    }
                 }
             },
             KeyState::Release => match self.held.remove(&ev.key) {
                 Some(HeldEntry::OutKey(out)) => self.out.push(Event { key: out, ..ev }),
+                Some(HeldEntry::OutChord(ch)) => {
+                    for k in ch.keys().iter().rev() {
+                        self.out.push(Event { key: *k, state: KeyState::Release, time_us: ev.time_us });
+                    }
+                }
                 Some(HeldEntry::Swallowed) => {}
                 Some(HeldEntry::LayerHeld(l)) => {
                     // Pop the layer from active_layers (last occurrence); never pop pos 0 (base layer)
@@ -241,6 +246,10 @@ impl Engine {
             },
             KeyState::Repeat => match self.held.get(&ev.key) {
                 Some(HeldEntry::OutKey(out)) => { let out = *out; self.out.push(Event { key: out, ..ev }); }
+                Some(HeldEntry::OutChord(ch)) => {
+                    let last = *ch.keys().last().expect("chord len >= 2");
+                    self.out.push(Event { key: last, ..ev });
+                }
                 Some(_) => {}
                 None => self.out.push(ev),
             },
@@ -256,10 +265,14 @@ impl Engine {
             self.out.push(Event { key: p.tap, state: KeyState::Press, time_us: p.press_time_us });
             self.out.push(Event { key: p.tap, state: KeyState::Release, time_us: p.press_time_us });
         }
-        // Emit Release for every held OutKey
+        // Emit Release for every held OutKey or OutChord
         for (_phys, entry) in &self.held {
             if let HeldEntry::OutKey(k) = entry {
                 self.out.push(Event { key: *k, state: KeyState::Release, time_us: 0 });
+            } else if let HeldEntry::OutChord(ch) = entry {
+                for k in ch.keys().iter().rev() {
+                    self.out.push(Event { key: *k, state: KeyState::Release, time_us: 0 });
+                }
             }
         }
         // Clear all state
@@ -639,5 +652,42 @@ mod tests {
         let mut e = engine(DEV_ENGINE);
         e.handle_on(press("a", 0), Some(0)); // emits c
         assert_eq!(e.handle_on(release("a", 10), None), &[release("c", 10)]);
+    }
+
+    // ── Chord action ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn chord_press_emits_in_order_release_in_reverse() {
+        let mut e = engine("[profile.default.keys]\nmouse4 = \"ctrl+c\"\n");
+        assert_eq!(
+            e.handle(press("mouse4", 5)),
+            &[press("leftctrl", 5), press("c", 5)]
+        );
+        assert_eq!(
+            e.handle(release("mouse4", 9)),
+            &[release("c", 9), release("leftctrl", 9)]
+        );
+    }
+
+    #[test]
+    fn chord_repeat_repeats_only_last_key() {
+        let mut e = engine("[profile.default.keys]\nmouse4 = \"ctrl+c\"\n");
+        e.handle(press("mouse4", 0));
+        let rep = Event { key: key("mouse4"), state: KeyState::Repeat, time_us: 3 };
+        assert_eq!(
+            e.handle(rep),
+            &[Event { key: key("c"), state: KeyState::Repeat, time_us: 3 }]
+        );
+    }
+
+    #[test]
+    fn suspend_releases_chord_in_reverse() {
+        let mut e = engine("[profile.default.keys]\nmouse4 = \"ctrl+shift+t\"\n");
+        e.handle(press("mouse4", 0));
+        let out = e.suspend().to_vec();
+        let t = out.iter().position(|x| *x == release("t", 0)).unwrap();
+        let s = out.iter().position(|x| *x == release("leftshift", 0)).unwrap();
+        let c = out.iter().position(|x| *x == release("leftctrl", 0)).unwrap();
+        assert!(t < s && s < c, "reverse order expected, got {out:?}");
     }
 }
