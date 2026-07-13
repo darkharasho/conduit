@@ -9,6 +9,43 @@
 
 import type { ActionModel } from "./config-model";
 
+/**
+ * Modifier keys and their display names used in chord labels.
+ * Exported so action-catalog.ts can import without re-declaring.
+ */
+export const MOD_LABELS: Record<string, string> = {
+  leftctrl: "Ctrl",
+  rightctrl: "Ctrl",
+  leftshift: "Shift",
+  rightshift: "Shift",
+  leftalt: "Alt",
+  rightalt: "AltGr",
+  leftmeta: "Super",
+  rightmeta: "Super",
+};
+
+/** Human-readable label for a chord key sequence: ["leftctrl","c"] → "Ctrl + C" */
+export function chordLabel(keys: string[]): string {
+  return keys.map((k) => MOD_LABELS[k] ?? keyLabel(k)).join(" + ");
+}
+
+/**
+ * Optional catalog lookup injected by action-catalog.ts at module init.
+ * Allows actionLabel to return the catalog entry label (e.g. "Copy") for
+ * known chords without creating a circular import.
+ */
+type CatalogLookup = (action: ActionModel) => { label: string } | null;
+let _catalogLookup: CatalogLookup | null = null;
+
+/**
+ * Called once by action-catalog.ts immediately after it builds the CATALOG.
+ * Must be called before any actionLabel(chord) is used in practice, but
+ * actionLabel degrades gracefully if it was never called.
+ */
+export function registerCatalogLookup(fn: CatalogLookup): void {
+  _catalogLookup = fn;
+}
+
 /** Mouse controls named as the user sees them on the device. */
 const MOUSE_CONTROLS: Record<string, string> = {
   btn_left: "Left click",
@@ -100,9 +137,13 @@ export function actionLabel(action: ActionModel | null): string {
       }
       return `${tap} when tapped, ${keyLabel(action.hold)} when held`;
     }
-    case "chord":
-      // Task 4 replaces this with catalog lookup
-      return action.keys.join("+");
+    case "chord": {
+      if (_catalogLookup) {
+        const entry = _catalogLookup(action);
+        if (entry) return entry.label;
+      }
+      return `Presses ${chordLabel(action.keys)}`;
+    }
     case "layer_toggle":
       return `Switches the ${action.layer} layer on/off`;
   }

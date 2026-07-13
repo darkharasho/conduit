@@ -57,6 +57,13 @@ describe("actionLabel", () => {
       "Switches the nav layer on/off"
     );
   });
+
+  it("labels chord actions via the catalog, falling back to key math", async () => {
+    // Import catalog to trigger registerCatalogLookup
+    await import("./action-catalog");
+    expect(actionLabel({ kind: "chord", keys: ["leftctrl", "c"] })).toBe("Copy");
+    expect(actionLabel({ kind: "chord", keys: ["leftalt", "f4"] })).toBe("Presses Alt + F4");
+  });
 });
 
 describe("QUICK_PICKS", () => {
