@@ -57,6 +57,16 @@ describe("groupPhysicalDevices", () => {
     ];
     expect(groupPhysicalDevices(devices)).toHaveLength(0);
   });
+  it("F2: primaryPath is the path of the first input-class node even when earlier nodes are class 'other'", () => {
+    // First node is class "other", second is class "mouse" → primaryPath must be the mouse node's path
+    const devices = [
+      node({ vendor: 0x046d, product: 0x4099, class: "other", path: "/dev/input/event0", name: "G502 X" }),
+      node({ vendor: 0x046d, product: 0x4099, class: "mouse", path: "/dev/input/event1", name: "G502 X" }),
+    ];
+    const phys = groupPhysicalDevices(devices);
+    expect(phys).toHaveLength(1);
+    expect(phys[0].primaryPath).toBe("/dev/input/event1");
+  });
 });
 
 describe("remembered + investment", () => {
@@ -93,5 +103,15 @@ mouse5 = "paste"
       node({ vendor: 0x046d, product: 0xc24a, class: "mouse", name: "G600", id: "046d:c24a/G600" }),
     ])[0];
     expect(deviceOverrideCount(model, g600)).toBe(2); // mouse4 + mouse5
+  });
+  it("F3: bare vid:pid selector with no curated entry renders as 'Remembered device', never raw hex", () => {
+    const hexModel = parseConfigToml(`
+[profile.default.device."1234:abcd".keys]
+mouse4 = "copy"
+`);
+    const rem = rememberedDevices(hexModel, []);
+    expect(rem).toHaveLength(1);
+    expect(rem[0].name).toBe("Remembered device");
+    expect(rem[0].name).not.toContain("1234");
   });
 });

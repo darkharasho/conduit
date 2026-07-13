@@ -8,6 +8,7 @@ export interface PhysicalDevice {
   key: string;
   name: string;
   archetype: Archetype;
+  primaryPath: string;
   nodes: DeviceInfo[];
 }
 
@@ -75,7 +76,7 @@ export function groupPhysicalDevices(devices: DeviceInfo[]): PhysicalDevice[] {
     const { name, archetype } = resolveDevice(
       primary.vendor, primary.product, primary.name, primary.class,
     );
-    out.push({ key, name, archetype, nodes });
+    out.push({ key, name, archetype, primaryPath: primary.path, nodes });
   }
   out.sort((a, b) => a.name.localeCompare(b.name));
   return out;
@@ -98,7 +99,10 @@ export function rememberedDevices(
       const m = /^([0-9a-f]{4}):([0-9a-f]{4})$/i.exec(head);
       const vendor = m ? parseInt(m[1], 16) : 0;
       const product = m ? parseInt(m[2], 16) : 0;
-      const { name, archetype } = resolveDevice(vendor, product, tail, "mouse");
+      // When head === tail the selector has no name part (bare vid:pid).
+      // resolveDevice would fall back to the raw hex string; use a friendlier label instead.
+      const fallbackName = (head === tail && m) ? "Remembered device" : tail;
+      const { name, archetype } = resolveDevice(vendor, product, fallbackName, "mouse");
       seen.set(selector, { selector, key: m ? physKey(vendor, product) : base, name, archetype });
     }
   }

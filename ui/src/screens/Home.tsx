@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DeviceArt } from "../components/DeviceArt";
-import { ConduitError, listDevices, type DeviceInfo } from "../lib/client";
+import { ConduitError, listDevices, onStatus, type DeviceInfo } from "../lib/client";
 import type { ConfigModel } from "../lib/config-model";
 import {
   appProfileCount,
@@ -30,6 +30,7 @@ function investmentLine(model: ConfigModel | null, phys: PhysicalDevice): string
 export function HomeScreen({ model, connected, onOpenDevice }: Props) {
   const [devices, setDevices] = useState<DeviceInfo[] | null>(null);
   const [error, setError] = useState<ErrorPresentation | null>(null);
+  const lastGrabbedRef = useRef<string | null>(null);
 
   const refresh = useCallback(() => {
     setError(null);
@@ -44,6 +45,17 @@ export function HomeScreen({ model, connected, onOpenDevice }: Props) {
   useEffect(() => {
     refresh();
   }, [refresh, connected]);
+
+  useEffect(() => {
+    const unlisten = onStatus((s) => {
+      const key = s.grabbed_devices.join(",");
+      if (key !== lastGrabbedRef.current) {
+        lastGrabbedRef.current = key;
+        refresh();
+      }
+    });
+    return () => { unlisten.then((f) => f()); };
+  }, [refresh]);
 
   const phys = groupPhysicalDevices(devices ?? []);
   const remembered = model ? rememberedDevices(model, devices ?? []) : [];

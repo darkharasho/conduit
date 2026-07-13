@@ -88,11 +88,16 @@ describe("App shell — home-first navigation", () => {
   it("shows an unmissable banner when paused", async () => {
     const { getStatus } = await import("./lib/client");
     const mockGetStatus = vi.mocked(getStatus);
+    // Scope the suspended mock to this test only — restore the default after.
     mockGetStatus.mockResolvedValue({ ...sampleStatus, suspended: true });
-    render(<App />);
-    expect(await screen.findByRole("status")).toHaveTextContent(
-      "Conduit is paused — your buttons have their normal behavior.",
-    );
+    try {
+      render(<App />);
+      expect(await screen.findByRole("status")).toHaveTextContent(
+        "Conduit is paused — your buttons have their normal behavior.",
+      );
+    } finally {
+      mockGetStatus.mockResolvedValue({ ...sampleStatus, suspended: false });
+    }
   });
 
   it("navigates home → device editor → back", async () => {

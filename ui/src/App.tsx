@@ -206,7 +206,7 @@ function App() {
                   model={configModel}
                   connected={connected}
                   onOpenDevice={(d: PhysicalDevice) =>
-                    setView({ kind: "device", devPath: d.nodes[0].path, title: d.name })
+                    setView({ kind: "device", devPath: d.primaryPath, title: d.name })
                   }
                 />
                 <button className="home-shell__help-link" onClick={() => setView({ kind: "help" })}>

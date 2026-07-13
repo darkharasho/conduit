@@ -1,6 +1,6 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { DeviceInfo } from "../lib/client";
+import type { DeviceInfo, Status } from "../lib/client";
 import { parseConfigToml } from "../lib/config-model";
 import { HomeScreen } from "./Home";
 
@@ -22,6 +22,13 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
 
 const mockListDevices = vi.fn();
+// Captured onStatus callbacks so tests can fire synthetic status pushes.
+let capturedStatusCallbacks: Array<(s: Status) => void> = [];
+const mockOnStatus = vi.fn((cb: (s: Status) => void) => {
+  capturedStatusCallbacks.push(cb);
+  return Promise.resolve(() => {});
+});
+
 // vi.hoisted() runs before vi.mock factories, so MockConduitError is available
 // both in the factory closure and in test bodies without a dynamic import().
 const { MockConduitError } = vi.hoisted(() => {
@@ -40,6 +47,7 @@ const { MockConduitError } = vi.hoisted(() => {
 
 vi.mock("../lib/client", () => ({
   listDevices: (...a: unknown[]) => mockListDevices(...a),
+  onStatus: (...a: unknown[]) => mockOnStatus(a[0] as (s: Status) => void),
   ConduitError: MockConduitError,
 }));
 
@@ -63,7 +71,11 @@ f1 = "back"
 mouse4 = "copy"
 `);
 
-beforeEach(() => { mockListDevices.mockReset(); });
+beforeEach(() => {
+  mockListDevices.mockReset();
+  capturedStatusCallbacks = [];
+  mockOnStatus.mockClear();
+});
 
 describe("HomeScreen", () => {
   it("renders heading, a card per physical device, and opens on click", async () => {
@@ -102,5 +114,57 @@ describe("HomeScreen", () => {
     render(<HomeScreen model={null} connected={false} onOpenDevice={() => {}} />);
     expect(await screen.findByText("Conduit's engine isn't running")).toBeInTheDocument();
     expect(screen.queryByText(/ECONNREFUSED|conduit\.sock/)).toBeNull();
+  });
+
+  it("F1: refreshes device list when a status push reports a changed grabbed_devices", async () => {
+    // Initial render: no devices → empty state visible
+    mockListDevices.mockResolvedValue([]);
+    render(<HomeScreen model={null} connected={true} onOpenDevice={() => {}} />);
+    expect(await screen.findByText("Plug in a mouse or keyboard to get started")).toBeInTheDocument();
+
+    // Now a device plugs in: status push arrives with a changed grabbed_devices
+    // and listDevices now returns one device
+    mockListDevices.mockResolvedValue([node({})]);
+    const baseStatus: Status = {
+      active_profile: "default",
+      active_layers: ["base"],
+      suspended: false,
+      focus: null,
+      grabbed_devices: ["/dev/input/event0"],
+      version: "0.1.0",
+      config_version: 0,
+    };
+    await act(async () => {
+      for (const cb of capturedStatusCallbacks) cb(baseStatus);
+    });
+
+    expect(await screen.findByRole("button", { name: /Logitech G502 X/ })).toBeInTheDocument();
+    expect(screen.queryByText("Plug in a mouse or keyboard to get started")).toBeNull();
+  });
+
+  it("F1: does not re-fetch when grabbed_devices is unchanged in a status push", async () => {
+    mockListDevices.mockResolvedValue([node({})]);
+    render(<HomeScreen model={null} connected={true} onOpenDevice={() => {}} />);
+    await screen.findByRole("button", { name: /Logitech G502 X/ });
+    const callCountAfterMount = mockListDevices.mock.calls.length;
+
+    // Push same grabbed_devices value — should not trigger another listDevices call
+    const sameStatus: Status = {
+      active_profile: "default",
+      active_layers: ["base"],
+      suspended: false,
+      focus: null,
+      grabbed_devices: [],
+      version: "0.1.0",
+      config_version: 0,
+    };
+    // First push establishes the ref; second push with same value must not refetch
+    await act(async () => {
+      for (const cb of capturedStatusCallbacks) cb(sameStatus);
+    });
+    await act(async () => {
+      for (const cb of capturedStatusCallbacks) cb(sameStatus);
+    });
+    expect(mockListDevices.mock.calls.length).toBe(callCountAfterMount + 1); // only the first push
   });
 });
