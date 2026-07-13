@@ -777,4 +777,72 @@ a = "d"
         assert_eq!(versions.len(), 2);
         assert!(versions[1] > versions[0]);
     }
+
+    /// Verify that an out-of-order (stale) Reload is ignored by the runloop.
+    ///
+    /// Two senders share the same version counter, so delivery order is not
+    /// guaranteed.  Injecting v2 then v1 simulates a race where the watcher
+    /// delivers a redundant reload after IPC has already applied a newer one.
+    /// The runloop must keep config_version == 2, not regress to 1.
+    #[test]
+    fn stale_reload_is_skipped_and_version_does_not_regress() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let sock_path = tmp.path().join("conduit-stale-test.sock");
+        let config_path = tmp.path().join("conduit.toml");
+
+        let toml = "[profile.default.keys]\n";
+        std::fs::write(&config_path, toml).expect("write config");
+
+        let compiled = compile_config(toml).expect("compile");
+        let settings = compiled.settings.clone();
+        let engine = Engine::new(compiled);
+
+        let (tx, rx) = crossbeam_channel::unbounded::<crate::runloop::Msg>();
+        let tx_for_ipc = tx.clone();
+
+        // Spawn the runloop.
+        std::thread::Builder::new()
+            .name("test-runloop-stale".into())
+            .spawn(move || {
+                crate::runloop::run(
+                    engine,
+                    None,
+                    rx,
+                    tx,
+                    HashMap::new(),
+                    settings,
+                    HashMap::new(),
+                    Vec::new(),
+                )
+            })
+            .expect("spawn runloop");
+
+        // Spawn the IPC server.
+        let gate = std::sync::Arc::new(std::sync::Mutex::new(crate::watch::ReloadGate::new()));
+        let version = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        spawn_at(sock_path.clone(), tx_for_ipc.clone(), config_path.clone(), gate, version)
+            .expect("spawn ipc");
+
+        // Inject v2 first, then the stale v1 — simulating out-of-order delivery.
+        let cfg2 = compile_config(toml).expect("compile cfg2");
+        let cfg1 = compile_config(toml).expect("compile cfg1");
+        tx_for_ipc.send(crate::runloop::Msg::Reload(cfg2, 2)).unwrap();
+        tx_for_ipc.send(crate::runloop::Msg::Reload(cfg1, 1)).unwrap();
+
+        // Give the runloop time to process both messages.
+        std::thread::sleep(Duration::from_millis(100));
+
+        // GetStatus via the socket must report version == 2, not 1.
+        let mut client = UnixStream::connect(&sock_path).expect("connect");
+        let resp = send_request(&mut client, &Request::GetStatus);
+        match resp {
+            Response::Status(s) => {
+                assert_eq!(
+                    s.config_version, 2,
+                    "stale v1 reload must not regress config_version from 2 to 1"
+                );
+            }
+            other => panic!("expected Status, got {other:?}"),
+        }
+    }
 }

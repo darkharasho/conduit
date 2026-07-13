@@ -252,25 +252,36 @@ pub fn run(
                 engine.handle_on(ev, slot).to_vec()
             }
             Some(Msg::Reload(cfg, ver)) => {
-                // swap_config needs the current focus so buffered events
-                // replay under the right profile — handled here, not in
-                // drive(), because only run() knows the focus.
-                config_version = ver;
-                let new_settings = cfg.settings.clone();
-                device_selectors = cfg.device_selectors.clone();
-                let evs = {
-                    let (process, class, title) = current_focus
-                        .as_ref()
-                        .map(|f| (f.process.as_str(), f.class.as_str(), f.title.as_str()))
-                        .unwrap_or(("", "", ""));
-                    engine
-                        .swap_config(cfg, &FocusFields { process, class, title })
-                        .to_vec()
-                };
-                settings = new_settings;
-                slots = compute_slots(&sources, &device_selectors);
-                push_status(&engine, &current_focus, &grabbed_devices, config_version, &mut status_subs);
-                evs
+                // Two senders (ipc.rs::set_config and watch.rs::poll_loop) both
+                // allocate version numbers from the same AtomicU64 and send over
+                // the same channel.  Allocation order is not guaranteed to match
+                // delivery order, so a stale (lower-numbered) reload can arrive
+                // after a newer one has already been applied.  Skip it to avoid
+                // regressing the live config and reported version.
+                if ver <= config_version {
+                    eprintln!("conduit: skipping stale reload v{ver} (current v{config_version})");
+                    vec![]
+                } else {
+                    // swap_config needs the current focus so buffered events
+                    // replay under the right profile — handled here, not in
+                    // drive(), because only run() knows the focus.
+                    config_version = ver;
+                    let new_settings = cfg.settings.clone();
+                    device_selectors = cfg.device_selectors.clone();
+                    let evs = {
+                        let (process, class, title) = current_focus
+                            .as_ref()
+                            .map(|f| (f.process.as_str(), f.class.as_str(), f.title.as_str()))
+                            .unwrap_or(("", "", ""));
+                        engine
+                            .swap_config(cfg, &FocusFields { process, class, title })
+                            .to_vec()
+                    };
+                    settings = new_settings;
+                    slots = compute_slots(&sources, &device_selectors);
+                    push_status(&engine, &current_focus, &grabbed_devices, config_version, &mut status_subs);
+                    evs
+                }
             }
             Some(Msg::DeviceAdded(p)) => {
                 try_grab_device(
