@@ -30,11 +30,14 @@ interface Props {
   railActiveProfile: string;
   /** Notify App.tsx when profile list changes */
   onProfilesChange: (names: string[]) => void;
+  /** When set and a device with that path exists after load, make it the active tab (one-shot) */
+  focusDevicePath?: string;
 }
 
 export function MappingsScreen({
   railActiveProfile,
   onProfilesChange,
+  focusDevicePath,
 }: Props) {
   const [model, setModel] = useState<ConfigModel | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -96,6 +99,15 @@ export function MappingsScreen({
       unlistenConn.then(([fn1, fn2]) => { fn1(); fn2(); });
     };
   }, [loadConfig, loadDevices]);
+
+  // One-shot: when focusDevicePath is provided and devices have loaded, select it
+  useEffect(() => {
+    if (!focusDevicePath) return;
+    if (devices.some((d) => d.path === focusDevicePath)) {
+      setActiveDevPath(focusDevicePath);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [devices, focusDevicePath]);
 
   // When rail selects a different profile, reset layer & editing
   useEffect(() => {

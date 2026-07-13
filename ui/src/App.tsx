@@ -9,6 +9,7 @@ import {
 } from "./lib/client";
 import type { Status, FocusInfo } from "./lib/client";
 import { Titlebar } from "./components/Titlebar";
+import { SetupCheck } from "./components/SetupCheck";
 import {
   parseConfigToml,
   serializeConfigToml,
@@ -19,20 +20,16 @@ import {
 import type { ConfigModel } from "./lib/config-model";
 import { StatusScreen } from "./screens/Status";
 import { MappingsScreen } from "./screens/Mappings";
-import { KeyTesterScreen } from "./screens/KeyTester";
-import { DevicesScreen } from "./screens/Devices";
+import { HomeScreen } from "./screens/Home";
+import type { PhysicalDevice } from "./lib/device-registry";
 
-type Screen = "mappings" | "key-tester" | "devices" | "status";
-
-const NAV_ITEMS: { id: Screen; label: string; key: string }[] = [
-  { id: "mappings",    label: "Mappings",   key: "1" },
-  { id: "key-tester", label: "Key Tester", key: "2" },
-  { id: "devices",    label: "Devices",    key: "3" },
-  { id: "status",     label: "Status",     key: "4" },
-];
+type View =
+  | { kind: "home" }
+  | { kind: "device"; devPath: string; title: string }
+  | { kind: "help" };
 
 function App() {
-  const [activeScreen, setActiveScreen] = useState<Screen>("mappings");
+  const [view, setView] = useState<View>({ kind: "home" });
   const [connected, setConnected] = useState<boolean | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
 
@@ -59,7 +56,7 @@ function App() {
   // Seed status with a one-shot query. The Tauri process emits
   // conduit://connected when ITS subscription connects — often before this
   // webview has registered listeners — so without this seed the shell shows
-  // a red daemon dot and 0 grabbed devices until the next status push.
+  // a stale state until the next status push.
   const refreshStatus = useCallback(async () => {
     try {
       const s = await getStatus();
@@ -130,117 +127,100 @@ function App() {
     };
   }, [loadConfig, refreshStatus]);
 
-  // Keyboard shortcuts 1-4 to switch screens
-  // Skip when modifier keys are held or when focus is in an editable element
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-      const target = e.target as HTMLElement;
-      const tag = target?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      if (target?.isContentEditable) return;
-      const item = NAV_ITEMS.find((n) => n.key === e.key);
-      if (item) setActiveScreen(item.id);
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, []);
-
-  function renderScreen() {
-    switch (activeScreen) {
-      case "status":
-        return <StatusScreen />;
-      case "mappings":
-        return (
-          <MappingsScreen
-            railActiveProfile={activeProfile}
-            onProfilesChange={handleProfilesChange}
-          />
-        );
-      case "key-tester":
-        return <KeyTesterScreen />;
-      case "devices":
-        return <DevicesScreen />;
-    }
-  }
-
   const profiles = configModel ? listProfiles(configModel) : [];
 
-  // Status bar values
-  const daemonOk = connected === true;
-  const activeProfileLabel = status?.active_profile ?? "—";
-  const activeLayers = status?.active_layers ?? [];
-  const layersLabel = activeLayers.length > 0 ? activeLayers.join(", ") : "base";
-  const focusLabel = status?.focus ? status.focus.process : "—";
-  const grabbedCount = status?.grabbed_devices?.length ?? 0;
+  const isDeviceView = view.kind === "device";
 
   return (
     <div className="app-shell">
       <Titlebar connected={connected} />
-      <div className="app-cols">
-        {/* Left rail */}
-        <aside className="rail" aria-label="Navigation">
-          {/* Nav */}
-          <nav className="rail__nav">
-            {NAV_ITEMS.map((item) => (
-              <button
-                key={item.id}
-                className={`rail__nav-item${activeScreen === item.id ? " rail__nav-item--active" : ""}`}
-                onClick={() => setActiveScreen(item.id)}
-                aria-current={activeScreen === item.id ? "page" : undefined}
-              >
-                {item.label}
-                <kbd className="rail__nav-kbd">{item.key}</kbd>
-              </button>
-            ))}
-          </nav>
+      <div className={`app-cols${isDeviceView ? "" : " app--no-rail"}`}>
+        {/* Left rail — only in device view */}
+        {isDeviceView && view.kind === "device" && (
+          <aside className="rail" aria-label="Navigation">
+            {/* Back button */}
+            <button className="rail__back" onClick={() => setView({ kind: "home" })}>
+              ‹ Your devices
+            </button>
+            <div className="rail__device-title">{view.title}</div>
 
-          {/* Profiles section — on every screen; clicking a profile jumps
-              to Mappings with it selected. The technical match rule stays
-              available as a tooltip; the rail itself speaks plainly. */}
-          <div className="rail__section-label">Profiles</div>
-          {profiles.map((name) => {
-            const isActive = name === activeProfile && activeScreen === "mappings";
-            const isLive = name === status?.active_profile;
-            const matchLabel = configModel
-              ? getProfileMatchLabel(configModel, name)
-              : null;
+            {/* Profiles section — clicking a profile jumps to Mappings with it selected.
+                The technical match rule stays available as a tooltip; the rail speaks plainly. */}
+            <div className="rail__section-label">Profiles</div>
+            {profiles.map((name) => {
+              const isActive = name === activeProfile;
+              const isLive = name === status?.active_profile;
+              const matchLabel = configModel
+                ? getProfileMatchLabel(configModel, name)
+                : null;
 
-            return (
-              <button
-                key={name}
-                className={`rail__profile${isActive ? " rail__profile--active" : ""}`}
-                title={matchLabel ?? undefined}
-                onClick={() => {
-                  setActiveProfile(name);
-                  setActiveScreen("mappings");
-                }}
-              >
-                <span>
-                  {name === "default" ? "Everywhere" : name}
-                  {isLive && (
-                    <span className="rail__profile-live"> ● active</span>
+              return (
+                <button
+                  key={name}
+                  className={`rail__profile${isActive ? " rail__profile--active" : ""}`}
+                  title={matchLabel ?? undefined}
+                  onClick={() => {
+                    setActiveProfile(name);
+                  }}
+                >
+                  <span>
+                    {name === "default" ? "Everywhere" : name}
+                    {isLive && (
+                      <span className="rail__profile-live"> ● active</span>
+                    )}
+                  </span>
+                  {matchLabel && (
+                    <span className="rail__profile-auto">AUTO</span>
                   )}
-                </span>
-                {matchLabel && (
-                  <span className="rail__profile-auto">AUTO</span>
-                )}
-              </button>
-            );
-          })}
-          <button
-            className="rail__add-profile"
-            onClick={handleOpenAddProfile}
-          >
-            + Profile for an app…
-          </button>
-          <p className="rail__profiles-hint">
-            App profiles switch on by themselves when their app is in front.
-          </p>
-        </aside>
+                </button>
+              );
+            })}
+            <button
+              className="rail__add-profile"
+              onClick={handleOpenAddProfile}
+            >
+              + Profile for an app…
+            </button>
+            <p className="rail__profiles-hint">
+              App profiles switch on by themselves when their app is in front.
+            </p>
+          </aside>
+        )}
 
         {/* Main content */}
-        <div className="main-area">{renderScreen()}</div>
+        <div className="main-area">
+          {view.kind === "home" && (
+            connected === false ? (
+              <div className="home-shell__recovery"><SetupCheck /></div>
+            ) : (
+              <>
+                <HomeScreen
+                  model={configModel}
+                  connected={connected}
+                  onOpenDevice={(d: PhysicalDevice) =>
+                    setView({ kind: "device", devPath: d.nodes[0].path, title: d.name })
+                  }
+                />
+                <button className="home-shell__help-link" onClick={() => setView({ kind: "help" })}>
+                  Help & troubleshooting
+                </button>
+              </>
+            )
+          )}
+          {view.kind === "device" && (
+            <MappingsScreen
+              railActiveProfile={activeProfile}
+              onProfilesChange={handleProfilesChange}
+              focusDevicePath={view.devPath}
+            />
+          )}
+          {view.kind === "help" && (
+            <div className="home-shell__help">
+              <button className="home-shell__back" onClick={() => setView({ kind: "home" })}>‹ Your devices</button>
+              <StatusScreen />
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Profile add modal (lifted from MappingsScreen) */}
@@ -303,38 +283,6 @@ function App() {
           </div>
         </div>
       )}
-
-      {/* Bottom status bar (26px, mono 11px) */}
-      <div className="status-bar" role="status" aria-label="Daemon status">
-        <span>
-          <span className={daemonOk ? "status-bar__dot--ok" : "status-bar__dot--err"}>
-            ●
-          </span>
-          {" daemon"}
-        </span>
-        <span>
-          profile:{" "}
-          <span className="status-bar__val">{activeProfileLabel}</span>
-        </span>
-        <span>
-          layers:{" "}
-          <span className="status-bar__val">{layersLabel}</span>
-        </span>
-        <span>
-          focus:{" "}
-          <span className="status-bar__val">{focusLabel}</span>
-        </span>
-        <div className="status-bar__right">
-          <span>
-            grabbed:{" "}
-            <span className="status-bar__val">{grabbedCount}</span>
-          </span>
-          <span>
-            panic:{" "}
-            <span className="status-bar__val">ctrl+alt+bsp</span>
-          </span>
-        </div>
-      </div>
     </div>
   );
 }

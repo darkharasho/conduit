@@ -1977,3 +1977,14 @@ button {
 .home__error { margin-top: 20px; padding: 14px 18px; border: 1px solid var(--amber-border); border-radius: var(--r6); max-width: 520px; }
 .home__error-title { font-size: 14px; font-weight: 600; color: var(--text-hi); }
 .home__error-body { margin-top: 4px; font-size: 13px; color: var(--text-mid); }
+
+/* ── Shell: home-first navigation ────────────────────────────────────── */
+.app--no-rail { grid-template-columns: 1fr; }
+.rail__back { display: block; width: 100%; text-align: left; padding: 8px 10px; margin-bottom: 4px; background: none; border: none; border-radius: var(--r4); color: var(--text-mid); font: inherit; font-size: 13px; cursor: pointer; }
+.rail__back:hover { background: var(--bg-key); color: var(--text-hi); }
+.rail__device-title { padding: 2px 10px 10px; font-size: 13px; font-weight: 650; color: var(--text-hi); border-bottom: 1px solid var(--border-structural); margin-bottom: 8px; }
+.home-shell__help-link { margin: 0 48px 24px; align-self: flex-start; background: none; border: none; color: var(--text-lo); font: inherit; font-size: 12.5px; cursor: pointer; border-bottom: 1px dotted var(--text-dim); padding: 0; }
+.home-shell__help-link:hover { color: var(--text-mid); }
+.home-shell__back { background: none; border: none; color: var(--text-mid); font: inherit; font-size: 13px; cursor: pointer; padding: 12px 16px; text-align: left; }
+.home-shell__help { display: flex; flex-direction: column; overflow-y: auto; }
+.home-shell__recovery { display: flex; align-items: center; justify-content: center; height: 100%; }

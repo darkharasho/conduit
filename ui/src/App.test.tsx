@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import App from "./App";
 
-// Regression: the Tauri process emits conduit://connected before the webview
-// registers listeners, so the shell must seed connection + status from a
-// one-shot getStatus() on mount. Without the seed the daemon dot stayed red
-// and the bottom bar showed "grabbed: 0" while the Status screen showed 1.
+// Tests rewritten for home-first navigation (Phase 2 shell rework).
+// Deleted tests:
+//   - "seeds grabbed count and daemon-ok from getStatus on mount"
+//     (asserted .status-bar__val and .status-bar__dot--ok — status bar removed)
+//   - "profiles rail is visible outside the Mappings screen"
+//     (asserted nav button "Devices" and the old 4-screen nav rail — both removed)
 
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
@@ -27,7 +29,23 @@ vi.mock("./lib/client", () => ({
   getConfig: vi.fn(async () => '[profile.default.keys]\na = "b"'),
   setConfig: vi.fn(async () => {}),
   listWindows: vi.fn(async () => []),
-  listDevices: vi.fn(async () => []),
+  listDevices: vi.fn(async () => [
+    {
+      path: "/dev/input/event0",
+      name: "Logitech G502 X",
+      vendor: 0x046d,
+      product: 0x4099,
+      is_keyboard: false,
+      is_mouse: true,
+      grabbed: true,
+      id: "046d:4099/x",
+      class: "mouse",
+      phys: "",
+      keys: [],
+      wheel: true,
+      hwheel: false,
+    },
+  ]),
   suspend: vi.fn(async () => {}),
   resume: vi.fn(async () => {}),
   onStatus: vi.fn(() => Promise.resolve(() => {})),
@@ -35,27 +53,23 @@ vi.mock("./lib/client", () => ({
   onKeyEvent: vi.fn(() => Promise.resolve(() => {})),
 }));
 
-describe("App shell status seeding", () => {
-  it("seeds grabbed count and daemon-ok from getStatus on mount", async () => {
+describe("App shell — home-first navigation", () => {
+  it("opens on the home screen with no status bar daemon dot", async () => {
     render(<App />);
-    // Bottom bar reflects the seeded status, not 0/red.
-    const grabbed = await screen.findByText("1", { selector: ".status-bar__val" });
-    expect(grabbed).toBeInTheDocument();
-    expect(document.querySelector(".status-bar__dot--ok")).not.toBeNull();
+    expect(await screen.findByText("Your devices")).toBeInTheDocument();
+    // Status bar (with daemon dot) is removed entirely
+    expect(document.querySelector(".status-bar")).toBeNull();
+    expect(document.querySelector(".status-bar__dot--ok")).toBeNull();
     expect(document.querySelector(".status-bar__dot--err")).toBeNull();
-    // Titlebar daemon indicator turns ok too.
-    expect(document.querySelector(".titlebar__daemon--ok")).not.toBeNull();
   });
 
-  it("profiles rail is visible outside the Mappings screen", async () => {
+  it("navigates home → device editor → back", async () => {
     render(<App />);
-    await screen.findAllByText("Everywhere");
-    // Switch to the Devices screen via its nav button…
-    const devicesNav = screen.getAllByRole("button", { name: /Devices/ })[0];
-    devicesNav.click();
-    // …profiles section is still there.
-    expect(screen.getByText("Profiles")).toBeInTheDocument();
-    expect(screen.getByText("+ Profile for an app…")).toBeInTheDocument();
+    const card = await screen.findByRole("button", { name: /Logitech G502 X/ });
+    fireEvent.click(card);
+    expect(await screen.findByText(/‹ Your devices/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText(/‹ Your devices/));
+    expect(await screen.findByText("Your devices")).toBeInTheDocument();
   });
 });
 
@@ -66,6 +80,9 @@ describe("Plain-language profile rail and app picker", () => {
       '[profile.default.keys]\na = "b"\n[profile.firefox]\nmatch = { class = "firefox" }\n[profile.firefox.keys]\nmouse4 = "back"'
     );
     render(<App />);
+    // Navigate into device view to see profiles rail
+    const card = await screen.findByRole("button", { name: /Logitech G502 X/ });
+    fireEvent.click(card);
     await screen.findByText("firefox");
     expect(screen.getByText("Everywhere")).toBeInTheDocument();
     expect(screen.getByText("AUTO")).toBeInTheDocument();
@@ -83,6 +100,9 @@ describe("Plain-language profile rail and app picker", () => {
       { process: "steam", class: "steam", title: "Steam" },
     ]);
     render(<App />);
+    // Navigate into device view to see profiles rail with the add button
+    const card = await screen.findByRole("button", { name: /Logitech G502 X/ });
+    fireEvent.click(card);
     await screen.findByText("firefox");
     screen.getByText("+ Profile for an app…").click();
     await screen.findByText("Profile for an app");
