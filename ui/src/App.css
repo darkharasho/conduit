@@ -2010,3 +2010,9 @@ button {
 .help__tab { background: none; border: none; border-bottom: 2px solid transparent; padding: 8px 12px; font: inherit; font-size: 13px; color: var(--text-lo); cursor: pointer; }
 .help__tab--sel { color: var(--text-hi); border-bottom-color: var(--teal); }
 .help__body { flex: 1; overflow-y: auto; min-height: 0; }
+
+/* ── Toast ───────────────────────────────────────────────────────────── */
+.toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; padding: 10px 16px; border-radius: var(--r6); background: var(--bg-key); border: 1px solid var(--border-control); font-size: 13px; color: var(--text-hi); box-shadow: 0 8px 24px rgba(0,0,0,.4); z-index: 40; }
+.toast--error { border-color: var(--amber-border); }
+.toast__action { background: none; border: none; color: var(--teal); font: inherit; font-weight: 600; cursor: pointer; }
+.toast__close { background: none; border: none; color: var(--text-dim); font: inherit; cursor: pointer; }

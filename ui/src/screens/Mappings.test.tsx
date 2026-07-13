@@ -5,7 +5,7 @@
  * every render.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, act } from "@testing-library/react";
+import { render, act, screen, fireEvent, waitFor } from "@testing-library/react";
 
 // ── Mock Tauri APIs before importing anything that uses them ──────────────────
 
@@ -20,6 +20,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { MappingsScreen } from "./Mappings";
+import { ConduitError } from "../lib/client";
 
 const mockInvoke = vi.mocked(invoke);
 const mockListen = vi.mocked(listen);
@@ -300,5 +301,108 @@ describe("MappingsScreen — plain-language assignment", () => {
 
     expect(setConfigCalls).toHaveLength(1);
     expect(setConfigCalls[0]).not.toContain('a = "b"');
+  });
+});
+
+// A TOML config with key "a" mapped to "b" under profile "default" (base layer = profile.keys)
+const MAPPED_TOML_AB = '[profile.default.keys]\na = "b"';
+
+/** Shared arrange: render with a mapped config and no devices. */
+async function renderMapped(invokeImpl: (cmd: string, args?: { toml?: string }) => unknown) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  mockInvoke.mockImplementation((async (cmd: string, args?: { toml?: string }) =>
+    invokeImpl(cmd, args)) as any);
+  mockListen.mockResolvedValue(vi.fn());
+
+  const result = render(
+    <MappingsScreen railActiveProfile="default" onProfilesChange={() => {}} />,
+  );
+
+  // Wait for initial load
+  await act(async () => { await Promise.resolve(); });
+  await act(async () => { await Promise.resolve(); });
+
+  return result;
+}
+
+describe("MappingsScreen — applyWithUndo failure path", () => {
+  it("apply failure reverts the model and offers Try again with plain language", async () => {
+    let setConfigCallCount = 0;
+
+    const { container, findByText } = await renderMapped((cmd, _args) => {
+      if (cmd === "get_config") return MAPPED_TOML_AB;
+      if (cmd === "list_devices") return [];
+      if (cmd === "set_config") {
+        setConfigCallCount++;
+        if (setConfigCallCount === 1) {
+          // First call rejects with a ConduitError (thrown synchronously from
+          // the mock so the async wrapper rejects the promise)
+          throw new ConduitError("config-invalid", "config rejected", "TOML parse error at line 3");
+        }
+        return undefined;
+      }
+      return undefined;
+    });
+
+    // Select the mapped key "a" on the keyboard viz
+    const keycap = container.querySelector('button[title="a"]') as HTMLElement;
+    expect(keycap).toBeTruthy();
+    await act(async () => { keycap.click(); });
+
+    // Wait for AssignPanel ("Use default" appears when panel is open)
+    await findByText("Use default");
+
+    // Click the "Back" quick pick to trigger a save that will fail
+    const backBtn = await findByText("Back");
+    await act(async () => { fireEvent.click(backBtn); });
+
+    // Assert: error toast with plain-language title
+    const toastEl = await screen.findByRole("status");
+    expect(toastEl).toHaveTextContent("That change couldn't be applied");
+    // Try again button is present
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    // Raw error detail must NOT appear anywhere in the document
+    expect(screen.queryByText(/line 3|TOML/)).toBeNull();
+    // setConfig was called exactly once (no retry yet — optimistic model reverted)
+    expect(setConfigCallCount).toBe(1);
+  });
+});
+
+describe("MappingsScreen — applyWithUndo undo path", () => {
+  it("undo re-applies the previous config", async () => {
+    const setConfigCalls: string[] = [];
+
+    const { container, findByText } = await renderMapped((cmd, args) => {
+      if (cmd === "get_config") return MAPPED_TOML_AB;
+      if (cmd === "list_devices") return [];
+      if (cmd === "set_config") {
+        setConfigCalls.push((args as { toml?: string })?.toml ?? "");
+        return undefined;
+      }
+      return undefined;
+    });
+
+    // Select the mapped key "a" on the keyboard viz
+    const keycap = container.querySelector('button[title="a"]') as HTMLElement;
+    expect(keycap).toBeTruthy();
+    await act(async () => { keycap.click(); });
+
+    // Wait for AssignPanel, then click the "Back" quick pick to save
+    await findByText("Use default");
+    const backBtn = await findByText("Back");
+    await act(async () => { fireEvent.click(backBtn); });
+
+    // Wait for success toast with Undo button
+    const undoBtn = await screen.findByRole("button", { name: "Undo" });
+    expect(setConfigCalls).toHaveLength(1);
+    // First setConfig call should include the new mapping
+    expect(setConfigCalls[0]).toContain("back");
+
+    // Click Undo — should re-apply the previous config (lacking the new mapping)
+    await act(async () => { fireEvent.click(undoBtn); });
+
+    // Second setConfig call must not contain the new mapping
+    await waitFor(() => expect(setConfigCalls).toHaveLength(2));
+    expect(setConfigCalls[1]).not.toContain("back");
   });
 });

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { getConfig, setConfig, onConnection, onKeyEvent, listDevices } from "../lib/client";
-import type { DeviceInfo } from "../lib/client";
+import type { DeviceInfo, ConduitError } from "../lib/client";
 import {
   parseConfigToml,
   serializeConfigToml,
@@ -24,6 +24,10 @@ import { MouseViz } from "../components/MouseViz";
 import { Toolbar } from "../components/Toolbar";
 import { AssignPanel } from "../components/AssignPanel";
 import { ProfileMatchEditor } from "../components/ProfileMatchEditor";
+import { Toast } from "../components/Toast";
+import type { ToastData } from "../components/Toast";
+import { presentError } from "../lib/error-messages";
+import { keyDisplayName, actionLabel } from "../lib/action-labels";
 
 interface Props {
   /** Rail-selected profile (controlled by App.tsx rail) */
@@ -32,6 +36,11 @@ interface Props {
   onProfilesChange: (names: string[]) => void;
   /** When set and a device with that path exists after load, make it the active tab (one-shot) */
   focusDevicePath?: string;
+}
+
+interface UndoFrame {
+  prev: ConfigModel;
+  description: string;
 }
 
 export function MappingsScreen({
@@ -45,6 +54,7 @@ export function MappingsScreen({
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [newLayerPrompt, setNewLayerPrompt] = useState(false);
   const [newLayerName, setNewLayerName] = useState("");
+  const [toast, setToast] = useState<ToastData | null>(null);
 
   // Device tabs: grabbed devices, keyed by evdev path (unique even for twins)
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
@@ -53,6 +63,9 @@ export function MappingsScreen({
   const [deviceScope, setDeviceScope] = useState(false);
   // Detect flow: waiting for a physical press on the active device
   const [detecting, setDetecting] = useState(false);
+
+  // Undo stack: capped at 10 frames (in a ref — not state)
+  const undoStackRef = useRef<UndoFrame[]>([]);
 
   // Hold onProfilesChange in a ref so loadConfig's deps stay stable
   const onProfilesChangeRef = useRef(onProfilesChange);
@@ -153,16 +166,72 @@ export function MappingsScreen({
     (sel) => !devices.some((d) => selectorMatches(sel, d))
   );
 
-  const persist = async (updated: ConfigModel) => {
-    setModel(updated);
-    try {
-      await setConfig(serializeConfigToml(updated));
-    } catch (err) {
-      setLoadError(String(err));
-      return;
-    }
-    onProfilesChangeRef.current(listProfiles(updated));
-  };
+  /**
+   * Apply `updated` optimistically, persist, and offer Undo on success or
+   * revert + Try-again on failure. `skipUndoPush` is used by the Undo action
+   * itself so it does not push a new frame.
+   */
+  const applyWithUndoImpl = useCallback(
+    async (updated: ConfigModel, description: string, skipUndoPush = false) => {
+      // Snapshot current model before optimistic update
+      // model is captured via closure — this is safe since we read it once
+      const prevSnapshot = model;
+
+      if (prevSnapshot !== null && !skipUndoPush) {
+        const frame: UndoFrame = { prev: prevSnapshot, description };
+        undoStackRef.current = [...undoStackRef.current, frame].slice(-10);
+      }
+
+      // Optimistic update
+      setModel(updated);
+
+      try {
+        await setConfig(serializeConfigToml(updated));
+        onProfilesChangeRef.current(listProfiles(updated));
+
+        // Success toast with Undo
+        setToast({
+          kind: "success",
+          message: description,
+          actionLabel: "Undo",
+          onAction: () => {
+            // Pop the frame we just pushed
+            const stack = undoStackRef.current;
+            if (stack.length === 0) return;
+            const frame = stack[stack.length - 1];
+            undoStackRef.current = stack.slice(0, -1);
+            setToast(null);
+            // Re-apply prev WITHOUT pushing a new undo frame
+            applyWithUndoImpl(frame.prev, "Undone", true);
+          },
+        });
+      } catch (err) {
+        // Revert optimistic update
+        if (prevSnapshot !== null) {
+          setModel(prevSnapshot);
+        }
+        // Pop the frame we pushed (if we did)
+        if (!skipUndoPush && prevSnapshot !== null) {
+          undoStackRef.current = undoStackRef.current.slice(0, -1);
+        }
+
+        const conduitErr = err as ConduitError;
+        const presentation = presentError(conduitErr);
+
+        setToast({
+          kind: "error",
+          message: presentation.title,
+          actionLabel: "Try again",
+          onAction: () => {
+            setToast(null);
+            applyWithUndoImpl(updated, description, skipUndoPush);
+          },
+        });
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [model]
+  );
 
   const handleSaveAction = async (action: ActionModel): Promise<void> => {
     if (!model || !editingKey) return;
@@ -178,7 +247,15 @@ export function MappingsScreen({
             action
           )
         : setAction(model, railActiveProfile, activeLayer, editingKey, action);
-    await persist(updated);
+
+    let description: string;
+    if (action.kind === "disabled") {
+      description = "Button disabled";
+    } else {
+      description = `${keyDisplayName(editingKey)} now does ${actionLabel(action)}`;
+    }
+
+    await applyWithUndoImpl(updated, description);
   };
 
   // "Use default": remove whatever mapping is currently in effect for this
@@ -190,11 +267,15 @@ export function MappingsScreen({
     if (eff?.source === "device" && activeDev) {
       const section = deviceSectionFor(model, railActiveProfile, activeDev);
       if (!section) return;
-      await persist(
-        removeDeviceAction(model, railActiveProfile, section, activeLayer, editingKey)
+      await applyWithUndoImpl(
+        removeDeviceAction(model, railActiveProfile, section, activeLayer, editingKey),
+        "Back to its normal behavior"
       );
     } else {
-      await persist(removeAction(model, railActiveProfile, activeLayer, editingKey));
+      await applyWithUndoImpl(
+        removeAction(model, railActiveProfile, activeLayer, editingKey),
+        "Back to its normal behavior"
+      );
     }
   };
 
@@ -202,8 +283,9 @@ export function MappingsScreen({
     if (!model || !editingKey || !activeDev) return;
     const section = deviceSectionFor(model, railActiveProfile, activeDev);
     if (!section) return;
-    await persist(
-      removeDeviceAction(model, railActiveProfile, section, activeLayer, editingKey)
+    await applyWithUndoImpl(
+      removeDeviceAction(model, railActiveProfile, section, activeLayer, editingKey),
+      "Back to its normal behavior"
     );
   };
 
@@ -417,7 +499,7 @@ export function MappingsScreen({
                   profileName={railActiveProfile}
                   onApply={async (match) => {
                     const updated = setProfileMatch(model, railActiveProfile, match);
-                    await persist(updated);
+                    await applyWithUndoImpl(updated, "Profile match updated");
                   }}
                 />
                 <div className="inspector">
@@ -432,6 +514,14 @@ export function MappingsScreen({
           <span className="muted">Loading config…</span>
         ) : null}
       </div>
+
+      {/* Toast notification */}
+      {toast && (
+        <Toast
+          toast={toast}
+          onDismiss={() => setToast(null)}
+        />
+      )}
     </div>
   );
 }
