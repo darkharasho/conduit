@@ -4,6 +4,31 @@ use crate::{event::Key, keys};
 
 pub const KEY_TABLE_SIZE: usize = 768;
 
+pub const MAX_CHORD_KEYS: usize = 4;
+
+/// A fixed-capacity multi-key output (e.g. Ctrl+C). Kept `Copy` so `Action`
+/// stays `Copy` for the engine's lookup tables.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Chord {
+    keys: [Key; MAX_CHORD_KEYS],
+    len: u8,
+}
+
+impl Chord {
+    pub fn new(keys: &[Key]) -> Option<Chord> {
+        if keys.len() < 2 || keys.len() > MAX_CHORD_KEYS {
+            return None;
+        }
+        let mut arr = [Key(0); MAX_CHORD_KEYS];
+        arr[..keys.len()].copy_from_slice(keys);
+        Some(Chord { keys: arr, len: keys.len() as u8 })
+    }
+
+    pub fn keys(&self) -> &[Key] {
+        &self.keys[..self.len as usize]
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum HoldAction {
     Key(Key),
@@ -18,6 +43,7 @@ pub enum Action {
     LayerToggle(u8),
     Disabled,
     Passthrough,
+    Chord(Chord),
 }
 
 pub type LayerMap = Box<[Option<Action>; KEY_TABLE_SIZE]>;
@@ -107,6 +133,8 @@ pub enum ConfigError {
     NoMatcher(String),
     #[error("config is empty: no default profile and no keys")]
     Empty,
+    #[error("chord `{chord}` in profile `{profile}` must have 2 to 4 keys")]
+    BadChord { profile: String, chord: String },
 }
 
 // ── Raw serde layer ──────────────────────────────────────────────────────────
@@ -505,6 +533,20 @@ fn compile_raw_action(
                         name: lname.to_string(),
                     })
             }
+            s if s.contains('+') => {
+                let toks: Vec<&str> =
+                    s.split('+').filter(|t| !t.is_empty()).collect();
+                let mut parsed = Vec::with_capacity(toks.len());
+                for t in &toks {
+                    parsed.push(parse_key_checked(t, ctx)?);
+                }
+                Chord::new(&parsed)
+                    .map(Action::Chord)
+                    .ok_or_else(|| ConfigError::BadChord {
+                        profile: ctx.to_string(),
+                        chord: s.to_string(),
+                    })
+            }
             s => Ok(Action::Key(parse_key_checked(s, ctx)?)),
         },
         RawAction::TapHold { tap, hold, timeout_ms } => {
@@ -764,5 +806,33 @@ mod tests {
         let c = compile("[profile.default.keys]\na = \"b\"").unwrap();
         assert!(c.device_selectors.is_empty());
         assert!(c.profiles[c.default_idx].device_layers.is_empty());
+    }
+
+    #[test]
+    fn chord_string_compiles_to_chord_action() {
+        let cfg = compile("[profile.default.keys]\nmouse4 = \"ctrl+c\"\n").unwrap();
+        let def = &cfg.profiles[cfg.default_idx];
+        match def.layers[0][keys::from_name("mouse4").unwrap().0 as usize] {
+            Some(Action::Chord(ch)) => {
+                let ks = ch.keys();
+                assert_eq!(ks.len(), 2);
+                assert_eq!(ks[0], keys::from_name("leftctrl").unwrap()); // alias resolved
+                assert_eq!(ks[1], keys::from_name("c").unwrap());
+            }
+            other => panic!("expected Chord, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn chord_rejects_bad_shapes() {
+        // 5 keys: too long
+        let e = compile("[profile.default.keys]\na = \"ctrl+shift+alt+meta+c\"\n").unwrap_err();
+        assert!(matches!(e, ConfigError::BadChord { .. }), "got {e:?}");
+        // unknown token inside a chord
+        let e = compile("[profile.default.keys]\na = \"ctrl+notakey\"\n").unwrap_err();
+        assert!(matches!(e, ConfigError::UnknownKey { .. }), "got {e:?}");
+        // trailing separator produces one real token → not a valid chord
+        let e = compile("[profile.default.keys]\na = \"c+\"\n").unwrap_err();
+        assert!(matches!(e, ConfigError::BadChord { .. }), "got {e:?}");
     }
 }

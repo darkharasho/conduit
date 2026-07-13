@@ -219,6 +219,12 @@ impl Engine {
                     }
                     self.held.insert(ev.key, HeldEntry::Swallowed);
                 }
+                // Chord emission lands in the next commit; until then a chord
+                // behaves as Disabled so the crate compiles. Replaced by the
+                // full press/release implementation immediately after.
+                Action::Chord(_) => {
+                    self.held.insert(ev.key, HeldEntry::Swallowed);
+                }
             },
             KeyState::Release => match self.held.remove(&ev.key) {
                 Some(HeldEntry::OutKey(out)) => self.out.push(Event { key: out, ..ev }),
