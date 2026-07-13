@@ -12,6 +12,7 @@ import {
   actionToTomlLine,
   setProfileMatch,
   setDeviceAction,
+  removeAction,
   removeDeviceAction,
   deviceSectionFor,
   deviceSectionKey,
@@ -21,7 +22,7 @@ import type { ConfigModel, ActionModel } from "../lib/config-model";
 import { KeyboardViz } from "../components/KeyboardViz";
 import { MouseViz } from "../components/MouseViz";
 import { Toolbar } from "../components/Toolbar";
-import { InspectorPanel } from "../components/InspectorPanel";
+import { AssignPanel } from "../components/AssignPanel";
 import { ProfileMatchEditor } from "../components/ProfileMatchEditor";
 
 interface Props {
@@ -164,6 +165,23 @@ export function MappingsScreen({
           )
         : setAction(model, railActiveProfile, activeLayer, editingKey, action);
     await persist(updated);
+  };
+
+  // "Use default": remove whatever mapping is currently in effect for this
+  // key — the device override when one shadows the profile, else the
+  // profile mapping — so the button reverts to its normal job.
+  const handleUseDefault = async () => {
+    if (!model || !editingKey) return;
+    const eff = getEffectiveAction(model, railActiveProfile, activeDev, activeLayer, editingKey);
+    if (eff?.source === "device" && activeDev) {
+      const section = deviceSectionFor(model, railActiveProfile, activeDev);
+      if (!section) return;
+      await persist(
+        removeDeviceAction(model, railActiveProfile, section, activeLayer, editingKey)
+      );
+    } else {
+      await persist(removeAction(model, railActiveProfile, activeLayer, editingKey));
+    }
   };
 
   const handleRemoveOverride = async () => {
@@ -364,14 +382,16 @@ export function MappingsScreen({
                     )}
                   </div>
                 )}
-                <InspectorPanel
+                <AssignPanel
                   key={`${editingKey}:${railActiveProfile}:${activeLayer}:${activeDevPath}`}
                   keyName={editingKey}
                   model={model}
                   activeProfile={railActiveProfile}
                   activeLayer={activeLayer}
+                  currentAction={currentAction}
                   tomlEcho={tomlEcho}
                   onSave={handleSaveAction}
+                  onUseDefault={handleUseDefault}
                   onClose={() => setEditingKey(null)}
                 />
               </>
@@ -388,7 +408,7 @@ export function MappingsScreen({
                 />
                 <div className="inspector">
                   <div className="inspector__hint">
-                    Select a key above to edit its mapping.
+                    Click a button above to change what it does.
                   </div>
                 </div>
               </>

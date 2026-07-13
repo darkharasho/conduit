@@ -1,7 +1,7 @@
 import type { ConfigModel, DeviceIdent } from "../lib/config-model";
 import { getEffectiveAction } from "../lib/config-model";
 import type { DeviceLayout } from "../lib/mouse-layouts";
-import { actionHint } from "./KeyboardViz";
+import { actionLabel } from "../lib/action-labels";
 
 interface Props {
   layout: DeviceLayout;
@@ -44,12 +44,14 @@ export function CuratedLayout({
                       title={b.note ?? "Handled by onboard firmware; emits nothing."}
                     >
                       <span className="mousekey__label">{b.label}</span>
-                      <i className="mousekey__action">onboard</i>
+                      <i className="mousekey__action">built-in</i>
                     </span>
                   );
                 }
                 const eff = getEffectiveAction(model, activeProfile, dev, activeLayer, b.key);
-                const hint = actionHint(eff?.action ?? null);
+                // Plain words when customized; nothing when the button just
+                // does its normal job — raw key names live in the tooltip.
+                const hint = eff ? actionLabel(eff.action) : "";
                 const isSelected = b.key === selectedKey;
                 return (
                   <button
@@ -68,7 +70,7 @@ export function CuratedLayout({
                     aria-pressed={isSelected}
                   >
                     <span className="mousekey__label">{b.label}</span>
-                    <i className="mousekey__action">{hint || b.key}</i>
+                    {hint && <i className="mousekey__action">{hint}</i>}
                   </button>
                 );
               })}

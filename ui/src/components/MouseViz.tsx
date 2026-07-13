@@ -2,9 +2,10 @@ import type { ConfigModel, DeviceIdent } from "../lib/config-model";
 import { getEffectiveAction } from "../lib/config-model";
 import { codeForKeyName } from "../lib/keyboard-layout";
 import { layoutFor } from "../lib/mouse-layouts";
-import { actionHint } from "./KeyboardViz";
+import { actionLabel } from "../lib/action-labels";
 import { CuratedLayout } from "./CuratedLayout";
 import { ExtraKeys } from "./ExtraKeys";
+import { MouseIllustration, ILLO_KEYS } from "./MouseIllustration";
 
 interface Props {
   model: ConfigModel;
@@ -71,7 +72,8 @@ export function MouseViz({
 
   const control = (key: string, label: string, extraClass = "") => {
     const eff = getEffectiveAction(model, activeProfile, dev, activeLayer, key);
-    const hint = actionHint(eff?.action ?? null);
+    // Plain words when customized; nothing when the control does its normal job.
+    const hint = eff ? actionLabel(eff.action) : "";
     const isSelected = key === selectedKey;
     return (
       <button
@@ -97,76 +99,87 @@ export function MouseViz({
     );
   };
 
-  const sideKeys = SIDE_KEYS.filter(has);
+  // Standard controls the mouse picture can place; everything else is a chip.
+  const illoKeys = ILLO_KEYS.filter(has);
+
+  const illustration = (
+    <MouseIllustration
+      model={model}
+      activeProfile={activeProfile}
+      activeLayer={activeLayer}
+      selectedKey={selectedKey}
+      onSelectKey={onSelectKey}
+      dev={dev}
+      keys={illoKeys}
+    />
+  );
 
   if (curated) {
     return (
       <div className="mouse-viz-wrap">
-        <CuratedLayout
-          layout={curated}
-          model={model}
-          activeProfile={activeProfile}
-          activeLayer={activeLayer}
-          selectedKey={selectedKey}
-          onSelectKey={onSelectKey}
-          dev={dev}
-        />
-        <ExtraKeys
-          model={model}
-          activeProfile={activeProfile}
-          activeLayer={activeLayer}
-          selectedKey={selectedKey}
-          onSelectKey={onSelectKey}
-          dev={dev}
-          codes={extraCodes}
-          primary={(c) => (c >= 0x100 && c <= 0x15f) || (c >= 0x2c0 && c <= 0x2e7)}
-        />
+        <div className="mouse-viz-row">
+          {illustration}
+          <div className="mouse-viz-row__groups">
+            <CuratedLayout
+              layout={curated}
+              model={model}
+              activeProfile={activeProfile}
+              activeLayer={activeLayer}
+              selectedKey={selectedKey}
+              onSelectKey={onSelectKey}
+              dev={dev}
+            />
+            <ExtraKeys
+              model={model}
+              activeProfile={activeProfile}
+              activeLayer={activeLayer}
+              selectedKey={selectedKey}
+              onSelectKey={onSelectKey}
+              dev={dev}
+              codes={extraCodes}
+              primary={(c) => (c >= 0x100 && c <= 0x15f) || (c >= 0x2c0 && c <= 0x2e7)}
+            />
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="mouse-viz-wrap">
-      <div className="mouse-viz" aria-label="Mouse layout">
-        <div className="mouse-viz__body">
-          {has("btn_left") && control("btn_left", "M1", "mousekey--m1")}
-          {has("btn_middle") && control("btn_middle", "M3", "mousekey--m3")}
-          {has("btn_right") && control("btn_right", "M2", "mousekey--m2")}
-          {sideKeys.length > 0 && (
-            <div className="mouse-viz__side">
-              {sideKeys.map((k, i) => control(k, `M${i + 4}`, "mousekey--side"))}
-            </div>
-          )}
-        </div>
-        <div className="mouse-viz__groups">
-          {wheelKeys.length > 0 && (
-            <div>
-              <div className="mouse-viz__group-label">Wheel</div>
-              <div className="mouse-viz__chips">
-                {wheelKeys.map((k) => control(k, k.replace("wheel", "wheel ")))}
+      <div className="mouse-viz-row">
+        {illustration}
+        <div className="mouse-viz-row__groups">
+          <div className="mouse-viz__groups">
+            {wheelKeys.length > 0 && (
+              <div>
+                <div className="mouse-viz__group-label">Wheel</div>
+                <div className="mouse-viz__chips">
+                  {wheelKeys.map((k) => control(k, k.replace("wheel", "Scroll ")))}
+                </div>
               </div>
-            </div>
-          )}
-          {extraBtnKeys.length > 0 && (
-            <div>
-              <div className="mouse-viz__group-label">Extra buttons</div>
-              <div className="mouse-viz__chips">
-                {extraBtnKeys.map((k) => control(k, k.replace("btn_", "")))}
+            )}
+            {extraBtnKeys.length > 0 && (
+              <div>
+                <div className="mouse-viz__group-label">Extra buttons</div>
+                <div className="mouse-viz__chips">
+                  {extraBtnKeys.map((k) => control(k, k.replace("btn_", "")))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
+          <ExtraKeys
+            model={model}
+            activeProfile={activeProfile}
+            activeLayer={activeLayer}
+            selectedKey={selectedKey}
+            onSelectKey={onSelectKey}
+            dev={dev}
+            codes={extraCodes}
+            primary={isButtonCode}
+          />
         </div>
       </div>
-      <ExtraKeys
-        model={model}
-        activeProfile={activeProfile}
-        activeLayer={activeLayer}
-        selectedKey={selectedKey}
-        onSelectKey={onSelectKey}
-        dev={dev}
-        codes={extraCodes}
-        primary={isButtonCode}
-      />
     </div>
   );
 }

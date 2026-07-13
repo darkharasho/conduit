@@ -141,7 +141,7 @@ const G502X_MOUSE: DeviceLayout = {
     },
     WHEEL_GROUP,
     {
-      label: "Onboard (emit nothing by default)",
+      label: "Built-in — the mouse handles these itself",
       buttons: [
         { key: null, label: "G6 · DPI shift (sniper)", note: "Handled by firmware — changes DPI while held. Assign it a key in G HUB/logiops to make it mappable, then Detect." },
         { key: null, label: "G7 · DPI down", note: "Handled by firmware. Assign in G HUB/logiops to make it mappable." },

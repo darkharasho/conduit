@@ -24,7 +24,10 @@ static KEYS: &[(&str, u16)] = &[
     ("pageup", 104), ("left", 105), ("right", 106), ("end", 107), ("down", 108),
     ("pagedown", 109), ("insert", 110), ("delete", 111), ("mute", 113),
     ("volumedown", 114), ("volumeup", 115), ("leftmeta", 125), ("rightmeta", 126),
-    ("compose", 127), ("back", 158), ("forward", 159), ("print", 210),
+    ("compose", 127), ("back", 158), ("forward", 159),
+    // Multimedia keys — standard evdev codes, honored desktop-wide (MPRIS).
+    ("nextsong", 163), ("playpause", 164), ("previoussong", 165),
+    ("print", 210),
     ("btn_left", 272), ("btn_right", 273), ("btn_middle", 274),
     ("mouse4", 275), ("mouse5", 276), // BTN_SIDE / BTN_EXTRA — canonical UI names
     ("btn_forward", 277), ("btn_back", 278), ("btn_task", 279),
@@ -97,6 +100,14 @@ mod tests {
         for name in ["btn_forward", "btn_back", "btn_task", "wheelup", "wheeldown", "wheelleft", "wheelright"] {
             let k = from_name(name).expect(name);
             assert_eq!(super::name(k), name);
+        }
+    }
+
+    #[test]
+    fn media_key_names_round_trip() {
+        for (name, code) in [("previoussong", 165u16), ("playpause", 164), ("nextsong", 163)] {
+            assert_eq!(from_name(name), Some(Key(code)), "{name}");
+            assert_eq!(super::name(Key(code)), name);
         }
     }
 

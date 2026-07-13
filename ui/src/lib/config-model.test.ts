@@ -679,3 +679,37 @@ a = "y"
     expect(deviceSectionKey(twinA, [twinA, twinB])).toBe("046d:c24a/G600@usb-1");
   });
 });
+
+// ── removeAction ("Use default") ─────────────────────────────────────────────
+
+import { removeAction } from "./config-model";
+
+describe("removeAction", () => {
+  it("deletes a base-layer mapping so the key reverts to its normal job", () => {
+    let m = parseConfigToml('[profile.default.keys]\nmouse4 = "back"\na = "b"');
+    m = removeAction(m, "default", "base", "mouse4");
+    expect(getAction(m, "default", "base", "mouse4")).toBeNull();
+    // untouched sibling mapping survives
+    expect(getAction(m, "default", "base", "a")).toEqual({ kind: "key", key: "b" });
+  });
+
+  it("deletes a named-layer mapping and prunes the layer when empty", () => {
+    let m = parseConfigToml('[profile.default.keys]\na = "b"\n[profile.default.layers.nav]\nh = "left"');
+    m = removeAction(m, "default", "nav", "h");
+    expect(getAction(m, "default", "nav", "h")).toBeNull();
+    expect(m.profiles[0].layers["nav"]).toBeUndefined();
+  });
+
+  it("is a no-op for unknown profile or unmapped key", () => {
+    const m = parseConfigToml('[profile.default.keys]\na = "b"');
+    expect(removeAction(m, "nope", "base", "a")).toBe(m);
+    const same = removeAction(m, "default", "base", "q");
+    expect(getAction(same, "default", "base", "a")).toEqual({ kind: "key", key: "b" });
+  });
+
+  it("does not mutate the input model", () => {
+    const m = parseConfigToml('[profile.default.keys]\nmouse4 = "back"');
+    removeAction(m, "default", "base", "mouse4");
+    expect(getAction(m, "default", "base", "mouse4")).toEqual({ kind: "key", key: "back" });
+  });
+});

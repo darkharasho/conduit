@@ -166,3 +166,38 @@ describe("MappingsScreen — Detect button", () => {
     expect(container.textContent).not.toContain("press a button on");
   });
 });
+
+describe("MappingsScreen — plain-language assignment", () => {
+  it("'Use default' removes the mapping and persists", async () => {
+    const MAPPED_TOML = '[profile.default.keys]\na = "b"';
+    const setConfigCalls: string[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockInvoke.mockImplementation((async (cmd: string, args?: { toml?: string }) => {
+      if (cmd === "get_config") return MAPPED_TOML;
+      if (cmd === "list_devices") return [];
+      if (cmd === "set_config") {
+        setConfigCalls.push(args?.toml ?? "");
+        return undefined;
+      }
+      return undefined;
+    }) as any);
+    mockListen.mockResolvedValue(vi.fn());
+
+    const { container, findByText } = render(
+      <MappingsScreen railActiveProfile="default" onProfilesChange={() => {}} />
+    );
+
+    // Select the mapped key on the keyboard viz
+    await act(async () => { await Promise.resolve(); });
+    const keycap = container.querySelector('button[title="a"]') as HTMLElement;
+    expect(keycap).toBeTruthy();
+    await act(async () => { keycap.click(); });
+
+    // Panel shows the plain state, then revert it
+    const useDefault = await findByText("Use default");
+    await act(async () => { useDefault.click(); });
+
+    expect(setConfigCalls).toHaveLength(1);
+    expect(setConfigCalls[0]).not.toContain('a = "b"');
+  });
+});

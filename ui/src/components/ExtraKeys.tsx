@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { ConfigModel, DeviceIdent } from "../lib/config-model";
 import { getEffectiveAction } from "../lib/config-model";
 import { keyNameForCode } from "../lib/keyboard-layout";
-import { actionHint } from "./KeyboardViz";
+import { actionLabel, keyDisplayName } from "../lib/action-labels";
 
 interface Props {
   model: ConfigModel;
@@ -47,7 +47,7 @@ export function ExtraKeys({
   const chip = (code: number) => {
     const key = keyNameForCode(code);
     const eff = getEffectiveAction(model, activeProfile, dev, activeLayer, key);
-    const hint = actionHint(eff?.action ?? null);
+    const hint = eff ? actionLabel(eff.action) : "";
     const isSelected = key === selectedKey;
     return (
       <button
@@ -65,7 +65,7 @@ export function ExtraKeys({
         title={key}
         aria-pressed={isSelected}
       >
-        <span className="mousekey__label">{key}</span>
+        <span className="mousekey__label">{keyDisplayName(key)}</span>
         {hint && <i className="mousekey__action">{hint}</i>}
       </button>
     );
@@ -76,7 +76,7 @@ export function ExtraKeys({
       {primaryCodes.length > 0 && (
         <>
           <div className="mouse-viz__group-label">
-            Also on this device ({primaryCodes.length})
+            More on this device ({primaryCodes.length})
           </div>
           <div className="mouse-viz__chips extra-keys__chips">
             {primaryCodes.map(chip)}
@@ -90,8 +90,8 @@ export function ExtraKeys({
             onClick={() => setExpanded((v) => !v)}
             title="HID descriptors often declare far more codes than the device has physical controls. Use Detect to find what a button really emits."
           >
-            {expanded ? "hide" : "show"} {secondaryCodes.length} more declared codes
-            (likely unused — firmware over-declares)
+            {expanded ? "Hide" : "Show"} {secondaryCodes.length} more possible codes
+            (usually not real buttons)
           </button>
           {expanded && (
             <div className="mouse-viz__chips extra-keys__chips" style={{ marginTop: 6 }}>

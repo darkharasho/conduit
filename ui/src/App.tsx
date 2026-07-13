@@ -196,7 +196,8 @@ function App() {
           </nav>
 
           {/* Profiles section — on every screen; clicking a profile jumps
-              to Mappings with it selected. */}
+              to Mappings with it selected. The technical match rule stays
+              available as a tooltip; the rail itself speaks plainly. */}
           <div className="rail__section-label">Profiles</div>
           {profiles.map((name) => {
             const isActive = name === activeProfile && activeScreen === "mappings";
@@ -209,19 +210,20 @@ function App() {
               <button
                 key={name}
                 className={`rail__profile${isActive ? " rail__profile--active" : ""}`}
+                title={matchLabel ?? undefined}
                 onClick={() => {
                   setActiveProfile(name);
                   setActiveScreen("mappings");
                 }}
               >
                 <span>
-                  {name}
+                  {name === "default" ? "Everywhere" : name}
                   {isLive && (
                     <span className="rail__profile-live"> ● active</span>
                   )}
                 </span>
                 {matchLabel && (
-                  <span className="rail__profile-match">{matchLabel}</span>
+                  <span className="rail__profile-auto">AUTO</span>
                 )}
               </button>
             );
@@ -230,8 +232,11 @@ function App() {
             className="rail__add-profile"
             onClick={handleOpenAddProfile}
           >
-            + new profile
+            + Profile for an app…
           </button>
+          <p className="rail__profiles-hint">
+            App profiles switch on by themselves when their app is in front.
+          </p>
         </aside>
 
         {/* Main content */}
@@ -246,10 +251,10 @@ function App() {
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
-            aria-label="Select window for new profile"
+            aria-label="Profile for an app"
           >
             <div className="modal__header">
-              <span>Select window class</span>
+              <span>Profile for an app</span>
               <button
                 className="modal__close"
                 onClick={() => setShowProfileModal(false)}
@@ -259,23 +264,40 @@ function App() {
               </button>
             </div>
             <div className="modal__body">
-              {loadingWindows && <div className="muted">Loading windows…</div>}
+              <p className="modal__sub">
+                Pick an app that&apos;s open right now. Its profile switches on
+                whenever you&apos;re using that app, and off when you leave.
+              </p>
+              {loadingWindows && <div className="muted">Looking at your open apps…</div>}
               {windowError && <div className="banner--error">{windowError}</div>}
               {!loadingWindows && modalWindows.length === 0 && !windowError && (
-                <div className="muted">No windows found.</div>
+                <div className="muted">
+                  No open apps found. Open the app you want a profile for, then
+                  try again.
+                </div>
               )}
               <ul className="window-list">
-                {modalWindows.map((win, idx) => (
-                  <li key={idx}>
-                    <button
-                      className="window-list__item"
-                      onClick={() => handleSelectWindow(win)}
-                    >
-                      <span className="window-list__class">{win.class}</span>
-                      <span className="window-list__title muted"> — {win.title}</span>
-                    </button>
-                  </li>
-                ))}
+                {modalWindows.map((win, idx) => {
+                  const taken = configModel?.profiles.some(
+                    (p) =>
+                      p.match?.["class"]?.toLowerCase() === win.class.toLowerCase()
+                  );
+                  return (
+                    <li key={idx}>
+                      <button
+                        className="window-list__item"
+                        disabled={taken}
+                        onClick={() => handleSelectWindow(win)}
+                      >
+                        <span className="window-list__class">{win.class}</span>
+                        <span className="window-list__title muted">
+                          {" "}
+                          — {taken ? "already has a profile" : win.title}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           </div>

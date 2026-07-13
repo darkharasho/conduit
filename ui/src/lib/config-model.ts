@@ -270,6 +270,43 @@ export function setAction(
   return { ...m, profiles };
 }
 
+/**
+ * Delete a profile-level mapping ("Use default"): the key reverts to its
+ * normal job. Prunes a named layer that becomes empty. Unknown profile or
+ * unmapped key → model returned unchanged.
+ */
+export function removeAction(
+  m: ConfigModel,
+  profileName: string,
+  layer: string,
+  keyName: string
+): ConfigModel {
+  const profIdx = m.profiles.findIndex((p) => p.name === profileName);
+  if (profIdx === -1) return m;
+
+  const profiles = m.profiles.map((p, i) => {
+    if (i !== profIdx) return p;
+    const cloned: ProfileModel = {
+      ...p,
+      keys: { ...p.keys },
+      layers: Object.fromEntries(
+        Object.entries(p.layers).map(([k, v]) => [k, { ...v }])
+      ),
+    };
+    if (layer === "base") {
+      delete cloned.keys[keyName];
+    } else if (cloned.layers[layer]) {
+      delete cloned.layers[layer][keyName];
+      if (Object.keys(cloned.layers[layer]).length === 0) {
+        delete cloned.layers[layer];
+      }
+    }
+    return cloned;
+  });
+
+  return { ...m, profiles };
+}
+
 export function addProfile(
   m: ConfigModel,
   name: string,

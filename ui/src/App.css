@@ -1581,3 +1581,363 @@ button {
   font-size: 11.5px;
   color: var(--text-dim);
 }
+
+/* ── Plain-language assignment panel ── */
+
+.assign {
+  border: 1px solid var(--border-structural);
+  border-radius: var(--r6);
+  background: var(--bg-rail);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.assign__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.assign__head > div {
+  flex: 1;
+}
+
+.assign__title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-hi);
+}
+
+.assign__now {
+  font-size: 12px;
+  color: var(--text-lo);
+  margin: 2px 0 12px;
+}
+
+.assign__now-val {
+  color: var(--teal);
+  font-weight: 600;
+}
+
+.assign__back {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: var(--text-lo);
+  font-size: 12px;
+  padding: 0 0 8px;
+}
+
+.assign__back:hover {
+  color: var(--text-hi);
+}
+
+.assign__capture {
+  border: 1px dashed var(--teal-border);
+  background: var(--teal-bg);
+  border-radius: var(--r6);
+  padding: 14px 12px;
+  text-align: center;
+  width: 100%;
+}
+
+.assign__capture:hover:not(:disabled) {
+  border-color: var(--teal);
+}
+
+.assign__capture-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #0d1614;
+  border: 1px solid var(--teal-border);
+  border-bottom-width: 3px;
+  border-radius: var(--r6);
+  padding: 7px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-hi);
+}
+
+.assign__capture-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--teal);
+}
+
+.assign__capture--live .assign__capture-dot {
+  animation: assign-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes assign-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .assign__capture--live .assign__capture-dot {
+    animation: none;
+  }
+}
+
+.assign__capture-sub {
+  display: block;
+  font-size: 11px;
+  color: var(--text-lo);
+  margin-top: 8px;
+}
+
+.assign__or {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 8px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.assign__or::before,
+.assign__or::after {
+  content: "";
+  height: 1px;
+  background: var(--border-structural);
+  flex: 1;
+}
+
+.assign__quick {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.assign__pick {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 7px 10px;
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--text-mid);
+  background: var(--bg-key);
+  border: 1px solid var(--border-control);
+  border-radius: var(--r4);
+}
+
+.assign__pick:hover:not(:disabled) {
+  border-color: var(--text-dim);
+  color: var(--text-hi);
+}
+
+.assign__pick small {
+  font-size: 9.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.assign__advanced {
+  margin-top: 10px;
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: var(--text-lo);
+  font-size: 12px;
+  padding: 2px 0;
+}
+
+.assign__advanced:hover {
+  color: var(--text-hi);
+}
+
+.assign__advanced small {
+  color: var(--text-dim);
+  font-size: 10.5px;
+  margin-left: 4px;
+}
+
+.assign__foot {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-structural);
+}
+
+.assign__default,
+.assign__disable {
+  flex: 1;
+  padding: 7px 10px;
+  font-size: 12px;
+  background: transparent;
+  border: 1px solid var(--border-control);
+  border-radius: var(--r4);
+  color: var(--text-mid);
+}
+
+.assign__default:hover:not(:disabled) {
+  border-color: var(--text-dim);
+  color: var(--text-hi);
+}
+
+.assign__disable:hover:not(:disabled) {
+  border-color: #4a2a2a;
+  color: var(--red);
+}
+
+/* ── Rail: plain-language profiles ── */
+
+.rail__profile-auto {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  border: 1px solid var(--border-control);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+.rail__profile--active .rail__profile-auto {
+  color: var(--teal);
+  border-color: var(--teal-border);
+}
+
+.rail__profiles-hint {
+  font-size: 10.5px;
+  color: var(--text-dim);
+  line-height: 1.45;
+  margin: 6px 14px 0;
+}
+
+/* ── App-picker modal additions ── */
+
+.modal__sub {
+  font-size: 12px;
+  color: var(--text-lo);
+  line-height: 1.5;
+  margin-bottom: 8px;
+}
+
+.window-list__item:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.window-list__item:disabled:hover {
+  background: transparent;
+  border-color: transparent;
+}
+
+/* ── Mouse illustration (click-the-picture assignment) ── */
+
+.mouse-viz-row {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.mouse-viz-row__groups {
+  flex: 1;
+  min-width: 0;
+}
+
+.illo {
+  width: 340px;
+  max-width: 42%;
+  flex: none;
+}
+
+.illo__body {
+  fill: #151920;
+  stroke: #333a44;
+  stroke-width: 1.5;
+}
+
+.illo__seam {
+  stroke: #272d36;
+  stroke-width: 1.3;
+  fill: none;
+}
+
+.illo__wheel {
+  fill: #0e1013;
+  stroke: #333a44;
+  stroke-width: 1.5;
+}
+
+.illo__wheel-ridge {
+  stroke: #272d36;
+  stroke-width: 6;
+  stroke-linecap: round;
+}
+
+.illo__side {
+  fill: #10141a;
+  stroke: #333a44;
+  stroke-width: 1.5;
+}
+
+.illo__marker {
+  cursor: pointer;
+  outline: none;
+}
+
+.illo__marker .illo__ring {
+  fill: #0e1013;
+  stroke: var(--text-dim);
+  stroke-width: 1.5;
+}
+
+.illo__marker .illo__dot {
+  fill: var(--text-lo);
+}
+
+.illo__marker:hover .illo__ring,
+.illo__marker:focus-visible .illo__ring {
+  stroke: var(--text-mid);
+}
+
+.illo__marker--mapped .illo__ring {
+  stroke: var(--teal-border);
+}
+
+.illo__marker--mapped .illo__dot {
+  fill: var(--teal);
+}
+
+.illo__marker--devspec .illo__ring {
+  stroke-dasharray: 3 2;
+}
+
+.illo__marker--sel .illo__ring {
+  fill: var(--teal-bg);
+  stroke: var(--teal);
+}
+
+.illo__marker--sel .illo__dot {
+  fill: var(--teal);
+}
+
+.illo__callout-line {
+  stroke: var(--teal-border);
+  stroke-width: 1.2;
+}
+
+.illo__tag {
+  fill: var(--teal-bg);
+  stroke: var(--teal-border);
+  stroke-width: 1;
+}
+
+.illo__tag-title {
+  fill: var(--text-hi);
+  font: 600 13px var(--font-ui);
+}
+
+.illo__tag-sub {
+  fill: var(--teal);
+  font: 11.5px var(--font-ui);
+}

@@ -32,9 +32,9 @@ describe("KeyboardViz capability filtering", () => {
     // extras strip: named codes are primary; bare key:N codes are hidden
     // behind the "declared" expander (firmware over-declaration).
     expect(container.querySelector('[data-key="volumeup"]')).not.toBeNull();
-    expect(container.textContent).toContain("Also on this device (1)");
+    expect(container.textContent).toContain("More on this device (1)");
     expect(container.querySelector('[data-key="key:704"]')).toBeNull();
-    fireEvent.click(screen.getByText(/1 more declared codes/));
+    fireEvent.click(screen.getByText(/1 more possible codes/));
     expect(container.querySelector('[data-key="key:704"]')).not.toBeNull();
   });
 
@@ -50,7 +50,7 @@ describe("KeyboardViz capability filtering", () => {
       />
     );
     expect(container.querySelector(".keycap--absent")).toBeNull();
-    expect(container.textContent).not.toContain("Also on this device");
+    expect(container.textContent).not.toContain("More on this device");
   });
 });
 
