@@ -200,8 +200,11 @@ describe("MappingsScreen — focusDevicePath one-shot", () => {
       hwheel: true,
     };
 
-    // Start with both devices, listen callback to trigger refresh
-    let connectionCallback: ((connected: boolean) => void) | null = null;
+    // Start with both devices, listen callback to trigger refresh.
+    // onConnection() registers TWO listeners: "conduit://connected" (cb(true))
+    // and "conduit://disconnected" (cb(false)).  We capture the connected one
+    // so we can fire it to exercise the reload path.
+    let connectedListenerCb: ((e: { payload: unknown }) => void) | null = null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mockInvoke.mockImplementation((async (cmd: string) => {
       if (cmd === "get_config") return MINIMAL_TOML;
@@ -210,8 +213,8 @@ describe("MappingsScreen — focusDevicePath one-shot", () => {
     }) as any);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mockListen.mockImplementation((async (event: string, cb: (e: { payload: unknown }) => void) => {
-      if (event === "conduit://connection") {
-        connectionCallback = cb as (connected: boolean) => void;
+      if (event === "conduit://connected") {
+        connectedListenerCb = cb;
       }
       return vi.fn();
     }) as any);
@@ -248,10 +251,14 @@ describe("MappingsScreen — focusDevicePath one-shot", () => {
     expect(mouse1Tab?.getAttribute("aria-selected")).toBe("true");
     expect(mouse2Tab?.getAttribute("aria-selected")).toBe("false");
 
-    // Simulate device list refresh (e.g., daemon reconnect firing onConnection callback)
-    // This should NOT snap the tab back to mouse2
+    // Simulate daemon reconnect by firing the "conduit://connected" Tauri event.
+    // onConnection() wraps the user callback as `() => cb(true)`, so the
+    // listener receives a raw Tauri event object (payload is null for these).
+    // Firing it causes loadConfig() + loadDevices() to run a second time,
+    // which is the reload path the guard must survive.
+    expect(connectedListenerCb).not.toBeNull();
     await act(async () => {
-      connectionCallback?.(true);
+      connectedListenerCb!({ payload: null });
       await Promise.resolve();
     });
 
