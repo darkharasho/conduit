@@ -69,16 +69,19 @@ const GENERIC_MOUSE: DeviceInfo = {
 // ButtonCheck uses onKeyEvent which calls listen("conduit://event", cb)
 type KeyEventCb = (e: { payload: unknown }) => void;
 
-function setupListenMock(): { getEventCb: () => KeyEventCb | undefined } {
+function setupListenMock(): { getEventCb: () => KeyEventCb | undefined; getUnlistenMock: () => ReturnType<typeof vi.fn> | undefined } {
   let eventCb: KeyEventCb | undefined;
+  let unlistenMock: ReturnType<typeof vi.fn> | undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   mockListen.mockImplementation(async (event: string, cb: any) => {
     if (event === "conduit://event") {
       eventCb = cb as KeyEventCb;
+      unlistenMock = vi.fn();
+      return unlistenMock;
     }
     return vi.fn();
   });
-  return { getEventCb: () => eventCb };
+  return { getEventCb: () => eventCb, getUnlistenMock: () => unlistenMock };
 }
 
 // Helper: fire a key event through the captured listener
@@ -358,7 +361,15 @@ describe("ButtonCheck — technical details pane", () => {
     });
 
     const bodyText = document.body.textContent ?? "";
+    // Full banned-jargon list: none of these must appear in screen text outside the technical pane
+    expect(bodyText).not.toMatch(/\bdaemon\b/i);
+    expect(bodyText).not.toMatch(/\bsocket\b/i);
+    expect(bodyText).not.toMatch(/\buinput\b/i);
+    expect(bodyText).not.toMatch(/\budev\b/i);
+    expect(bodyText).not.toMatch(/\bsystemd\b/i);
+    expect(bodyText).not.toMatch(/\bpolkit\b/i);
     expect(bodyText).not.toMatch(/ratbagd/);
+    expect(bodyText).not.toMatch(/HID\+\+/);
     expect(bodyText).not.toMatch(/KEY_/);
     // Numeric codes should not appear outside technical pane
     // (test indirectly: 0x110 = 272 decimal — check 272 not in body text)
@@ -398,3 +409,97 @@ describe("isOnboardFixable", () => {
     expect(isOnboardFixable(dev)).toBe(false);
   });
 });
+
+// ─── Unmount cleanup ─────────────────────────────────────────────────────────
+//
+// Verifies that the effect cleanup calls the unlisten handle returned by the
+// `listen` subscription so that the Tauri event listener is torn down when the
+// component unmounts.
+//
+// Bite-proof note (Finding 1): temporarily commenting out `if (unlisten) unlisten();`
+// and `else sub.then((fn) => fn());` in ButtonCheck.tsx lines 81-82 caused this
+// test to fail with:
+//   AssertionError: expected "spy" to have been called at least once, but it was never called
+// Restoring those lines made the test pass again (see fix-report below).
+
+describe("ButtonCheck — unmount cleanup", () => {
+  it("calls the unlisten handle when the component unmounts", async () => {
+    const { getUnlistenMock } = setupListenMock();
+
+    // Render the component — this triggers the useEffect which calls listen()
+    const { unmount } = render(<ButtonCheck device={G502X} onClose={() => {}} />);
+
+    // Allow the listen() promise to resolve so unlisten is captured inside the effect
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Confirm the mock is defined (listen was called for conduit://event)
+    const unlistenMock = getUnlistenMock();
+    expect(unlistenMock).toBeDefined();
+    expect(unlistenMock).not.toHaveBeenCalled();
+
+    // Unmount — the effect cleanup should call unlisten()
+    await act(async () => {
+      unmount();
+    });
+
+    // The unlisten handle must have been called exactly once
+    expect(unlistenMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ─── onFix gating (Finding 2c, covered here since Mappings panel interaction
+//     is impractical at the integration level) ─────────────────────────────────
+//
+// For a fixable device (vendor 0x046d, product 0x4099) the ButtonCheck panel
+// receives onFix and shows "Fix this mouse's memory" after a collision.
+// For a non-fixable collided mouse it does not — no fix button appears.
+
+describe("ButtonCheck — onFix gating via props", () => {
+  it("(fixable device) shows 'Fix this mouse's memory' when onFix is provided", async () => {
+    const { getEventCb } = setupListenMock();
+    const onFix = vi.fn();
+
+    // G502X is the fixable device; caller (Mappings) would pass onFix only when isOnboardFixable is true
+    render(<ButtonCheck device={G502X} onClose={() => {}} onFix={onFix} />);
+
+    const cb = getEventCb()!;
+    // Generate a collision: same code pressed twice
+    await fireKeyEvent(cb, "key:272", 0x110, "Logitech G502 X PLUS");
+    await fireKeyEvent(cb, "key:273", 0x111, "Logitech G502 X PLUS");
+    await fireKeyEvent(cb, "key:272", 0x110, "Logitech G502 X PLUS");
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    });
+
+    // Fix button must appear for fixable device
+    expect(screen.getByRole("button", { name: "Fix this mouse's memory" })).toBeInTheDocument();
+    // "can't fix automatically" must NOT appear
+    expect(screen.queryByText(/can't fix this mouse automatically yet/)).toBeNull();
+  });
+
+  it("(non-fixable device) does NOT show fix button when onFix is absent", async () => {
+    const { getEventCb } = setupListenMock();
+
+    // GENERIC_MOUSE is not in the fixable set; caller would omit onFix
+    render(<ButtonCheck device={GENERIC_MOUSE} onClose={() => {}} />);
+
+    const cb = getEventCb()!;
+    await fireKeyEvent(cb, "key:272", 0x110, "Generic Mouse");
+    await fireKeyEvent(cb, "key:273", 0x111, "Generic Mouse");
+    await fireKeyEvent(cb, "key:272", 0x110, "Generic Mouse");
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    });
+
+    // Fix button must NOT appear for non-fixable device
+    expect(screen.queryByRole("button", { name: "Fix this mouse's memory" })).toBeNull();
+    // "can't fix automatically" must appear
+    expect(screen.getByText("Conduit can't fix this mouse automatically yet.")).toBeInTheDocument();
+  });
+});
+
+// Note: @testing-library/react runs cleanup() automatically via afterEach — no manual call needed.

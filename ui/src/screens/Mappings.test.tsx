@@ -874,6 +874,85 @@ match = { class = "firefox" }
   });
 });
 
+// ─── Finding 2a+2b: "Some buttons missing?" link visibility ─────────────────
+//
+// The link must appear for pointer-class devices (mouse/touchpad) and must NOT
+// appear for keyboard-class devices.  Finding 2c (onFix gating) is covered
+// in ButtonCheck.test.tsx via props because triggering the modal and inspecting
+// ButtonCheck's internal prop wiring from MappingsScreen is impractical here.
+
+describe('MappingsScreen — "Some buttons missing?" link', () => {
+  const pointerDevice = {
+    path: "/dev/input/event11",
+    name: "Logitech G502 X PLUS",
+    vendor: 0x046d,
+    product: 0x4099,
+    is_keyboard: false,
+    is_mouse: true,
+    grabbed: true,
+    id: "046d:4099/G502X",
+    class: "mouse",
+    phys: "usb-1",
+    keys: [0x110, 0x111],
+    wheel: true,
+    hwheel: true,
+  };
+
+  const keyboardDevice = {
+    path: "/dev/input/event5",
+    name: "Das Keyboard",
+    vendor: 0x1234,
+    product: 0x5678,
+    is_keyboard: true,
+    is_mouse: false,
+    grabbed: true,
+    id: "1234:5678/DasKeyboard",
+    class: "keyboard",
+    phys: "usb-2",
+    keys: [],
+    wheel: false,
+    hwheel: false,
+  };
+
+  it('(a) renders "Some buttons missing?" for a pointer-class device', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockInvoke.mockImplementation((async (cmd: string) => {
+      if (cmd === "get_config") return MINIMAL_TOML;
+      if (cmd === "list_devices") return [pointerDevice];
+      return undefined;
+    }) as any);
+    mockListen.mockResolvedValue(vi.fn());
+
+    render(
+      <MappingsScreen railActiveProfile="default" onProfilesChange={() => {}} />
+    );
+
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(document.body.textContent).toContain("Some buttons missing?");
+  });
+
+  it('(b) does NOT render "Some buttons missing?" for a keyboard-class device', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockInvoke.mockImplementation((async (cmd: string) => {
+      if (cmd === "get_config") return MINIMAL_TOML;
+      if (cmd === "list_devices") return [keyboardDevice];
+      return undefined;
+    }) as any);
+    mockListen.mockResolvedValue(vi.fn());
+
+    render(
+      <MappingsScreen railActiveProfile="default" onProfilesChange={() => {}} />
+    );
+
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(document.body.textContent).not.toContain("Some buttons missing?");
+  });
+});
+
 describe("phase 6 nits", () => {
   it("item 4: handleUseDefault no-ops when key has no mapping (setConfig NOT called)", async () => {
     // Config with no mapping on key "q" — clicking "Use default" on "q" should be a no-op
