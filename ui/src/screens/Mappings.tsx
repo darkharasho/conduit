@@ -86,7 +86,10 @@ export function MappingsScreen({
 
   // Device tabs: grabbed devices, keyed by evdev path (unique even for twins)
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
-  const [activeDevPath, setActiveDevPath] = useState<string | null>(null);
+  // Seed initial selection from focusDevicePath so the first paint already
+  // shows the right tab (avoids a flash of the first device before the
+  // one-shot didFocus effect can fire after the device list loads).
+  const [activeDevPath, setActiveDevPath] = useState<string | null>(focusDevicePath ?? null);
   // "This device only" scope for saves (resets on key/tab change)
   const [deviceScope, setDeviceScope] = useState(false);
   // Detect flow: waiting for a physical press on the active device
@@ -120,16 +123,36 @@ export function MappingsScreen({
     }
   }, []); // stable — no external deps
 
+  // One-shot: when focusDevicePath is provided and devices have loaded,
+  // select it once and never again, even if devices reload or connection restarts.
+  // Declared before loadDevices so the callback can mark it done on first load.
+  const didFocus = useRef(false);
+
   const loadDevices = useCallback(async () => {
     try {
       const devs = (await listDevices()).filter((d) => d.grabbed);
       setDevices(devs);
-      setActiveDevPath((prev) =>
-        prev && devs.some((d) => d.path === prev) ? prev : devs[0]?.path ?? null
-      );
+      setActiveDevPath((prev) => {
+        // Keep current selection if it still exists in the new list
+        if (prev && devs.some((d) => d.path === prev)) return prev;
+        // Focus device requested and present → select it (also marks didFocus done below)
+        if (focusDevicePath && devs.some((d) => d.path === focusDevicePath)) {
+          return focusDevicePath;
+        }
+        // Fall back to first device only when no focus was requested or it's absent
+        return devs[0]?.path ?? null;
+      });
+      // If focusDevicePath was provided and exists, mark the one-shot done so
+      // the belt-and-suspenders effect doesn't fire unnecessarily.
+      if (focusDevicePath && devs.some((d) => d.path === focusDevicePath)) {
+        didFocus.current = true;
+      }
     } catch {
       // Non-fatal: no tabs, keyboard view without device context
     }
+  // focusDevicePath is a one-shot mount prop; adding it here is safe (it never
+  // changes across a component lifetime).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -148,9 +171,9 @@ export function MappingsScreen({
     };
   }, [loadConfig, loadDevices]);
 
-  // One-shot: when focusDevicePath is provided and devices have loaded,
-  // select it once and never again, even if devices reload or connection restarts
-  const didFocus = useRef(false);
+  // Belt-and-suspenders: if loadDevices already marked didFocus done (because
+  // the device list included focusDevicePath on first load), this effect is a
+  // no-op. It fires as a fallback if the device list loads in multiple batches.
   useEffect(() => {
     if (!focusDevicePath || didFocus.current) return;
     if (devices.some((d) => d.path === focusDevicePath)) {

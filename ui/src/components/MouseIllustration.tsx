@@ -11,13 +11,21 @@ export const ILLO_KEYS = [
   "mouse5",
 ] as const;
 
-/** Marker centers in the 560×500 viewBox. */
+/**
+ * Marker centers in the 560×500 viewBox.
+ *
+ * These coordinates are derived from the DeviceArt gaming-mouse geometry
+ * (ui/src/components/DeviceArt.tsx) using the same transform applied to the
+ * static art below: scale(3.2) translate(55, 10).
+ * Formula: x_new = (x_devart + 55) * 3.2, y_new = (y_devart + 10) * 3.2
+ * If DeviceArt paths change, update these markers to match.
+ */
 const MARKER_POS: Record<string, { x: number; y: number }> = {
-  btn_left: { x: 280, y: 104 },
-  btn_right: { x: 380, y: 104 },
-  btn_middle: { x: 330, y: 170 },
-  mouse5: { x: 211, y: 219 }, // front side button (forward)
-  mouse4: { x: 215, y: 272 }, // rear side button (back)
+  btn_left:   { x: 282, y:  96 }, // left of top split seam  (~DeviceArt x=33, y=20)
+  btn_right:  { x: 378, y:  96 }, // right of top split seam (~DeviceArt x=63, y=20)
+  btn_middle: { x: 330, y: 122 }, // wheel rect center        (~DeviceArt x=48, y=28)
+  mouse5:     { x: 250, y: 202 }, // front side button (forward, upper) (~DeviceArt x=23, y=53)
+  mouse4:     { x: 253, y: 237 }, // rear side button  (back,    lower) (~DeviceArt x=24, y=64)
 };
 
 interface Props {
@@ -67,24 +75,35 @@ export function MouseIllustration({
       role="group"
       aria-label="Mouse picture — click a button to change what it does"
     >
-      {/* body */}
-      <path
-        className="illo__body"
-        d="M330,44 C402,44 442,116 442,236 C442,356 402,448 330,448 C258,448 218,356 218,236 C218,116 258,44 330,44 Z"
-      />
-      {/* seams */}
-      <path className="illo__seam" d="M330,44 L330,150" />
-      <path className="illo__seam" d="M221,206 Q330,246 439,206" />
-      {/* wheel */}
-      <rect className="illo__wheel" x="317" y="92" width="26" height="54" rx="13" />
-      <line className="illo__wheel-ridge" x1="330" y1="104" x2="330" y2="134" />
-      {/* side buttons */}
-      {keys.includes("mouse5") && (
-        <rect className="illo__side" x="202" y="194" width="18" height="50" rx="9" />
-      )}
-      {keys.includes("mouse4") && (
-        <rect className="illo__side" x="206" y="250" width="17" height="44" rx="8.5" />
-      )}
+      {/*
+        Static art — gaming-mouse archetype from DeviceArt.tsx, scaled up to fill
+        the 560×500 viewBox. Path data MUST stay visually in sync with DeviceArt.tsx
+        (MouseBody + gaming-mouse children). Transform chosen so the body matches
+        the old 560×500 footprint: top≈44, bottom≈448, left≈227, right≈435.
+      */}
+      <g transform="scale(3.2) translate(55, 10)">
+        {/* MouseBody — main body outline */}
+        <path
+          className="illo__body"
+          d="M48 4 C 66 4 78 15 81 32 C 83 44 79 52 80 62 C 82 82 84 100 74 115 C 67 126 56 130 48 130 C 38 130 28 125 22 114 C 14 99 16 82 18 64 C 19 52 14 44 16 32 C 19 15 31 4 48 4 Z"
+        />
+        {/* MouseBody — top split seam */}
+        <path className="illo__seam" d="M48 4 L 48 22" />
+        {/* MouseBody — horizontal seam below buttons */}
+        <path className="illo__seam" d="M17 34 C 30 40 42 41 48 41 C 54 41 66 40 79 34" />
+        {/* MouseBody — scroll wheel */}
+        <rect className="illo__wheel" x="44" y="18" width="8" height="20" rx="4" />
+        {/* gaming-mouse side buttons (left thumb buttons) */}
+        {keys.includes("mouse5") && (
+          <path className="illo__side" d="M19 50 L 26 48 L 27 56 L 20 58 Z" />
+        )}
+        {keys.includes("mouse4") && (
+          <path className="illo__side" d="M20 61 L 27 59 L 28 67 L 21 69 Z" />
+        )}
+        {/* gaming-mouse RGB accent arcs */}
+        <path className="illo__accent" d="M32 104 L 48 96 L 64 104" />
+        <path className="illo__accent illo__accent--dim" d="M35 112 L 48 105 L 61 112" />
+      </g>
 
       {shown.map((key) => {
         const pos = MARKER_POS[key];
