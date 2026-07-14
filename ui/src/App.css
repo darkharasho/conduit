@@ -2111,6 +2111,7 @@ img.app-pill__avatar { object-fit: contain; }
 .setup__step--done { opacity: .7; }
 .setup__step--done .setup__step-label { color: var(--text-lo); }
 .setup__step--attention { border-color: var(--teal-border); }
+.setup__step--active { border-color: var(--teal-border); }
 .setup__step--pending { opacity: .45; }
 
 .setup__ico { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--border-control); background: var(--bg-key); font-size: 11px; font-weight: 700; color: var(--text-lo); flex-shrink: 0; margin-top: 1px; }

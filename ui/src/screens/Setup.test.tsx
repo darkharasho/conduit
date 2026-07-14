@@ -48,6 +48,7 @@ it("renders the hero copy and three steps from status", async () => {
   mockSetupStatus.mockResolvedValue(ALL_BROKEN); // service off, uinput false, evdev false
   render(<SetupScreen />);
   expect(await screen.findByText("Let's get Conduit running")).toBeInTheDocument();
+  expect(screen.getByText("Conduit needs a couple of one-time permissions to remap your devices. You'll be asked for your password once.")).toBeInTheDocument();
   expect(screen.getByText("Background service installed")).toBeInTheDocument();
   expect(screen.getByText("Allowing Conduit to press keys for you")).toBeInTheDocument();
   expect(screen.getByText("Access to your mice and keyboards")).toBeInTheDocument();
@@ -96,4 +97,36 @@ it("enables Start using Conduit when all green", async () => {
   render(<SetupScreen />);
   await screen.findByText("Let's get Conduit running");
   expect(screen.getByRole("button", { name: "Start using Conduit" })).toBeEnabled();
+});
+
+it("shows waiting text while permission fix is in-flight for uinput", async () => {
+  mockSetupStatus.mockResolvedValue({ ...ALL_BROKEN, service_running: true });
+  let resolveFixPermissions: ((val: any) => void) | null = null;
+  const fixPromise = new Promise((resolve) => {
+    resolveFixPermissions = resolve;
+  });
+  mockSetupFixPermissions.mockReturnValue(fixPromise);
+
+  render(<SetupScreen />);
+  await screen.findByText("Let's get Conduit running");
+
+  // Initially the waiting text is not visible
+  expect(screen.queryByText("Waiting for your password in the system dialog…")).not.toBeInTheDocument();
+
+  // Click Allow to start the permission fix
+  fireEvent.click(screen.getByRole("button", { name: "Allow" }));
+
+  // Now the waiting text should be visible while the promise is unresolved
+  await waitFor(() =>
+    expect(screen.getByText("Waiting for your password in the system dialog…")).toBeInTheDocument()
+  );
+
+  // Resolve the promise and re-check status
+  mockSetupStatus.mockResolvedValue({ ...ALL_BROKEN, service_running: true, uinput_ok: true });
+  resolveFixPermissions!({ relogin_needed: false });
+
+  // After resolution, the waiting text should disappear
+  await waitFor(() =>
+    expect(screen.queryByText("Waiting for your password in the system dialog…")).not.toBeInTheDocument()
+  );
 });

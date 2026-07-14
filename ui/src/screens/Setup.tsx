@@ -151,7 +151,7 @@ export function SetupScreen({ onReady }: { onReady?: () => void }) {
         </div>
         <h1 className="setup__title">Let's get Conduit running</h1>
         <p className="setup__sub">
-          A few quick steps and you're ready to remap anything.
+          Conduit needs a couple of one-time permissions to remap your devices. You'll be asked for your password once.
         </p>
       </div>
 
@@ -191,36 +191,27 @@ export function SetupScreen({ onReady }: { onReady?: () => void }) {
                   </button>
                 )}
                 {state === "attention" && def.key === "uinput" && (
-                  <>
-                    {activeFix === "permissions" ? (
-                      <span className="setup__step-waiting">
-                        Waiting for your password in the system dialog…
-                      </span>
-                    ) : (
-                      <button
-                        className="btn setup__step-btn"
-                        onClick={() => handleFixPermissions("uinput")}
-                      >
-                        Allow
-                      </button>
-                    )}
-                  </>
+                  <button
+                    className="btn setup__step-btn"
+                    onClick={() => handleFixPermissions("uinput")}
+                  >
+                    Allow
+                  </button>
                 )}
                 {state === "attention" && def.key === "evdev" && (
-                  <>
-                    {activeFix === "permissions" ? (
-                      <span className="setup__step-waiting">
-                        Waiting for your password in the system dialog…
-                      </span>
-                    ) : (
-                      <button
-                        className="btn setup__step-btn"
-                        onClick={() => handleFixPermissions("evdev")}
-                      >
-                        Allow
-                      </button>
-                    )}
-                  </>
+                  <button
+                    className="btn setup__step-btn"
+                    onClick={() => handleFixPermissions("evdev")}
+                  >
+                    Allow
+                  </button>
+                )}
+
+                {/* Waiting indicator — shown when fix is running for uinput/evdev */}
+                {state === "active" && (def.key === "uinput" || def.key === "evdev") && (
+                  <span className="setup__step-waiting">
+                    Waiting for your password in the system dialog…
+                  </span>
                 )}
               </div>
             </li>
