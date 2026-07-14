@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import type { SetupStatus } from "../lib/client";
 import { SetupScreen } from "./Setup";
@@ -185,4 +185,52 @@ it("recovery shows error when restartEngine fails and still shows Copy report", 
   expect(await screen.findByText("Something went wrong")).toBeInTheDocument();
   expect(screen.queryByText(/unit not found/)).toBeNull();
   expect(screen.getByRole("button", { name: "Copy report for a bug" })).toBeInTheDocument();
+});
+
+it("re-checks on interval and on window focus", async () => {
+  vi.useFakeTimers();
+  mockSetupStatus.mockResolvedValue(ALL_BROKEN);
+  render(<SetupScreen />);
+  await act(async () => { await Promise.resolve(); });
+  const initial = mockSetupStatus.mock.calls.length;
+  await act(async () => { vi.advanceTimersByTime(5100); });
+  expect(mockSetupStatus.mock.calls.length).toBeGreaterThan(initial);
+  const afterTick = mockSetupStatus.mock.calls.length;
+  await act(async () => { window.dispatchEvent(new Event("focus")); });
+  expect(mockSetupStatus.mock.calls.length).toBeGreaterThan(afterTick);
+  vi.useRealTimers();
+});
+
+it("skips overlapping re-checks via in-flight guard", async () => {
+  vi.useFakeTimers();
+  let resolveSetupStatus: ((val: SetupStatus) => void) | undefined;
+  const statusPromise = new Promise<SetupStatus>((resolve) => {
+    resolveSetupStatus = resolve;
+  });
+  mockSetupStatus.mockReturnValue(statusPromise);
+  render(<SetupScreen />);
+  await act(async () => { await Promise.resolve(); });
+  const initial = mockSetupStatus.mock.calls.length;
+  // Advance timers twice without resolving the promise
+  await act(async () => { vi.advanceTimersByTime(5100); });
+  await act(async () => { vi.advanceTimersByTime(5100); });
+  // Should only have one additional call (the second timer fired but was skipped)
+  expect(mockSetupStatus.mock.calls.length).toBe(initial + 1);
+  // Resolve the first call
+  const resolver = resolveSetupStatus;
+  if (resolver) resolver(ALL_BROKEN);
+  await act(async () => { await Promise.resolve(); });
+  vi.useRealTimers();
+});
+
+it("recovery shows success state when daemon becomes connected", async () => {
+  mockSetupStatus.mockResolvedValueOnce({ ...ALL_GREEN, daemon_connected: false, service_running: false });
+  render(<SetupScreen variant="recovery" />);
+  expect(await screen.findByText("Conduit's engine stopped")).toBeInTheDocument();
+  // Simulate daemon reconnecting
+  mockSetupStatus.mockResolvedValue(ALL_GREEN);
+  window.dispatchEvent(new Event("focus"));
+  await waitFor(() => expect(screen.queryByText("Conduit's engine stopped")).not.toBeInTheDocument());
+  expect(screen.getByText("Everything's running again.")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Start using Conduit" })).toBeInTheDocument();
 });

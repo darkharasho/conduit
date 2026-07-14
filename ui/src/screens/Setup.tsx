@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { SetupStatus, PermissionFixOutcome } from "../lib/client";
 import { setupStatus, setupInstallService, setupFixPermissions, restartEngine, collectReport, ConduitError } from "../lib/client";
 import { presentError } from "../lib/error-messages";
@@ -72,6 +72,7 @@ export function SetupScreen({ onReady, variant = "firstrun" }: { onReady?: () =>
   const [attemptedRestart, setAttemptedRestart] = useState(false);
   const [copyConfirm, setCopyConfirm] = useState(false);
   const [restartError, setRestartError] = useState<string | null>(null);
+  const recheckInFlightRef = useRef(false);
 
   const recheck = async () => {
     try {
@@ -82,8 +83,24 @@ export function SetupScreen({ onReady, variant = "firstrun" }: { onReady?: () =>
     }
   };
 
+  const guardedRecheck = async () => {
+    if (recheckInFlightRef.current) return;
+    recheckInFlightRef.current = true;
+    try {
+      await recheck();
+    } finally {
+      recheckInFlightRef.current = false;
+    }
+  };
+
   useEffect(() => {
     recheck();
+    const id = setInterval(guardedRecheck, 5000);
+    window.addEventListener("focus", guardedRecheck);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("focus", guardedRecheck);
+    };
   }, []);
 
   const handleRestartEngine = async () => {
@@ -182,6 +199,27 @@ export function SetupScreen({ onReady, variant = "firstrun" }: { onReady?: () =>
             <span className="setup__copy-confirm">Copied. Paste it into a bug report.</span>
           )}
         </div>
+      </div>
+    );
+  }
+
+  // Recovery variant success: daemon is running again
+  if (variant === "recovery" && status !== null && status.service_installed && status.daemon_connected) {
+    return (
+      <div className="setup">
+        <div className="setup__hero">
+          <div className="setup__hero-art">
+            <DeviceArt archetype="mouse" width={56} />
+            <DeviceArt archetype="keyboard" width={80} />
+          </div>
+          <h1 className="setup__title">Everything's running again.</h1>
+        </div>
+        <button
+          className="btn btn--primary setup__cta"
+          onClick={() => onReady?.()}
+        >
+          Start using Conduit
+        </button>
       </div>
     );
   }
