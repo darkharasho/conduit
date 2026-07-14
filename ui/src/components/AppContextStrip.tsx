@@ -38,8 +38,9 @@ export function AppContextStrip({ pill, onToggleAutoSwitch, onRemove }: AppConte
   return (
     <div className="app-strip">
       <p className="app-strip__desc">
-        When {pill.label} is the window you&apos;re using, the highlighted buttons change.
-        Everything else keeps its Everywhere setting.
+        {pill.kind === "advanced"
+          ? "When your custom rule matches, the highlighted buttons change. Everything else keeps its Everywhere setting."
+          : `When ${pill.label} is the window you're using, the highlighted buttons change. Everything else keeps its Everywhere setting.`}
       </p>
       <div className="app-strip__controls">
         <button

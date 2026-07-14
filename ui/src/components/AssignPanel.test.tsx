@@ -124,4 +124,28 @@ describe("AssignPanel", () => {
     expect(screen.getByRole("button", { name: "Use the Everywhere setting (Copy)" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Use the button's normal behavior" })).toBeNull();
   });
+
+  it("browser context: Back and Forward appear before Copy in Popular", () => {
+    renderPanel({ appContext: { label: "Firefox", everywhereLabel: null, isBrowser: true } });
+    const rows = screen.getAllByRole("button", { name: /^(Back|Forward|Copy|Paste|Undo|Mute|Play|Take a screenshot)/ });
+    const labels = rows.map((b) => b.querySelector(".cat-row__label")?.textContent ?? b.textContent ?? "");
+    const backIdx = labels.findIndex((l) => l === "Back");
+    const forwardIdx = labels.findIndex((l) => l === "Forward");
+    const copyIdx = labels.findIndex((l) => l === "Copy");
+    expect(backIdx).toBeGreaterThanOrEqual(0);
+    expect(forwardIdx).toBeGreaterThanOrEqual(0);
+    expect(copyIdx).toBeGreaterThanOrEqual(0);
+    expect(backIdx).toBeLessThan(copyIdx);
+    expect(forwardIdx).toBeLessThan(copyIdx);
+  });
+
+  it("non-browser context: Popular order is unchanged (Copy before Back)", () => {
+    renderPanel({ appContext: { label: "Code", everywhereLabel: null, isBrowser: false } });
+    const rows = screen.getAllByRole("button", { name: /^(Back|Copy)/ });
+    const labels = rows.map((b) => b.querySelector(".cat-row__label")?.textContent ?? b.textContent ?? "");
+    const backIdx = labels.findIndex((l) => l === "Back");
+    const copyIdx = labels.findIndex((l) => l === "Copy");
+    // In default order, Copy (popular shortcuts) comes before Back (popular keys)
+    expect(copyIdx).toBeLessThan(backIdx);
+  });
 });

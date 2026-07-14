@@ -31,8 +31,9 @@ interface Props {
    * above the key name and changes the first footer hatch to
    * "Use the Everywhere setting (everywhereLabel)" or "Use the Everywhere setting"
    * when everywhereLabel is null.
+   * isBrowser: when true, browser-related catalog entries are surfaced first in Popular.
    */
-  appContext?: { label: string; everywhereLabel: string | null };
+  appContext?: { label: string; everywhereLabel: string | null; isBrowser?: boolean };
 }
 
 type Category = "popular" | CatalogCategory;
@@ -107,10 +108,17 @@ export function AssignPanel({
       ? catalogResults
       : [...catalogResults, comboEntry]
     : catalogResults;
+  const rawPopular = popularEntries();
+  const browserFirst = appContext?.isBrowser
+    ? [
+        ...rawPopular.filter((e) => (e.keywords ?? []).includes("browser")),
+        ...rawPopular.filter((e) => !(e.keywords ?? []).includes("browser")),
+      ]
+    : rawPopular;
   const displayEntries = query
     ? mergedResults
     : category === "popular"
-      ? popularEntries()
+      ? browserFirst
       : entriesFor(category as CatalogCategory);
 
   if (advanced) {

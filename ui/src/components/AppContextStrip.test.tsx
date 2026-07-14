@@ -17,7 +17,7 @@ describe("AppContextStrip", () => {
     const onToggle = vi.fn();
     const onRemove = vi.fn();
     render(<AppContextStrip pill={PILL} onToggleAutoSwitch={onToggle} onRemove={onRemove} />);
-    expect(screen.getByText(/When Firefox is the window you're using/)).toBeInTheDocument();
+    expect(screen.getByText(/When Firefox is the window you're using, the highlighted buttons change/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("switch", { name: "Switch automatically" }));
     expect(onToggle).toHaveBeenCalledWith(false);
     // Menu button now has aria-label "More options" (visible text is still ⋯)
@@ -64,5 +64,33 @@ describe("AppContextStrip", () => {
     fireEvent.click(menuBtn);
     // Menu should now be closed
     expect(screen.queryByRole("button", { name: "Remove Firefox settings" })).toBeNull();
+  });
+});
+
+describe("AppContextStrip — prose variants", () => {
+  const ADVANCED_PILL = {
+    profileName: "custom_rule",
+    label: "Custom rule",
+    kind: "advanced" as const,
+    matchClass: null,
+    autoSwitch: false,
+    icon: null,
+    isBrowser: false,
+  };
+
+  it("app pill: prose says 'When {label} is the window you're using…'", () => {
+    render(<AppContextStrip pill={PILL} onToggleAutoSwitch={vi.fn()} onRemove={vi.fn()} />);
+    expect(
+      screen.getByText(/When Firefox is the window you're using, the highlighted buttons change/)
+    ).toBeInTheDocument();
+  });
+
+  it("advanced pill: prose says 'When your custom rule matches, the highlighted buttons change. Everything else keeps its Everywhere setting.'", () => {
+    render(<AppContextStrip pill={ADVANCED_PILL} onToggleAutoSwitch={vi.fn()} onRemove={vi.fn()} />);
+    expect(
+      screen.getByText("When your custom rule matches, the highlighted buttons change. Everything else keeps its Everywhere setting.")
+    ).toBeInTheDocument();
+    // Must NOT contain the old app-style sentence
+    expect(screen.queryByText(/When Custom rule is the window/)).toBeNull();
   });
 });

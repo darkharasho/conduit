@@ -39,10 +39,10 @@ describe("AppPicker", () => {
     expect(onPick).toHaveBeenCalledWith("Dolphin", "dolphin");
   });
 
-  it("does not render the advanced link", async () => {
+  it("does not render the advanced link when onPickAdvanced is not provided", async () => {
     render(<AppPicker model={MODEL} onPick={() => {}} onClose={() => {}} />);
     await waitFor(() => expect(screen.getAllByText("Steam").length).toBeGreaterThan(0));
-    expect(screen.queryByRole("button", { name: /Advanced/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Advanced: match a specific window/i })).toBeNull();
   });
 
   it("installed app whose wm_class matches an existing pill is excluded while non-matching apps remain", async () => {
@@ -90,5 +90,61 @@ describe("phase 6 nits", () => {
     await waitFor(() => expect(screen.getByText("unknown-app")).toBeInTheDocument());
     fireEvent.click(screen.getByText("unknown-app").closest("button")!);
     expect(onPick).toHaveBeenCalledWith("unknown-app", "unknown-app");
+  });
+});
+
+describe("AppPicker — advanced match", () => {
+  it("advanced link is shown when onPickAdvanced is provided and swaps to form on click", async () => {
+    render(<AppPicker model={MODEL} onPick={() => {}} onPickAdvanced={() => {}} onClose={() => {}} />);
+    await waitFor(() => expect(screen.getAllByText("Steam").length).toBeGreaterThan(0));
+    const advLink = screen.getByRole("button", { name: /Advanced: match a specific window/i });
+    expect(advLink).toBeInTheDocument();
+    fireEvent.click(advLink);
+    // Form fields must appear
+    expect(screen.getByLabelText("Name")).toBeInTheDocument();
+    expect(screen.getByLabelText("Class")).toBeInTheDocument();
+    expect(screen.getByLabelText("Process")).toBeInTheDocument();
+    expect(screen.getByLabelText("Title pattern")).toBeInTheDocument();
+    // App list must be gone
+    expect(screen.queryByText("Steam")).toBeNull();
+  });
+
+  it("Create passes cleaned match (empty fields stripped)", async () => {
+    const onPickAdvanced = vi.fn();
+    render(<AppPicker model={MODEL} onPick={() => {}} onPickAdvanced={onPickAdvanced} onClose={() => {}} />);
+    await waitFor(() => expect(screen.getAllByText("Steam").length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole("button", { name: /Advanced: match a specific window/i }));
+    // Fill title only (Class and Process left blank)
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "GitHub browser" } });
+    fireEvent.change(screen.getByLabelText("Title pattern"), { target: { value: "GitHub" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(onPickAdvanced).toHaveBeenCalledWith("GitHub browser", { title: "GitHub" });
+  });
+
+  it("Cancel returns to the app list", async () => {
+    render(<AppPicker model={MODEL} onPick={() => {}} onPickAdvanced={() => {}} onClose={() => {}} />);
+    await waitFor(() => expect(screen.getAllByText("Steam").length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole("button", { name: /Advanced: match a specific window/i }));
+    expect(screen.getByLabelText("Name")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    // Back to list
+    expect(screen.queryByLabelText("Name")).toBeNull();
+    expect(screen.getAllByText("Steam").length).toBeGreaterThan(0);
+  });
+
+  it("all three non-name fields populated — all three appear in match record", async () => {
+    const onPickAdvanced = vi.fn();
+    render(<AppPicker model={MODEL} onPick={() => {}} onPickAdvanced={onPickAdvanced} onClose={() => {}} />);
+    await waitFor(() => expect(screen.getAllByText("Steam").length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole("button", { name: /Advanced: match a specific window/i }));
+    fireEvent.change(screen.getByLabelText("Class"), { target: { value: "myapp" } });
+    fireEvent.change(screen.getByLabelText("Process"), { target: { value: "myapp-bin" } });
+    fireEvent.change(screen.getByLabelText("Title pattern"), { target: { value: "My App" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(onPickAdvanced).toHaveBeenCalledWith("Custom rule", {
+      class: "myapp",
+      process: "myapp-bin",
+      title: "My App",
+    });
   });
 });

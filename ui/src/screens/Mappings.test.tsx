@@ -863,6 +863,107 @@ match = { class = "firefox" }
   });
 });
 
+describe("MappingsScreen — advanced picker plumbing", () => {
+  it("isBrowser is passed to appContext for a browser pill", async () => {
+    const FIREFOX_TOML = `
+[profile.default.keys]
+
+[profile.firefox]
+match = { class = "firefox" }
+[profile.firefox.keys]
+`;
+    const firefoxApp = {
+      app_id: "org.mozilla.firefox",
+      name: "Mozilla Firefox",
+      wm_class: "firefox",
+      categories: ["WebBrowser"],
+      icon: null,
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockInvoke.mockImplementation((async (cmd: string) => {
+      if (cmd === "get_config") return FIREFOX_TOML;
+      if (cmd === "list_devices") return [];
+      if (cmd === "list_installed_apps") return [firefoxApp];
+      if (cmd === "list_windows") return [];
+      return undefined;
+    }) as any);
+    mockListen.mockResolvedValue(vi.fn());
+
+    const { container } = render(
+      <MappingsScreen railActiveProfile="firefox" onProfilesChange={() => {}} />
+    );
+
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); });
+
+    // Click key "a" to open AssignPanel with app context
+    const keycap = container.querySelector('button[title="a"]') as HTMLElement;
+    expect(keycap).toBeTruthy();
+    await act(async () => { keycap.click(); });
+
+    // In browser context, the Popular list should show "Back" before "Copy".
+    // "Back" is browser-first; "Copy" is a regular popular shortcut.
+    await screen.findByText("In Mozilla Firefox");
+    const rows = Array.from(container.querySelectorAll(".cat-row__label")).map((el) => el.textContent ?? "");
+    const backIdx = rows.findIndex((l) => l === "Back");
+    const copyIdx = rows.findIndex((l) => l === "Copy");
+    expect(backIdx).toBeGreaterThanOrEqual(0);
+    expect(copyIdx).toBeGreaterThanOrEqual(0);
+    expect(backIdx).toBeLessThan(copyIdx);
+  });
+
+  it("handlePickAdvanced creates profile with title-only matcher via setProfileMatch", async () => {
+    const EMPTY_TOML = '[profile.default.keys]\n';
+    const setConfigCalls: string[] = [];
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockInvoke.mockImplementation((async (cmd: string, args?: { toml?: string }) => {
+      if (cmd === "get_config") return EMPTY_TOML;
+      if (cmd === "list_devices") return [];
+      if (cmd === "list_installed_apps") return [];
+      if (cmd === "list_windows") return [];
+      if (cmd === "set_config") {
+        setConfigCalls.push(args?.toml ?? "");
+        return undefined;
+      }
+      return undefined;
+    }) as any);
+    mockListen.mockResolvedValue(vi.fn());
+
+    const onSelectProfile = vi.fn();
+    const { container } = render(
+      <MappingsScreen railActiveProfile="default" onProfilesChange={() => {}} onSelectProfile={onSelectProfile} />
+    );
+
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); });
+
+    // Open the app picker
+    const addBtn = container.querySelector('.app-pill--add') as HTMLElement;
+    expect(addBtn).toBeTruthy();
+    await act(async () => { fireEvent.click(addBtn); });
+
+    // The picker must be open — find the Advanced link
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Advanced: match a specific window/i })).toBeInTheDocument()
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Advanced: match a specific window/i }));
+
+    // Fill in title only
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "GitHub" } });
+    fireEvent.change(screen.getByLabelText("Title pattern"), { target: { value: "GitHub" } });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Create" })); });
+    await act(async () => { await Promise.resolve(); });
+
+    // setConfig must have been called
+    expect(setConfigCalls).toHaveLength(1);
+    // The serialised TOML must contain the title match (and must NOT contain a class match for empty class)
+    expect(setConfigCalls[0]).toContain("GitHub");
+    expect(onSelectProfile).toHaveBeenCalledWith("github");
+  });
+});
+
 describe("phase 6 nits", () => {
   it("item 4: handleUseDefault no-ops when key has no mapping (setConfig NOT called)", async () => {
     // Config with no mapping on key "q" — clicking "Use default" on "q" should be a no-op

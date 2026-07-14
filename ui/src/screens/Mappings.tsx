@@ -308,6 +308,22 @@ export function MappingsScreen({
     [applyWithUndoImpl, onSelectProfile]
   );
 
+  const handlePickAdvanced = useCallback(
+    async (name: string, match: Record<string, string>) => {
+      if (!modelRef.current) return;
+      const profileName = slug(name);
+      // addProfile needs a class string; when the user gave no class but has
+      // process/title, create with empty class then immediately overwrite the
+      // match so the serialised TOML is correct.
+      const withProfile = addProfile(modelRef.current, profileName, match.class ?? "");
+      const updated = setProfileMatch(withProfile, profileName, match);
+      setPickerOpen(false);
+      await applyWithUndoImpl(updated, `${name} added`);
+      onSelectProfile?.(profileName);
+    },
+    [applyWithUndoImpl, onSelectProfile]
+  );
+
   const handleSaveAction = async (action: ActionModel): Promise<void> => {
     if (!model || !editingKey) return;
     const updated =
@@ -633,6 +649,7 @@ export function MappingsScreen({
                     return {
                       label: activePill.label,
                       everywhereLabel: everywhereEff ? actionLabel(everywhereEff.action) : null,
+                      isBrowser: activePill.isBrowser,
                     };
                   })()}
                 />
@@ -674,6 +691,7 @@ export function MappingsScreen({
         <AppPicker
           model={model}
           onPick={handlePickApp}
+          onPickAdvanced={handlePickAdvanced}
           onClose={() => setPickerOpen(false)}
         />
       )}

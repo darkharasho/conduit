@@ -144,6 +144,7 @@ export const CATALOG: CatalogEntry[] = [
     label: "Forward",
     subtitle: "Browser / files",
     category: "keys",
+    popular: true,
     keywords: ["browser", "navigate"],
     action: single("forward"),
   },
