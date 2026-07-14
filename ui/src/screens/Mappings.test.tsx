@@ -714,7 +714,7 @@ match = { class = "firefox" }
   /** Navigate the 3-step remove flow: ⋯ → "Remove Firefox settings" → "Remove" */
   async function triggerRemove(container: HTMLElement) {
     // Step 1: open the ⋯ menu
-    const menuBtn = container.querySelector('button[aria-label="⋯"]') as HTMLElement;
+    const menuBtn = container.querySelector('button[aria-label="More options"]') as HTMLElement;
     expect(menuBtn).toBeTruthy();
     await act(async () => { fireEvent.click(menuBtn); });
 

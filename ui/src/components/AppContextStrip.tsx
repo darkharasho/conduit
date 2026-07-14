@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { AppPill } from "../lib/app-registry";
 
 interface AppContextStripProps {
@@ -10,6 +10,31 @@ interface AppContextStripProps {
 export function AppContextStrip({ pill, onToggleAutoSwitch, onRemove }: AppContextStripProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
+
+  // Close menu on Escape or click outside.
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setMenuOpen(false);
+      }
+    }
+
+    function onMouseDown(e: MouseEvent) {
+      // Close if the click target is outside the menu button/list area.
+      // We use document mousedown so any outside click dismisses the menu.
+      void e;
+      setMenuOpen(false);
+    }
+
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("mousedown", onMouseDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("mousedown", onMouseDown);
+    };
+  }, [menuOpen]);
 
   return (
     <div className="app-strip">
@@ -29,8 +54,9 @@ export function AppContextStrip({ pill, onToggleAutoSwitch, onRemove }: AppConte
         <div className="app-strip__menu">
           <button
             className="app-strip__menu-btn"
-            aria-label="⋯"
-            onClick={() => {
+            aria-label="More options"
+            onClick={(e) => {
+              e.stopPropagation();
               setMenuOpen((v) => !v);
               setConfirming(false);
             }}
@@ -38,7 +64,10 @@ export function AppContextStrip({ pill, onToggleAutoSwitch, onRemove }: AppConte
             ⋯
           </button>
           {menuOpen && !confirming && (
-            <div className="app-strip__menu-list">
+            <div
+              className="app-strip__menu-list"
+              onMouseDown={(e) => e.stopPropagation()}
+            >
               <button
                 className="app-strip__menu-item"
                 onClick={() => {

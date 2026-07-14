@@ -92,6 +92,16 @@ describe("HomeScreen", () => {
     );
   });
 
+  it("device card accessible name contains the device name and no archetype slug", async () => {
+    mockListDevices.mockResolvedValue([node({})]);
+    render(<HomeScreen model={MODEL} connected={true} onOpenDevice={() => {}} />);
+    const card = await screen.findByRole("button", { name: /Logitech G502 X/ });
+    const accName = card.textContent ?? "";
+    expect(accName).toContain("Logitech G502 X");
+    // DeviceArt is aria-hidden — archetype slugs must not appear in accessible name
+    expect(accName).not.toMatch(/gaming-mouse|mmo-mouse|keyboard/);
+  });
+
   it("shows remembered devices with the spec copy", async () => {
     mockListDevices.mockResolvedValue([node({})]);
     render(<HomeScreen model={MODEL} connected={true} onOpenDevice={() => {}} />);

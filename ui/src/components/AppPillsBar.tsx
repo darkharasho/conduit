@@ -9,7 +9,7 @@ interface AppPillsBarProps {
 
 export function AppPillsBar({ pills, active, onSelect, onAdd }: AppPillsBarProps) {
   return (
-    <div className="app-pills">
+    <div className="app-pills" role="tablist">
       <span className="app-pills__label">Buttons work like this</span>
       {pills.map((pill) => {
         const isActive = pill.profileName === active;
@@ -17,6 +17,8 @@ export function AppPillsBar({ pills, active, onSelect, onAdd }: AppPillsBarProps
         return (
           <button
             key={pill.profileName}
+            role="tab"
+            aria-selected={isActive}
             className={`app-pill${isActive ? " app-pill--active" : ""}${isPaused ? " app-pill--paused" : ""}`}
             onClick={() => onSelect(pill.profileName)}
             title={isPaused ? "Switch automatically is off" : undefined}
@@ -28,7 +30,10 @@ export function AppPillsBar({ pills, active, onSelect, onAdd }: AppPillsBarProps
             )}
             <span className="app-pill__name">{pill.label}</span>
             {isPaused && (
-              <span className="app-pill__badge" title="Switch automatically is off">∅ auto</span>
+              <span
+                className="app-pill__badge"
+                aria-label="Switch automatically is off"
+              >∅ auto</span>
             )}
           </button>
         );

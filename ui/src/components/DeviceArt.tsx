@@ -28,8 +28,7 @@ export function DeviceArt({ archetype, width = 96 }: Props) {
   const isMouse = archetype !== "keyboard";
   return (
     <svg
-      role="img"
-      aria-label={archetype}
+      aria-hidden="true"
       width={width}
       viewBox={isMouse ? mouseView : kbView}
       className="device-art"
