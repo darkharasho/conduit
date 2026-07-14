@@ -58,6 +58,7 @@ export function InspectorPanel({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [liveToml, setLiveToml] = useState<string | null>(tomlEcho);
+  const [showToml, setShowToml] = useState(false);
 
   // Remap field
   const [remapKey, , remapCapturing, captureRemapKey] = useCaptureKey(
@@ -306,12 +307,18 @@ export function InspectorPanel({
         <div className="inspector__error" role="alert">{saveError}</div>
       )}
 
-      {/* Footer: live TOML echo */}
-      <div className="inspector__toml">
-        {liveToml ?? (
-          <span className="muted">fill fields above to preview TOML</span>
-        )}
-      </div>
+      {/* Footer: live TOML echo (hidden behind disclosure) */}
+      <button
+        className="assign-adv-link"
+        onClick={() => setShowToml((v) => !v)}
+      >
+        {showToml ? "Hide configuration" : "Show configuration"}
+      </button>
+      {showToml && (
+        <div className="inspector__toml">
+          {liveToml ?? <span className="muted">fill fields above to preview</span>}
+        </div>
+      )}
     </div>
   );
 }

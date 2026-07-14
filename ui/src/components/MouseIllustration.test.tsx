@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { MouseIllustration } from "./MouseIllustration";
 import { parseConfigToml } from "../lib/config-model";
+import "../lib/action-catalog";
 
 const MODEL = parseConfigToml('[profile.default.keys]\nmouse4 = "volumeup"');
 
@@ -51,5 +52,11 @@ describe("MouseIllustration", () => {
     const unmapped = container.querySelector('[data-illo-key="btn_left"]');
     expect(mapped?.getAttribute("class")).toContain("illo__marker--mapped");
     expect(unmapped?.getAttribute("class")).not.toContain("illo__marker--mapped");
+  });
+
+  it("shows an always-on job label for mapped controls", () => {
+    const model = parseConfigToml('[profile.default.keys]\nmouse4 = "leftctrl+c"');
+    renderIllo({ model });
+    expect(screen.getByText("Copy")).toBeInTheDocument();
   });
 });

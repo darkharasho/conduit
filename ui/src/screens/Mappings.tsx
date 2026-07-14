@@ -399,13 +399,20 @@ export function MappingsScreen({
                   </span>
                 ))}
                 {activeDev && (
-                  <button
-                    className={`btn devtabs__detect${detecting ? " devtabs__detect--active" : ""}`}
-                    onClick={() => setDetecting((v) => !v)}
-                    title="Press a physical button/key on this device to jump to its mapping"
-                  >
-                    {detecting ? `press a button on ${activeDev.name}…` : "Detect button"}
-                  </button>
+                  <>
+                    <button
+                      className={`btn devtabs__detect${detecting ? " devtabs__detect--active" : ""}`}
+                      onClick={() => setDetecting((v) => !v)}
+                      title="Press a physical button/key on this device to jump to its mapping"
+                    >
+                      Select by pressing
+                    </button>
+                    {detecting && (
+                      <span className="devtabs__detect-hint">
+                        …then press the button on your device
+                      </span>
+                    )}
+                  </>
                 )}
               </div>
             )}

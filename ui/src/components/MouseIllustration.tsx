@@ -88,7 +88,10 @@ export function MouseIllustration({
       {shown.map((key) => {
         const pos = MARKER_POS[key];
         const eff = getEffectiveAction(model, activeProfile, dev, activeLayer, key);
+        const action = eff?.action ?? null;
         const isSel = key === selected;
+        const rawLabel = actionLabel(action);
+        const jobLabel = rawLabel.length > 14 ? rawLabel.slice(0, 13) + "…" : rawLabel;
         return (
           <g
             key={key}
@@ -112,6 +115,15 @@ export function MouseIllustration({
           >
             <circle className="illo__ring" cx={pos.x} cy={pos.y} r={isSel ? 13 : 11} />
             <circle className="illo__dot" cx={pos.x} cy={pos.y} r={isSel ? 4 : 3.5} />
+            {action && (
+              <text
+                className="illo__joblabel"
+                x={pos.x + 26}
+                y={pos.y + 4}
+              >
+                {jobLabel}
+              </text>
+            )}
           </g>
         );
       })}

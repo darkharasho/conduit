@@ -109,4 +109,12 @@ describe("AssignPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /Advanced: tap & hold, layers/ }));
     expect(screen.getByText("tap-hold")).toBeInTheDocument();
   });
+
+  it("hides the TOML echo behind Show configuration", async () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: /Advanced: tap & hold, layers/ }));
+    expect(screen.queryByText(/conduit\.toml/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show configuration" }));
+    expect(screen.getByText(/conduit\.toml/)).toBeInTheDocument();
+  });
 });

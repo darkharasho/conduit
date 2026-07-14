@@ -139,7 +139,7 @@ describe("MappingsScreen — Detect button", () => {
       <MappingsScreen railActiveProfile="default" onProfilesChange={() => {}} />
     );
 
-    const detectBtn = await findByText("Detect button");
+    const detectBtn = await findByText("Select by pressing");
     await act(async () => {
       detectBtn.click();
     });
@@ -163,8 +163,8 @@ describe("MappingsScreen — Detect button", () => {
     // The detected key chip is selected and the detect prompt is gone.
     const chip = container.querySelector('[data-key="key:288"]');
     expect(chip?.className).toContain("mousekey--sel");
-    expect(container.textContent).toContain("Detect button");
-    expect(container.textContent).not.toContain("press a button on");
+    expect(container.textContent).toContain("Select by pressing");
+    expect(container.textContent).not.toContain("then press the button on your device");
   });
 });
 
