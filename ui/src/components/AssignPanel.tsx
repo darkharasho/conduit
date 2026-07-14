@@ -1,6 +1,15 @@
 import { useState } from "react";
 import type { ActionModel, ConfigModel } from "../lib/config-model";
-import { actionLabel, keyDisplayName, QUICK_PICKS } from "../lib/action-labels";
+import { actionLabel, keyDisplayName } from "../lib/action-labels";
+import {
+  searchCatalog,
+  popularEntries,
+  entriesFor,
+  parseComboInput,
+  entryForAction,
+  chordLabel,
+} from "../lib/action-catalog";
+import type { CatalogCategory, CatalogEntry } from "../lib/action-catalog";
 import { captureNextKey } from "../lib/client";
 import { InspectorPanel } from "./InspectorPanel";
 
@@ -19,10 +28,20 @@ interface Props {
   onClose: () => void;
 }
 
+type Category = "popular" | CatalogCategory;
+
+const CATEGORIES: { id: Category; label: string }[] = [
+  { id: "popular", label: "Popular" },
+  { id: "shortcuts", label: "Shortcuts" },
+  { id: "keys", label: "Keys" },
+  { id: "media", label: "Media & volume" },
+  { id: "system", label: "System" },
+];
+
 /**
- * Plain-language assignment panel: press-to-set is the primary path, quick
- * picks cover the common one-click actions, and the old kind-based editor
- * stays available behind "Advanced options" for tap-hold and layers.
+ * Search-first assignment panel: catalog entries are the primary path,
+ * the press-to-set capture flow lives inside the "Keys" category,
+ * and the old kind-based editor stays available behind the quiet advanced link.
  */
 export function AssignPanel({
   keyName,
@@ -35,6 +54,8 @@ export function AssignPanel({
   onUseDefault,
   onClose,
 }: Props) {
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState<Category>("popular");
   const [capturing, setCapturing] = useState(false);
   const [advanced, setAdvanced] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -63,6 +84,27 @@ export function AssignPanel({
       }
     });
 
+  const save = (action: ActionModel) => run(() => onSave(action));
+
+  // Build the list of entries to display
+  const comboAction = query ? parseComboInput(query) : null;
+  // When a typed combo resolves to a catalog entry, include it in results so the
+  // user sees the named action (e.g. "Undo" for "ctrl+z") even if the text
+  // search wouldn't match the formatted subtitle ("Ctrl + Z" vs "ctrl+z").
+  const comboEntry: CatalogEntry | null = comboAction ? entryForAction(comboAction) : null;
+  const catalogResults = query ? searchCatalog(query) : [];
+  // Merge: text results first, then the combo-matched entry if not already present
+  const mergedResults: CatalogEntry[] = comboEntry
+    ? catalogResults.some((e) => e.id === comboEntry.id)
+      ? catalogResults
+      : [...catalogResults, comboEntry]
+    : catalogResults;
+  const displayEntries = query
+    ? mergedResults
+    : category === "popular"
+      ? popularEntries()
+      : entriesFor(category as CatalogCategory);
+
   if (advanced) {
     return (
       <div className="assign" role="region" aria-label={`Assign ${keyDisplayName(keyName)}`}>
@@ -88,7 +130,8 @@ export function AssignPanel({
         <div>
           <h2 className="assign__title">{keyDisplayName(keyName)}</h2>
           <p className="assign__now">
-            Now: <span className="assign__now-val">{actionLabel(currentAction)}</span>
+            Right now it does:{" "}
+            <span className="assign__now-val">{actionLabel(currentAction)}</span>
           </p>
         </div>
         <button className="modal__close" onClick={onClose} aria-label="Close">
@@ -96,41 +139,77 @@ export function AssignPanel({
         </button>
       </div>
 
-      <button
-        className={`assign__capture${capturing ? " assign__capture--live" : ""}`}
-        onClick={handleCapture}
-        disabled={capturing || busy}
-      >
-        <span className="assign__capture-key">
-          <span className="assign__capture-dot" aria-hidden="true" />
-          {capturing ? "Press any key…" : "Press to set"}
-        </span>
-        <span className="assign__capture-sub">
-          {capturing
-            ? "waiting for the key this button should type"
-            : "Click, then press the key this button should type"}
-        </span>
-      </button>
-
-      <div className="assign__or">or pick an action</div>
-
-      <div className="assign__quick">
-        {QUICK_PICKS.map((pick) => (
-          <button
-            key={pick.key}
-            className="assign__pick"
-            disabled={busy}
-            onClick={() => run(() => onSave({ kind: "key", key: pick.key }))}
-          >
-            {pick.label}
-            {pick.hint && <small>{pick.hint}</small>}
-          </button>
-        ))}
+      {/* Search input */}
+      <div className="assign-search">
+        <input
+          type="text"
+          placeholder='Search anything — "screenshot", "ctrl+z", "mute"…'
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
       </div>
 
-      <button className="assign__advanced" onClick={() => setAdvanced(true)}>
-        Advanced options… <small>tap-hold, layers</small>
-      </button>
+      {/* Category chips — only shown when not searching */}
+      {!query && (
+        <div className="assign-cats">
+          {CATEGORIES.map((cat) => (
+            <button
+              key={cat.id}
+              className={`assign-cat${category === cat.id ? " assign-cat--sel" : ""}`}
+              onClick={() => setCategory(cat.id)}
+            >
+              {cat.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Entry list */}
+      <div className="assign__list">
+        {/* Press-to-set row: only in Keys category (or search) */}
+        {!query && category === "keys" && (
+          <button
+            className={`cat-row${capturing ? " assign__capture--live" : ""}`}
+            onClick={handleCapture}
+            disabled={capturing || busy}
+          >
+            <div className="cat-row__label">
+              {capturing ? "Press any key…" : "Press a key to type it…"}
+            </div>
+            <div className="cat-row__sub">
+              {capturing
+                ? "Waiting for the key this button should type"
+                : "Click, then press the physical key"}
+            </div>
+          </button>
+        )}
+
+        {displayEntries.map((entry) => (
+          <button
+            key={entry.id}
+            className="cat-row"
+            disabled={busy}
+            onClick={() => save(entry.action)}
+          >
+            <div className="cat-row__label">{entry.label}</div>
+            <div className="cat-row__sub">{entry.subtitle}</div>
+          </button>
+        ))}
+
+        {/* Synthetic row for typed combo */}
+        {comboAction && comboAction.kind === "chord" && (
+          <button
+            className="cat-row"
+            disabled={busy}
+            onClick={() => save(comboAction)}
+          >
+            <div className="cat-row__label">
+              Press {chordLabel(comboAction.keys)}
+            </div>
+            <div className="cat-row__sub">Custom shortcut</div>
+          </button>
+        )}
+      </div>
 
       {error && (
         <div className="inspector__error" role="alert">
@@ -138,22 +217,30 @@ export function AssignPanel({
         </div>
       )}
 
+      {/* Footer */}
       <div className="assign__foot">
         <button
           className="assign__default"
           disabled={busy}
           onClick={() => run(onUseDefault)}
         >
-          Use default
+          Use the button's normal behavior
         </button>
         <button
           className="assign__disable"
           disabled={busy}
-          onClick={() => run(() => onSave({ kind: "disabled" }))}
+          onClick={() => save({ kind: "disabled" })}
         >
-          Disable button
+          Do nothing when pressed
         </button>
       </div>
+
+      <button
+        className="assign-adv-link"
+        onClick={() => setAdvanced(true)}
+      >
+        Advanced: tap &amp; hold, layers… ›
+      </button>
     </div>
   );
 }

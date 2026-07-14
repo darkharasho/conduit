@@ -36,46 +36,77 @@ describe("AssignPanel", () => {
   it("shows the button and its current job in plain language", () => {
     renderPanel();
     expect(screen.getByRole("heading", { name: "Back button" })).toBeInTheDocument();
-    expect(screen.getByText(/Now:/)).toHaveTextContent("Now: Back");
+    expect(screen.getByText(/Right now it does:/)).toBeInTheDocument();
   });
 
   it("says 'Normal job' when the key is unmapped", () => {
     renderPanel({ currentAction: null });
-    expect(screen.getByText(/Now:/)).toHaveTextContent("Now: Normal job");
+    expect(screen.getByText(/Right now it does:/)).toHaveTextContent("Normal job");
   });
 
-  it("press-to-set captures a key and saves it in one step", async () => {
-    const props = renderPanel();
-    fireEvent.click(screen.getByRole("button", { name: /press to set/i }));
+  it("shows Popular by default and saves a catalog entry on click", async () => {
+    const { onSave } = renderPanel();
+    expect(screen.getByPlaceholderText(/Search anything/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Copy/ }));
     await waitFor(() =>
-      expect(props.onSave).toHaveBeenCalledWith({ kind: "key", key: "volumeup" })
+      expect(onSave).toHaveBeenCalledWith({ kind: "chord", keys: ["leftctrl", "c"] }),
+    );
+  });
+
+  it("search finds actions and typed combos become a custom row", async () => {
+    const { onSave } = renderPanel();
+    fireEvent.change(screen.getByPlaceholderText(/Search anything/), {
+      target: { value: "ctrl+z" },
+    });
+    expect(screen.getByText("Undo")).toBeInTheDocument(); // catalog hit (subtitle Ctrl + Z)
+    fireEvent.click(screen.getByRole("button", { name: /Press Ctrl \+ Z/ }));
+    await waitFor(() =>
+      expect(onSave).toHaveBeenCalledWith({ kind: "chord", keys: ["leftctrl", "z"] }),
+    );
+  });
+
+  it("renders the plain-language escape hatches", () => {
+    renderPanel();
+    expect(screen.getByRole("button", { name: "Use the button's normal behavior" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Do nothing when pressed" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Advanced: tap & hold, layers/ })).toBeInTheDocument();
+  });
+
+  it("Keys category exposes press-to-set", async () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "Keys" }));
+    expect(screen.getByRole("button", { name: /Press a key to type it/ })).toBeInTheDocument();
+  });
+
+  it("press-to-set in Keys category captures a key and saves it", async () => {
+    const { onSave } = renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "Keys" }));
+    fireEvent.click(screen.getByRole("button", { name: /Press a key to type it/ }));
+    await waitFor(() =>
+      expect(onSave).toHaveBeenCalledWith({ kind: "key", key: "volumeup" })
     );
     expect(captureNextKey).toHaveBeenCalledOnce();
   });
 
-  it("quick picks save immediately", async () => {
-    const props = renderPanel();
-    fireEvent.click(screen.getByRole("button", { name: /play \/ pause/i }));
+  it("'Use the button's normal behavior' calls onUseDefault", async () => {
+    const { onUseDefault } = renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "Use the button's normal behavior" }));
+    await waitFor(() => expect(onUseDefault).toHaveBeenCalledOnce());
+  });
+
+  it("'Do nothing when pressed' saves disabled", async () => {
+    const { onSave } = renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "Do nothing when pressed" }));
     await waitFor(() =>
-      expect(props.onSave).toHaveBeenCalledWith({ kind: "key", key: "playpause" })
+      expect(onSave).toHaveBeenCalledWith({ kind: "disabled" })
     );
   });
 
-  it("'Use default' reverts and 'Disable button' saves disabled", async () => {
-    const props = renderPanel();
-    fireEvent.click(screen.getByRole("button", { name: "Use default" }));
-    await waitFor(() => expect(props.onUseDefault).toHaveBeenCalledOnce());
-    fireEvent.click(screen.getByRole("button", { name: "Disable button" }));
-    await waitFor(() =>
-      expect(props.onSave).toHaveBeenCalledWith({ kind: "disabled" })
-    );
-  });
-
-  it("hides advanced options until asked", () => {
+  it("hides InspectorPanel until Advanced link is clicked", () => {
     renderPanel();
     // The advanced editor's kind selector is not in the document by default
     expect(screen.queryByText("tap-hold")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /advanced/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Advanced: tap & hold, layers/ }));
     expect(screen.getByText("tap-hold")).toBeInTheDocument();
   });
 });

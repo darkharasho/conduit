@@ -296,7 +296,7 @@ describe("MappingsScreen — plain-language assignment", () => {
     await act(async () => { keycap.click(); });
 
     // Panel shows the plain state, then revert it
-    const useDefault = await findByText("Use default");
+    const useDefault = await findByText("Use the button's normal behavior");
     await act(async () => { useDefault.click(); });
 
     expect(setConfigCalls).toHaveLength(1);
@@ -349,8 +349,8 @@ describe("MappingsScreen — applyWithUndo failure path", () => {
     expect(keycap).toBeTruthy();
     await act(async () => { keycap.click(); });
 
-    // Wait for AssignPanel ("Use default" appears when panel is open)
-    await findByText("Use default");
+    // Wait for AssignPanel (footer button appears when panel is open)
+    await findByText("Use the button's normal behavior");
 
     // Click the "Back" quick pick to trigger a save that will fail
     const backBtn = await findByText("Back");
@@ -387,8 +387,8 @@ describe("MappingsScreen — applyWithUndo undo path", () => {
     expect(keycap).toBeTruthy();
     await act(async () => { keycap.click(); });
 
-    // Wait for AssignPanel, then click the "Back" quick pick to save
-    await findByText("Use default");
+    // Wait for AssignPanel, then click the "Back" catalog entry to save
+    await findByText("Use the button's normal behavior");
     const backBtn = await findByText("Back");
     await act(async () => { fireEvent.click(backBtn); });
 
@@ -487,7 +487,7 @@ describe("MappingsScreen — applyWithUndo retry-then-undo", () => {
     await act(async () => { keycap.click(); });
 
     // Wait for AssignPanel, then click "Back" — first attempt fails
-    await findByText("Use default");
+    await findByText("Use the button's normal behavior");
     const backBtn = await findByText("Back");
     await act(async () => { fireEvent.click(backBtn); });
 
