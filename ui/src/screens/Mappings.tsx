@@ -26,6 +26,8 @@ import { KeyboardViz } from "../components/KeyboardViz";
 import { MouseViz } from "../components/MouseViz";
 import { Toolbar } from "../components/Toolbar";
 import { AssignPanel } from "../components/AssignPanel";
+import { ButtonCheck } from "../components/ButtonCheck";
+import { isOnboardFixable } from "../lib/button-check";
 import { ProfileMatchEditor } from "../components/ProfileMatchEditor";
 import { Toast } from "../components/Toast";
 import type { ToastData } from "../components/Toast";
@@ -78,6 +80,8 @@ export function MappingsScreen({
 
   // App picker state
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Button check panel state
+  const [buttonCheckOpen, setButtonCheckOpen] = useState(false);
   const [installedApps, setInstalledApps] = useState<InstalledApp[]>([]);
 
   useEffect(() => {
@@ -540,16 +544,25 @@ export function MappingsScreen({
 
             {/* Visualization: mouse diagram for pointer devices, ANSI board otherwise */}
             {activeDev && isPointerClass(activeDev.class) ? (
-              <MouseViz
-                model={model}
-                activeProfile={railActiveProfile}
-                activeLayer={activeLayer}
-                selectedKey={editingKey}
-                onSelectKey={(keyName) => {
-                  setEditingKey((prev) => (prev === keyName ? null : keyName));
-                }}
-                dev={activeDev}
-              />
+              <>
+                <MouseViz
+                  model={model}
+                  activeProfile={railActiveProfile}
+                  activeLayer={activeLayer}
+                  selectedKey={editingKey}
+                  onSelectKey={(keyName) => {
+                    setEditingKey((prev) => (prev === keyName ? null : keyName));
+                  }}
+                  dev={activeDev}
+                />
+                {/* Quiet entry point to the Button check panel */}
+                <button
+                  className="assign-adv-link"
+                  onClick={() => setButtonCheckOpen(true)}
+                >
+                  Some buttons missing?
+                </button>
+              </>
             ) : (
               <KeyboardViz
                 model={model}
@@ -651,6 +664,19 @@ export function MappingsScreen({
           onPickAdvanced={handlePickAdvanced}
           onClose={() => setPickerOpen(false)}
         />
+      )}
+
+      {/* Button check panel — modal overlay */}
+      {buttonCheckOpen && activeDev && (
+        <div className="modal-backdrop">
+          <div className="modal">
+            <ButtonCheck
+              device={activeDev}
+              onClose={() => setButtonCheckOpen(false)}
+              onFix={isOnboardFixable(activeDev) ? () => setButtonCheckOpen(false) : undefined}
+            />
+          </div>
+        </div>
       )}
     </div>
   );

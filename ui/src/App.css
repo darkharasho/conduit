@@ -2065,3 +2065,132 @@ img.app-pill__avatar { object-fit: contain; }
   gap: 8px;
   margin-top: 8px;
 }
+
+/* ── Button check panel ─────────────────────────────────────────────────── */
+
+.btn-check {
+  display: flex;
+  flex-direction: column;
+  min-width: 360px;
+  max-width: 480px;
+}
+
+.btn-check__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-structural);
+  flex-shrink: 0;
+}
+
+.btn-check__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-hi);
+}
+
+.btn-check__body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.btn-check__intro {
+  font-size: 13px;
+  color: var(--text-mid);
+  line-height: 1.5;
+}
+
+.btn-check__tally {
+  font-size: 13px;
+  color: var(--text-lo);
+  font-variant-numeric: tabular-nums;
+}
+
+.btn-check__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* Verdict containers */
+.btn-check__verdict {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: var(--r4);
+  border: 1px solid var(--border-structural);
+}
+
+.btn-check__verdict--ok {
+  border-color: var(--ok);
+  background: rgba(52, 211, 153, 0.06);
+}
+
+.btn-check__verdict--collision {
+  border-color: var(--amber-border);
+  background: rgba(217, 160, 77, 0.06);
+}
+
+.btn-check__verdict-text {
+  font-size: 13px;
+  color: var(--text-hi);
+  line-height: 1.5;
+}
+
+.btn-check__fix-btn {
+  align-self: flex-start;
+}
+
+.btn-check__no-fix {
+  font-size: 12px;
+  color: var(--text-lo);
+}
+
+/* Technical details pane */
+.btn-check__tech {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.btn-check__tech-body {
+  padding: 8px 0;
+  overflow-x: auto;
+}
+
+.btn-check__tech-table {
+  border-collapse: collapse;
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  color: var(--text-lo);
+  width: 100%;
+}
+
+.btn-check__tech-table th,
+.btn-check__tech-table td {
+  text-align: left;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--border-structural);
+}
+
+.btn-check__tech-table th {
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  font-family: var(--font-ui);
+}
+
+.btn-check__tech-note {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 6px;
+  font-family: var(--font-mono);
+}

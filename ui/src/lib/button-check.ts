@@ -111,3 +111,12 @@ export function analyzePresses(
     keyboardCodes,
   };
 }
+
+/**
+ * Returns true when the device is in the curated onboard-fixable set.
+ * Curated fixable set v1: G502 X family — usb:046d:c099, c095, receiver 4099.
+ * Exported here for Task 6 reuse.
+ */
+export function isOnboardFixable(dev: { vendor: number; product: number }): boolean {
+  return dev.vendor === 0x046d && [0x4099, 0xc099, 0xc095].includes(dev.product);
+}
