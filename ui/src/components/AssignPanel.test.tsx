@@ -117,4 +117,11 @@ describe("AssignPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show configuration" }));
     expect(screen.getByText(/conduit\.toml/)).toBeInTheDocument();
   });
+
+  it("shows the app eyebrow and Everywhere hatch in app context", () => {
+    renderPanel({ appContext: { label: "Firefox", everywhereLabel: "Copy" } });
+    expect(screen.getByText("In Firefox")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Use the Everywhere setting (Copy)" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Use the button's normal behavior" })).toBeNull();
+  });
 });

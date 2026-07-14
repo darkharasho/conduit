@@ -577,3 +577,39 @@ mouse4 = "back"
     expect(pillNames).toContain("Mozilla Firefox");
   });
 });
+
+describe("MappingsScreen — per-app overlay inheritance", () => {
+  const TWO_PROFILE_TOML = `
+[profile.default.keys]
+a = "b"
+
+[profile.firefox]
+match = { class = "firefox" }
+[profile.firefox.keys]
+`;
+
+  it("shows --inherited class for a key inherited from Everywhere in the firefox profile", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockInvoke.mockImplementation((async (cmd: string) => {
+      if (cmd === "get_config") return TWO_PROFILE_TOML;
+      if (cmd === "list_devices") return [];
+      if (cmd === "list_installed_apps") return [];
+      return undefined;
+    }) as any);
+    mockListen.mockResolvedValue(vi.fn());
+
+    const { container } = render(
+      <MappingsScreen railActiveProfile="firefox" onProfilesChange={() => {}} />
+    );
+
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); });
+
+    // In the firefox profile, key "a" is not set — it inherits from Everywhere (default).
+    // Since no device is present, KeyboardViz renders, and all keys that have
+    // Everywhere mappings but not firefox mappings get --inherited.
+    // Key "a" is in the ANSI layout and is mapped in default, so it should appear as --inherited.
+    const inheritedEl = container.querySelector('[class*="--inherited"]');
+    expect(inheritedEl).not.toBeNull();
+  });
+});

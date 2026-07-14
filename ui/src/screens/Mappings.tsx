@@ -18,6 +18,9 @@ import {
   deviceSectionKey,
   selectorMatches,
   addProfile,
+  actionWithEverywhereFallback,
+  setProfileAutoSwitch,
+  removeProfile,
 } from "../lib/config-model";
 import type { ConfigModel, ActionModel } from "../lib/config-model";
 import { KeyboardViz } from "../components/KeyboardViz";
@@ -29,6 +32,7 @@ import { Toast } from "../components/Toast";
 import type { ToastData } from "../components/Toast";
 import { AppPillsBar } from "../components/AppPillsBar";
 import { AppPicker } from "../components/AppPicker";
+import { AppContextStrip } from "../components/AppContextStrip";
 import { presentError } from "../lib/error-messages";
 import { keyDisplayName, actionLabel } from "../lib/action-labels";
 import { appPills } from "../lib/app-registry";
@@ -306,6 +310,10 @@ export function MappingsScreen({
   const handleUseDefault = async () => {
     if (!model || !editingKey) return;
     const eff = getEffectiveAction(model, railActiveProfile, activeDev, activeLayer, editingKey);
+    const pills = appPills(model, installedApps);
+    const activePill = pills.find(p => p.profileName === railActiveProfile);
+    const isAppContext = activePill && activePill.kind !== "everywhere";
+
     if (eff?.source === "device" && activeDev) {
       const section = deviceSectionFor(model, railActiveProfile, activeDev);
       if (!section) return;
@@ -316,7 +324,7 @@ export function MappingsScreen({
     } else {
       await applyWithUndoImpl(
         removeAction(model, railActiveProfile, activeLayer, editingKey),
-        "Back to its normal behavior"
+        isAppContext ? "Back to the Everywhere setting" : "Back to its normal behavior"
       );
     }
   };
@@ -417,6 +425,28 @@ export function MappingsScreen({
               onSelect={(name) => onSelectProfile?.(name)}
               onAdd={() => setPickerOpen(true)}
             />
+
+            {/* App context strip — shown when an app/advanced profile is active */}
+            {(() => {
+              const pills = appPills(model, installedApps);
+              const activePill = pills.find(p => p.profileName === railActiveProfile);
+              if (!activePill || activePill.kind === "everywhere") return null;
+              return (
+                <AppContextStrip
+                  pill={activePill}
+                  onToggleAutoSwitch={(on) => {
+                    const updated = setProfileAutoSwitch(model, railActiveProfile, on);
+                    applyWithUndoImpl(updated, `Automatic switching ${on ? "on" : "off"} for ${activePill.label}`);
+                  }}
+                  onRemove={() => {
+                    const updated = removeProfile(model, railActiveProfile);
+                    applyWithUndoImpl(updated, `${activePill.label} settings removed`).then(() => {
+                      onSelectProfile?.("default");
+                    });
+                  }}
+                />
+              );
+            })()}
 
             {/* Device tabs */}
             {(devices.length > 0 || offlineSections.length > 0) && (
@@ -546,6 +576,16 @@ export function MappingsScreen({
                   onSave={handleSaveAction}
                   onUseDefault={handleUseDefault}
                   onClose={() => setEditingKey(null)}
+                  appContext={(() => {
+                    const pills = appPills(model, installedApps);
+                    const activePill = pills.find(p => p.profileName === railActiveProfile);
+                    if (!activePill || activePill.kind === "everywhere") return undefined;
+                    const everywhereEff = actionWithEverywhereFallback(model, "default", activeDev, activeLayer, editingKey);
+                    return {
+                      label: activePill.label,
+                      everywhereLabel: everywhereEff ? actionLabel(everywhereEff.action) : null,
+                    };
+                  })()}
                 />
               </>
             ) : (

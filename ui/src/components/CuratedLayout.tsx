@@ -1,5 +1,5 @@
 import type { ConfigModel, DeviceIdent } from "../lib/config-model";
-import { getEffectiveAction } from "../lib/config-model";
+import { actionWithEverywhereFallback } from "../lib/config-model";
 import type { DeviceLayout } from "../lib/mouse-layouts";
 import { actionLabel } from "../lib/action-labels";
 
@@ -27,6 +27,7 @@ export function CuratedLayout({
   onSelectKey,
   dev,
 }: Props) {
+  const overlayMode = activeProfile !== "default";
   return (
     <div className="curated" aria-label={layout.title}>
       <div className="curated__title">{layout.title}</div>
@@ -48,11 +49,13 @@ export function CuratedLayout({
                     </span>
                   );
                 }
-                const eff = getEffectiveAction(model, activeProfile, dev, activeLayer, b.key);
+                const eff = actionWithEverywhereFallback(model, activeProfile, dev, activeLayer, b.key);
                 // Plain words when customized; nothing when the button just
                 // does its normal job — raw key names live in the tooltip.
                 const hint = eff ? actionLabel(eff.action) : "";
                 const isSelected = b.key === selectedKey;
+                const isInherited = overlayMode && eff?.source === "everywhere";
+                const isOverride = overlayMode && eff?.source === "app";
                 return (
                   <button
                     key={b.label}
@@ -60,7 +63,8 @@ export function CuratedLayout({
                     className={[
                       "mousekey",
                       eff ? "mousekey--mapped" : "",
-                      eff?.source === "device" ? "mousekey--devspec" : "",
+                      isInherited ? "mousekey--inherited" : "",
+                      isOverride ? "mousekey--override" : "",
                       isSelected ? "mousekey--sel" : "",
                     ]
                       .filter(Boolean)

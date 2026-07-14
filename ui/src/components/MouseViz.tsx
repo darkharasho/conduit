@@ -1,5 +1,5 @@
 import type { ConfigModel, DeviceIdent } from "../lib/config-model";
-import { getEffectiveAction } from "../lib/config-model";
+import { actionWithEverywhereFallback, getEffectiveAction } from "../lib/config-model";
 import { codeForKeyName } from "../lib/keyboard-layout";
 import { layoutFor } from "../lib/mouse-layouts";
 import { actionLabel } from "../lib/action-labels";
@@ -41,6 +41,7 @@ export function MouseViz({
   onSelectKey,
   dev = null,
 }: Props) {
+  const overlayMode = activeProfile !== "default";
   const curated = dev ? layoutFor(dev as { vendor: number; product: number; class?: string }) : null;
   const declared = dev?.keys && dev.keys.length > 0 ? new Set(dev.keys) : null;
   const has = (key: string) => {
@@ -71,10 +72,17 @@ export function MouseViz({
     (c >= 0x100 && c <= 0x15f) || (c >= 0x2c0 && c <= 0x2e7);
 
   const control = (key: string, label: string, extraClass = "") => {
-    const eff = getEffectiveAction(model, activeProfile, dev, activeLayer, key);
+    const eff = actionWithEverywhereFallback(model, activeProfile, dev, activeLayer, key);
     // Plain words when customized; nothing when the control does its normal job.
     const hint = eff ? actionLabel(eff.action) : "";
     const isSelected = key === selectedKey;
+    const isInherited = overlayMode && eff?.source === "everywhere";
+    const isOverride = overlayMode && eff?.source === "app";
+    // Preserve device-specific styling when not in overlay mode (default profile behavior)
+    const rawEff = !overlayMode
+      ? getEffectiveAction(model, activeProfile, dev, activeLayer, key)
+      : null;
+    const isDevSpec = !overlayMode && rawEff?.source === "device";
     return (
       <button
         key={key}
@@ -83,7 +91,9 @@ export function MouseViz({
           "mousekey",
           extraClass,
           eff ? "mousekey--mapped" : "",
-          eff?.source === "device" ? "mousekey--devspec" : "",
+          isDevSpec ? "mousekey--devspec" : "",
+          isInherited ? "mousekey--inherited" : "",
+          isOverride ? "mousekey--override" : "",
           isSelected ? "mousekey--sel" : "",
         ]
           .filter(Boolean)

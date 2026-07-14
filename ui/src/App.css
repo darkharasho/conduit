@@ -2060,3 +2060,33 @@ img.app-pill__avatar { object-fit: contain; }
 .app-picker__row-name { flex: 1; }
 .app-picker__row-sub { font-size: 11px; color: var(--text-lo); }
 .modal__footer { padding: 8px 16px; border-top: 1px solid var(--border-structural); }
+
+/* ── Per-app overlay — context strip ─────────────────────────────────── */
+.app-strip { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border-structural); font-size: 13px; color: var(--text-mid); }
+.app-strip__desc { color: var(--text-lo); font-size: 12px; line-height: 1.5; }
+.app-strip__controls { display: flex; align-items: center; gap: 10px; }
+.app-strip__switch { display: inline-flex; align-items: center; gap: 8px; background: none; border: 1px solid var(--border-control); border-radius: 999px; padding: 4px 12px; color: var(--text-mid); font: inherit; font-size: 12px; cursor: pointer; }
+.app-strip__switch[aria-checked="true"] { background: var(--teal-bg); border-color: var(--teal-border); color: var(--text-hi); }
+.app-strip__menu { position: relative; }
+.app-strip__menu-btn { background: none; border: none; color: var(--text-dim); font: inherit; font-size: 16px; cursor: pointer; padding: 2px 8px; border-radius: var(--r4); }
+.app-strip__menu-btn:hover { background: var(--bg-key); color: var(--text-mid); }
+.app-strip__menu-list { position: absolute; right: 0; top: 100%; background: var(--bg-key); border: 1px solid var(--border-control); border-radius: var(--r6); min-width: 160px; z-index: 20; padding: 4px 0; }
+.app-strip__menu-item { display: block; width: 100%; text-align: left; padding: 7px 14px; background: none; border: none; color: var(--text-mid); font: inherit; font-size: 13px; cursor: pointer; }
+.app-strip__menu-item:hover { background: var(--bg-body); color: var(--text-hi); }
+.app-strip__confirm { padding: 10px 16px; background: var(--bg-key); border: 1px solid var(--amber-border); border-radius: var(--r6); margin-top: 6px; }
+.app-strip__confirm p { margin: 0 0 10px; font-size: 12px; color: var(--text-lo); }
+.app-strip__confirm-btns { display: flex; gap: 8px; }
+.app-strip__confirm-btns button { font: inherit; font-size: 12px; padding: 4px 12px; border-radius: var(--r4); cursor: pointer; }
+.app-strip__confirm-btns .btn--danger { background: var(--red); border: none; color: #fff; }
+.app-strip__confirm-btns .btn--ghost { background: none; border: 1px solid var(--border-control); color: var(--text-mid); }
+
+/* ── Per-app overlay — inherited / override markers ─────────────────── */
+.illo__marker--inherited .illo__ring { stroke: var(--text-dim); }
+.illo__marker--inherited .illo__dot { fill: var(--text-dim); }
+.illo__marker--override .illo__ring { stroke: var(--teal); }
+.illo__marker--override .illo__dot { fill: var(--teal); }
+.illo__joblabel--inherited { opacity: .45; }
+.mousekey--inherited { opacity: 0.5; }
+.mousekey--override { border-color: var(--teal-border); }
+.keycap--inherited { opacity: 0.5; }
+.keycap--override { border-color: var(--teal-border); }

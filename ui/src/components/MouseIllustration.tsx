@@ -1,5 +1,5 @@
 import type { ConfigModel, DeviceIdent } from "../lib/config-model";
-import { getEffectiveAction } from "../lib/config-model";
+import { actionWithEverywhereFallback, getEffectiveAction } from "../lib/config-model";
 import { actionLabel, keyDisplayName } from "../lib/action-labels";
 
 /** Standard controls the picture knows how to place. */
@@ -47,13 +47,14 @@ export function MouseIllustration({
   keys,
 }: Props) {
   const shown = ILLO_KEYS.filter((k) => keys.includes(k));
+  const overlayMode = activeProfile !== "default";
 
   const selected = selectedKey && shown.includes(selectedKey as (typeof ILLO_KEYS)[number])
     ? selectedKey
     : null;
   const selectedPos = selected ? MARKER_POS[selected] : null;
   const selectedEff = selected
-    ? getEffectiveAction(model, activeProfile, dev, activeLayer, selected)
+    ? actionWithEverywhereFallback(model, activeProfile, dev, activeLayer, selected)
     : null;
 
   // Callout sits left of the mouse, vertically centered on its marker.
@@ -87,11 +88,18 @@ export function MouseIllustration({
 
       {shown.map((key) => {
         const pos = MARKER_POS[key];
-        const eff = getEffectiveAction(model, activeProfile, dev, activeLayer, key);
+        const eff = actionWithEverywhereFallback(model, activeProfile, dev, activeLayer, key);
         const action = eff?.action ?? null;
         const isSel = key === selected;
         const rawLabel = actionLabel(action);
         const jobLabel = rawLabel.length > 14 ? rawLabel.slice(0, 13) + "…" : rawLabel;
+        const isInherited = overlayMode && eff?.source === "everywhere";
+        const isOverride = overlayMode && eff?.source === "app";
+        // Preserve device-specific styling when not in overlay mode (default profile behavior)
+        const rawEff = !overlayMode
+          ? getEffectiveAction(model, activeProfile, dev, activeLayer, key)
+          : null;
+        const isDevSpec = !overlayMode && rawEff?.source === "device";
         return (
           <g
             key={key}
@@ -99,7 +107,9 @@ export function MouseIllustration({
             className={[
               "illo__marker",
               eff ? "illo__marker--mapped" : "",
-              eff?.source === "device" ? "illo__marker--devspec" : "",
+              isDevSpec ? "illo__marker--devspec" : "",
+              isInherited ? "illo__marker--inherited" : "",
+              isOverride ? "illo__marker--override" : "",
               isSel ? "illo__marker--sel" : "",
             ]
               .filter(Boolean)
@@ -117,7 +127,12 @@ export function MouseIllustration({
             <circle className="illo__dot" cx={pos.x} cy={pos.y} r={isSel ? 4 : 3.5} />
             {action && (
               <text
-                className="illo__joblabel"
+                className={[
+                  "illo__joblabel",
+                  isInherited ? "illo__joblabel--inherited" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
                 x={pos.x + 26}
                 y={pos.y + 4}
               >
@@ -137,13 +152,25 @@ export function MouseIllustration({
             x2={162}
             y2={tagY + 21}
           />
-          <rect className="illo__tag" x={8} y={tagY} width={152} height={42} rx={4} />
+          <rect
+            className="illo__tag"
+            x={8}
+            y={tagY}
+            width={152}
+            height={overlayMode && selectedEff?.source === "everywhere" ? 54 : 42}
+            rx={4}
+          />
           <text className="illo__tag-title" x={18} y={tagY + 17}>
             {keyDisplayName(selected)}
           </text>
           <text className="illo__tag-sub" x={18} y={tagY + 33}>
             {actionLabel(selectedEff?.action ?? null)}
           </text>
+          {overlayMode && selectedEff?.source === "everywhere" && (
+            <text className="illo__tag-inherited" x={18} y={tagY + 47}>
+              Same as Everywhere
+            </text>
+          )}
         </g>
       )}
     </svg>

@@ -1,5 +1,5 @@
 import type { ConfigModel, ActionModel, DeviceIdent } from "../lib/config-model";
-import { getEffectiveAction } from "../lib/config-model";
+import { actionWithEverywhereFallback } from "../lib/config-model";
 import { ANSI_LAYOUT, codeForKeyName, keyNameForCode } from "../lib/keyboard-layout";
 import { layoutFor } from "../lib/mouse-layouts";
 import { CuratedLayout } from "./CuratedLayout";
@@ -55,6 +55,7 @@ export function KeyboardViz({
 }: Props) {
   const COLS_PER_U = 4;
 
+  const overlayMode = activeProfile !== "default";
   // Capability filtering: when the device reports its key codes, dim board
   // keys it doesn't declare and list declared codes the board doesn't show.
   const curated = dev ? layoutFor(dev as { vendor: number; product: number; class?: string }) : null;
@@ -100,11 +101,13 @@ export function KeyboardViz({
               const start = colStart;
               colStart += span;
 
-              const eff = getEffectiveAction(model, activeProfile, dev, activeLayer, cap.name);
+              const eff = actionWithEverywhereFallback(model, activeProfile, dev, activeLayer, cap.name);
               const hint = actionHint(eff?.action ?? null);
               const isSelected = cap.name === selectedKey;
               const code = codeForKeyName(cap.name);
               const absent = declared !== null && code !== null && !declared.has(code);
+              const isInherited = overlayMode && eff?.source === "everywhere";
+              const isOverride = overlayMode && eff?.source === "app";
 
               return (
                 <button
@@ -112,7 +115,8 @@ export function KeyboardViz({
                   className={[
                     "keycap",
                     eff ? "keycap--mapped" : "",
-                    eff?.source === "device" ? "keycap--devspec" : "",
+                    isInherited ? "keycap--inherited" : "",
+                    isOverride ? "keycap--override" : "",
                     isSelected ? "keycap--selected" : "",
                     absent ? "keycap--absent" : "",
                   ]

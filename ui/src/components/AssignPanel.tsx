@@ -26,6 +26,13 @@ interface Props {
   /** "Use default": remove the mapping so the button does its normal job */
   onUseDefault: () => Promise<void>;
   onClose: () => void;
+  /**
+   * When set, the panel is in app-context mode: shows an eyebrow "In {label}"
+   * above the key name and changes the first footer hatch to
+   * "Use the Everywhere setting (everywhereLabel)" or "Use the Everywhere setting"
+   * when everywhereLabel is null.
+   */
+  appContext?: { label: string; everywhereLabel: string | null };
 }
 
 type Category = "popular" | CatalogCategory;
@@ -53,6 +60,7 @@ export function AssignPanel({
   onSave,
   onUseDefault,
   onClose,
+  appContext,
 }: Props) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<Category>("popular");
@@ -124,10 +132,18 @@ export function AssignPanel({
     );
   }
 
+  // Footer hatch label depends on whether we're in app context
+  const defaultHatchLabel = appContext
+    ? `Use the Everywhere setting${appContext.everywhereLabel ? ` (${appContext.everywhereLabel})` : ""}`
+    : "Use the button's normal behavior";
+
   return (
     <div className="assign" role="region" aria-label={`Assign ${keyDisplayName(keyName)}`}>
       <div className="assign__head">
         <div>
+          {appContext && (
+            <p className="assign__eyebrow">In {appContext.label}</p>
+          )}
           <h2 className="assign__title">{keyDisplayName(keyName)}</h2>
           <p className="assign__now">
             Right now it does:{" "}
@@ -224,7 +240,7 @@ export function AssignPanel({
           disabled={busy}
           onClick={() => run(onUseDefault)}
         >
-          Use the button's normal behavior
+          {defaultHatchLabel}
         </button>
         <button
           className="assign__disable"
