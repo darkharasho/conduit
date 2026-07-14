@@ -306,7 +306,7 @@ impl Engine {
 
     pub fn set_focus(&mut self, f: &crate::config::FocusFields) {
         let idx = self.cfg.profiles.iter().position(|p| {
-            p.matcher.as_ref().map_or(true, |m| m.matches(f))
+            p.auto_switch && p.matcher.as_ref().map_or(true, |m| m.matches(f))
         }).unwrap_or(self.cfg.default_idx);
         if idx != self.profile_idx {
             self.profile_idx = idx;
@@ -689,5 +689,15 @@ mod tests {
         let s = out.iter().position(|x| *x == release("leftshift", 0)).unwrap();
         let c = out.iter().position(|x| *x == release("leftctrl", 0)).unwrap();
         assert!(t < s && s < c, "reverse order expected, got {out:?}");
+    }
+
+    #[test]
+    fn paused_profile_is_never_auto_selected() {
+        let mut e = engine(
+            "[profile.default.keys]\na = \"b\"\n\n[profile.game]\nmatch = { class = \"steam_app_123\" }\nauto_switch = false\n[profile.game.keys]\na = \"x\"\n",
+        );
+        e.set_focus(&focus("steam_app_123"));
+        // Focus matches game's rule, but switching is paused: default stays live.
+        assert_eq!(e.handle(press("a", 0)), &[press("b", 0)]);
     }
 }

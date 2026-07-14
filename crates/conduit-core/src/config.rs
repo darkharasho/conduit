@@ -74,6 +74,10 @@ impl Matcher {
 pub struct CompiledProfile {
     pub name: String,
     pub matcher: Option<Matcher>,
+    /// When false the profile is "paused" and will never be auto-selected by
+    /// `set_focus`. It can still be activated by an explicit UI selection.
+    /// Defaults to true; set via `auto_switch = false` in the TOML.
+    pub auto_switch: bool,
     pub layers: Vec<LayerMap>,
     pub layer_names: Vec<String>,
     /// Per-device shadow tables, outer-indexed by the global device slot
@@ -173,6 +177,8 @@ struct RawProfile {
     #[serde(rename = "match")]
     r#match: Option<RawMatch>,
     inherit: Option<String>,
+    #[serde(default)]
+    auto_switch: Option<bool>,
     #[serde(default)]
     keys: IndexMap<String, RawAction>,
     #[serde(default)]
@@ -388,10 +394,12 @@ pub fn compile(toml_str: &str) -> Result<CompiledConfig, ConfigError> {
             return Err(ConfigError::NoMatcher(pname.clone()));
         }
         let matcher = build_matcher(raw_profile, pname)?;
+        let auto_switch = raw_profile.auto_switch.unwrap_or(true);
         let (layers, layer_names) = compiled_map.shift_remove(pname).unwrap();
         compiled_profiles.push(CompiledProfile {
             name: pname.clone(),
             matcher,
+            auto_switch,
             layers,
             layer_names,
             device_layers: Vec::new(),
@@ -406,6 +414,7 @@ pub fn compile(toml_str: &str) -> Result<CompiledConfig, ConfigError> {
         compiled_profiles.push(CompiledProfile {
             name: "default".to_string(),
             matcher,
+            auto_switch: true, // default profile is never paused
             layers,
             layer_names,
             device_layers: Vec::new(),
@@ -834,5 +843,17 @@ mod tests {
         // trailing separator produces one real token → not a valid chord
         let e = compile("[profile.default.keys]\na = \"c+\"\n").unwrap_err();
         assert!(matches!(e, ConfigError::BadChord { .. }), "got {e:?}");
+    }
+
+    #[test]
+    fn auto_switch_flag_compiles_and_defaults_true() {
+        let cfg = compile(
+            "[profile.default.keys]\n\n[profile.firefox]\nmatch = { class = \"firefox\" }\nauto_switch = false\n[profile.firefox.keys]\nf1 = \"back\"\n",
+        )
+        .unwrap();
+        let ff = cfg.profiles.iter().find(|p| p.name == "firefox").unwrap();
+        assert!(!ff.auto_switch);
+        let def = cfg.profiles.iter().find(|p| p.name == "default").unwrap();
+        assert!(def.auto_switch);
     }
 }
