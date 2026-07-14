@@ -406,3 +406,126 @@ describe("MappingsScreen — applyWithUndo undo path", () => {
     expect(setConfigCalls[1]).not.toContain("back");
   });
 });
+
+describe("MappingsScreen — applyWithUndo retry-then-undo", () => {
+  /**
+   * Regression for undo-stack corruption on the retry path.
+   *
+   * With a stale [model] closure, `applyWithUndoImpl` captures `prevSnapshot`
+   * at the time the function was DEFINED (the render before the action). If an
+   * external model update (e.g. daemon reconnect) changes the model between
+   * the failure and the retry, the stale closure still uses the old prevSnapshot.
+   * That means Undo after a successful retry restores the WRONG state (it misses
+   * any keys that arrived via the external reload).
+   *
+   * With the `[]`-stable + modelRef fix, prevSnapshot is always read at CALL
+   * TIME from the ref, so it correctly captures whatever the model was
+   * immediately before the retry action ran.
+   *
+   * Scenario:
+   * 1. Initial config: MAPPED_TOML_AB ("a" mapped to "b")
+   * 2. Save "Back" on key "a" → M_back. setConfig REJECTS → model reverts to M0.
+   * 3. External reload (connection event) delivers TOML_WITH_EXTRA which adds
+   *    key "c" → "d". Model becomes M_extra.
+   * 4. Click "Try again" → setConfig now RESOLVES → success toast.
+   * 5. Click "Undo".
+   * 6. CORRECT (ref): Undo setConfig = M_extra (prevSnapshot was M_extra at call time).
+   *    WRONG (stale): Undo setConfig = M0 (prevSnapshot was M0 when fn was defined).
+   *
+   * We assert the undo TOML CONTAINS "c" (i.e. the externally-added key) to
+   * confirm the ref path is used.
+   */
+  it("undo after retry uses current model as prev-snapshot, not the stale one from before the failure", async () => {
+    // TOML_WITH_EXTRA adds key "c" = "d" to the base profile — this simulates
+    // an external update that arrives while the error toast is showing.
+    // NOTE: parser reads from [profile.<name>.keys], NOT [profiles.<name>].
+    const TOML_WITH_EXTRA = '[profile.default.keys]\na = "b"\nc = "d"';
+
+    const setConfigCalls: string[] = [];
+    let setConfigCallCount = 0;
+    let getConfigToml = MAPPED_TOML_AB; // starts as the minimal AB config
+
+    // Capture the "conduit://connected" listener so we can trigger a reload.
+    let connectedListenerCb: ((e: { payload: unknown }) => void) | null = null;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockInvoke.mockImplementation((async (cmd: string, args?: { toml?: string }) => {
+      if (cmd === "get_config") return getConfigToml;
+      if (cmd === "list_devices") return [];
+      if (cmd === "set_config") {
+        setConfigCallCount++;
+        const toml = args?.toml ?? "";
+        if (setConfigCallCount === 1) {
+          // First call fails — simulates daemon rejection
+          throw new ConduitError("config-invalid", "config rejected", "TOML parse error");
+        }
+        setConfigCalls.push(toml);
+        return undefined;
+      }
+      return undefined;
+    }) as any);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockListen.mockImplementation((async (event: string, cb: (e: { payload: unknown }) => void) => {
+      if (event === "conduit://connected") {
+        connectedListenerCb = cb;
+      }
+      return vi.fn();
+    }) as any);
+
+    const { container, findByText } = render(
+      <MappingsScreen railActiveProfile="default" onProfilesChange={() => {}} />,
+    );
+
+    // Wait for initial load
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); });
+
+    // Select key "a" on the keyboard viz
+    const keycap = container.querySelector('button[title="a"]') as HTMLElement;
+    expect(keycap).toBeTruthy();
+    await act(async () => { keycap.click(); });
+
+    // Wait for AssignPanel, then click "Back" — first attempt fails
+    await findByText("Use default");
+    const backBtn = await findByText("Back");
+    await act(async () => { fireEvent.click(backBtn); });
+
+    // Error toast with "Try again" should appear
+    await screen.findByRole("status");
+    const tryAgainBtn = screen.getByRole("button", { name: "Try again" });
+    expect(setConfigCallCount).toBe(1); // only the failing call so far
+
+    // Simulate an external model update (daemon reconnect delivers new TOML).
+    // This changes model from M0 → M_extra (adds key "c" = "d").
+    // The error toast is still showing; "Try again" button is still present.
+    getConfigToml = TOML_WITH_EXTRA;
+    expect(connectedListenerCb).not.toBeNull();
+    await act(async () => {
+      connectedListenerCb!({ payload: null });
+      await Promise.resolve();
+    });
+
+    // Click "Try again" — second attempt succeeds
+    await act(async () => { fireEvent.click(tryAgainBtn); });
+
+    // Success toast with "Undo" should appear
+    const undoBtn = await screen.findByRole("button", { name: "Undo" });
+    expect(setConfigCalls).toHaveLength(1); // one successful set_config
+    expect(setConfigCalls[0]).toContain("back"); // the action A output
+
+    // Click "Undo" — must revert to M_extra (the model that was current when retry ran).
+    // The stale-closure bug would revert to M0 (misses the "c" key from external reload).
+    await act(async () => { fireEvent.click(undoBtn); });
+
+    await waitFor(() => expect(setConfigCalls).toHaveLength(2));
+    // The undo TOML must contain the "c" KEY from the external reload.
+    // Use the full key-value form to avoid matching "c" as a letter inside words
+    // like "[settings]" or "[devices]" that appear in every serialized TOML.
+    // Stale-closure bug: Undo uses M0 (no 'c = "d"' entry).
+    // Ref fix:          Undo uses M_extra ('c = "d"' entry present).
+    expect(setConfigCalls[1]).toContain('c = "d"');
+    // And must NOT contain "back" (the failed action A output)
+    expect(setConfigCalls[1]).not.toContain("back");
+  });
+});

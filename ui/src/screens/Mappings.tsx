@@ -73,6 +73,13 @@ export function MappingsScreen({
     onProfilesChangeRef.current = onProfilesChange;
   }, [onProfilesChange]);
 
+  // Hold model in a ref so applyWithUndoImpl can read the current value at
+  // call time without being in its deps (keeps the callback stable).
+  const modelRef = useRef(model);
+  useEffect(() => {
+    modelRef.current = model;
+  }, [model]);
+
   const loadConfig = useCallback(async () => {
     try {
       const toml = await getConfig();
@@ -173,9 +180,9 @@ export function MappingsScreen({
    */
   const applyWithUndoImpl = useCallback(
     async (updated: ConfigModel, description: string, skipUndoPush = false) => {
-      // Snapshot current model before optimistic update
-      // model is captured via closure — this is safe since we read it once
-      const prevSnapshot = model;
+      // Read the current model via ref at call time — always fresh, avoids
+      // stale-closure undo-stack corruption on the retry path.
+      const prevSnapshot = modelRef.current;
 
       if (prevSnapshot !== null && !skipUndoPush) {
         const frame: UndoFrame = { prev: prevSnapshot, description };
@@ -229,8 +236,7 @@ export function MappingsScreen({
         });
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [model]
+    [] // stable — reads current model via modelRef at call time
   );
 
   const handleSaveAction = async (action: ActionModel): Promise<void> => {
