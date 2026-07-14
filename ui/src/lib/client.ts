@@ -147,17 +147,6 @@ export async function captureNextKey(): Promise<CapturedKey> {
   return call<CapturedKey>("capture_next_key");
 }
 
-export interface SetupResult {
-  daemon: boolean;
-  uinput: boolean;
-  input_group: boolean;
-  config_ok: boolean;
-}
-
-export async function checkSetup(): Promise<SetupResult> {
-  return call<SetupResult>("check_setup");
-}
-
 export interface InstalledApp {
   app_id: string;
   name: string;

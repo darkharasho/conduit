@@ -1,5 +1,6 @@
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
+use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
@@ -23,6 +24,27 @@ pub const UDEV_RULE: &str =
     "KERNEL==\"uinput\", GROUP=\"input\", MODE=\"0660\", OPTIONS+=\"static_node=uinput\"\n";
 
 // ---- Pure functions ----
+
+/// Decide whether the destination binary should be replaced by the source.
+/// `src_meta`  = (size_bytes, mtime) of the freshest non-dest source candidate.
+/// `dest_meta` = None if dest doesn't exist yet; Some((size, mtime)) otherwise.
+/// Returns true when: dest is absent, OR source is newer, OR sizes differ.
+pub fn should_replace_binary(
+    src_meta: (u64, SystemTime),
+    dest_meta: Option<(u64, SystemTime)>,
+) -> bool {
+    match dest_meta {
+        None => true,
+        Some((dest_size, dest_mtime)) => {
+            let (src_size, src_mtime) = src_meta;
+            if src_size != dest_size {
+                return true;
+            }
+            // src newer → replace; src older or equal → keep
+            src_mtime > dest_mtime
+        }
+    }
+}
 
 /// Validate a Unix username against [a-z_][a-z0-9_-]*.
 /// Returns Err(msg) if invalid.
@@ -181,32 +203,55 @@ pub async fn setup_install_service() -> Result<(), ErrorPayload> {
 
     let dest = local_bin.join("conduit-daemon");
 
-    // Copy binary if not already there
-    if !dest.exists() {
-        let src = find_conduit_daemon_binary().ok_or_else(|| {
-            ErrorPayload::new(
-                "internal",
-                "Conduit's engine program is missing from this build",
-                "",
-            )
-        })?;
-        std::fs::copy(&src, &dest).map_err(|e| {
-            ErrorPayload::new(
-                "internal",
-                "failed to copy conduit-daemon to ~/.local/bin",
-                e.to_string(),
-            )
-        })?;
-        // Make it executable
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&dest)
-            .map_err(|e| ErrorPayload::new("internal", "failed to read permissions", e.to_string()))?
-            .permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&dest, perms).map_err(|e| {
-            ErrorPayload::new("internal", "failed to set permissions", e.to_string())
-        })?;
+    // Copy binary using copy-if-stale logic:
+    // Find the freshest source that is NOT the destination itself.
+    let src_opt = find_conduit_daemon_binary_excluding(&dest);
+
+    if let Some(src) = src_opt {
+        // Gather metadata for staleness check
+        let src_meta_raw = std::fs::metadata(&src);
+        let dest_meta_raw = std::fs::metadata(&dest);
+
+        let src_meta: Option<(u64, SystemTime)> = src_meta_raw.ok().and_then(|m| {
+            m.modified().ok().map(|t| (m.len(), t))
+        });
+
+        let dest_meta: Option<(u64, SystemTime)> = dest_meta_raw.ok().and_then(|m| {
+            m.modified().ok().map(|t| (m.len(), t))
+        });
+
+        let do_copy = match src_meta {
+            None => !dest.exists(), // can't read src meta: only copy if dest absent
+            Some(sm) => should_replace_binary(sm, dest_meta),
+        };
+
+        if do_copy {
+            std::fs::copy(&src, &dest).map_err(|e| {
+                ErrorPayload::new(
+                    "internal",
+                    "failed to copy conduit-daemon to ~/.local/bin",
+                    e.to_string(),
+                )
+            })?;
+            // Make it executable
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&dest)
+                .map_err(|e| ErrorPayload::new("internal", "failed to read permissions", e.to_string()))?
+                .permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&dest, perms).map_err(|e| {
+                ErrorPayload::new("internal", "failed to set permissions", e.to_string())
+            })?;
+        }
+    } else if !dest.exists() {
+        // No source other than dest, and dest is also absent — hard error.
+        return Err(ErrorPayload::new(
+            "internal",
+            "Conduit's engine program is missing from this build",
+            "",
+        ));
     }
+    // else: no source other than dest, but dest already exists — keep it as-is.
 
     // Write the unit file
     let unit_dir = home.join(".config").join("systemd").join("user");
@@ -400,6 +445,59 @@ pub async fn collect_report() -> Result<String, ErrorPayload> {
 
 // ---- Helpers ----
 
+/// Like `find_conduit_daemon_binary`, but skips `exclude` so the resolver
+/// doesn't return dest as its own source (which would make every run a no-op).
+fn find_conduit_daemon_binary_excluding(exclude: &std::path::Path) -> Option<PathBuf> {
+    // Collect every candidate from the standard resolver by walking through
+    // the same priority list, skipping the one that equals `exclude`.
+    // We re-implement the search inline to be able to skip mid-list.
+
+    // 1. PATH via `which`
+    if let Ok(output) = std::process::Command::new("which").arg("conduit-daemon").output() {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout);
+            let path = path.trim();
+            if !path.is_empty() {
+                let pb = PathBuf::from(path);
+                if pb != exclude {
+                    return Some(pb);
+                }
+            }
+        }
+    }
+
+    // 2. ~/.local/bin/conduit-daemon — this IS usually the dest; skip if so
+    if let Ok(home) = std::env::var("HOME") {
+        let candidate = PathBuf::from(home).join(".local").join("bin").join("conduit-daemon");
+        if candidate.exists() && candidate != exclude {
+            return Some(candidate);
+        }
+    }
+
+    // 3 & 4. Relative to the app executable (dev mode)
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            let sibling = exe_dir.join("conduit-daemon");
+            if sibling.exists() && sibling != exclude {
+                return Some(sibling);
+            }
+            for profile in &["debug", "release"] {
+                let candidate = exe_dir
+                    .parent()
+                    .and_then(|p| p.parent())
+                    .map(|root| root.join("target").join(profile).join("conduit-daemon"));
+                if let Some(c) = candidate {
+                    if c.exists() && c != exclude {
+                        return Some(c);
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
 fn service_unit_path() -> PathBuf {
     let config_dir = std::env::var("HOME")
         .map(|h| PathBuf::from(h).join(".config"))
@@ -465,5 +563,45 @@ mod tests {
         let r = assemble_report(&[("check", "{}"), ("journal", "line1\nline2")]);
         assert!(r.contains("== check ==\n{}"));
         assert!(r.contains("== journal ==\nline1\nline2"));
+    }
+
+    // ---- should_replace_binary unit tests ----
+
+    fn ts(secs: u64) -> SystemTime {
+        // Build a deterministic SystemTime from UNIX_EPOCH + secs.
+        SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs)
+    }
+
+    #[test]
+    fn replace_binary_dest_absent() {
+        // dest None → always replace
+        assert!(should_replace_binary((1024, ts(100)), None));
+    }
+
+    #[test]
+    fn replace_binary_src_newer() {
+        // src mtime newer than dest → replace
+        assert!(should_replace_binary(
+            (1024, ts(200)),
+            Some((1024, ts(100))),
+        ));
+    }
+
+    #[test]
+    fn replace_binary_same_size_and_mtime() {
+        // identical size + mtime → keep (no-op)
+        assert!(!should_replace_binary(
+            (1024, ts(100)),
+            Some((1024, ts(100))),
+        ));
+    }
+
+    #[test]
+    fn replace_binary_src_older_but_different_size() {
+        // src older but different size → replace
+        assert!(should_replace_binary(
+            (2048, ts(50)),
+            Some((1024, ts(100))),
+        ));
     }
 }

@@ -164,55 +164,6 @@ async fn capture_next_key() -> Result<CapturedKey, ErrorPayload> {
     }
 }
 
-/// Check system setup: if daemon is reachable return all-ok; otherwise
-/// locate the `conduit-daemon` binary, run `--check`, and parse its JSON.
-#[tauri::command]
-async fn check_setup() -> Result<SetupResult, ErrorPayload> {
-    // If the daemon socket connects, we know everything is OK.
-    if UnixStream::connect(socket_path()).is_ok() {
-        return Ok(SetupResult {
-            daemon: true,
-            uinput: true,
-            input_group: true,
-            config_ok: true,
-        });
-    }
-
-    // Daemon not running — find the binary and run --check.
-    let binary = find_conduit_daemon_binary();
-
-    let Some(binary_path) = binary else {
-        return Ok(SetupResult {
-            daemon: false,
-            uinput: false,
-            input_group: false,
-            config_ok: false,
-        });
-    };
-
-    // Run `conduit-daemon --check`
-    let output = std::process::Command::new(&binary_path)
-        .arg("--check")
-        .output()
-        .map_err(|e| ErrorPayload::new("internal", "failed to run conduit-daemon --check", e.to_string()))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let check: DaemonCheckOutput = serde_json::from_str(stdout.trim())
-        .unwrap_or(DaemonCheckOutput {
-            uinput: false,
-            evdev: false,
-            input_group: false,
-            config_ok: false,
-        });
-
-    Ok(SetupResult {
-        daemon: false,
-        uinput: check.uinput,
-        input_group: check.input_group,
-        config_ok: check.config_ok,
-    })
-}
-
 /// Find the `conduit-daemon` binary. Tries:
 /// 1. `which conduit-daemon` (PATH)
 /// 2. `~/.local/bin/conduit-daemon`
@@ -273,23 +224,6 @@ pub(crate) fn find_conduit_daemon_binary() -> Option<std::path::PathBuf> {
 pub struct CapturedKey {
     pub name: String,
     pub code: u16,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct SetupResult {
-    pub daemon: bool,
-    pub uinput: bool,
-    pub input_group: bool,
-    pub config_ok: bool,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-struct DaemonCheckOutput {
-    uinput: bool,
-    #[serde(default)]
-    evdev: bool,
-    input_group: bool,
-    config_ok: bool,
 }
 
 // ---- Long-lived subscription threads ----
@@ -431,7 +365,6 @@ pub fn run() {
             suspend,
             resume,
             capture_next_key,
-            check_setup,
             list_installed_apps,
             setup::setup_status,
             setup::setup_install_service,

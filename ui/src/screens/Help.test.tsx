@@ -15,7 +15,6 @@ vi.mock("../lib/client", () => ({
   onStatus: vi.fn().mockResolvedValue(() => {}),
   onConnection: vi.fn().mockResolvedValue([() => {}, () => {}]),
   onKeyEvent: vi.fn().mockResolvedValue(() => {}),
-  checkSetup: vi.fn().mockResolvedValue({ daemon: true, uinput: true, input_group: true, config_ok: true }),
 }));
 
 describe("HelpScreen", () => {

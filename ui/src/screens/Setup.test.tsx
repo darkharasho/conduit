@@ -187,6 +187,21 @@ it("recovery shows error when restartEngine fails and still shows Copy report", 
   expect(screen.getByRole("button", { name: "Copy report for a bug" })).toBeInTheDocument();
 });
 
+it("shows permission-denied title when fix-permissions is cancelled via pkexec", async () => {
+  // uinput step is the active attention step; service is running
+  mockSetupStatus.mockResolvedValue({ ...ALL_BROKEN, service_running: true });
+  mockSetupFixPermissions.mockRejectedValue(
+    new ConduitError("permission-denied", "You closed the password prompt", "pkexec status 126")
+  );
+  render(<SetupScreen />);
+  fireEvent.click(await screen.findByRole("button", { name: "Allow" }));
+  // presentError("permission-denied") → "Conduit doesn't have permission to do that"
+  expect(await screen.findByText("Conduit doesn't have permission to do that")).toBeInTheDocument();
+  // raw technical detail must never leak into the UI
+  expect(screen.queryByText(/pkexec/)).toBeNull();
+  expect(screen.queryByText(/126/)).toBeNull();
+});
+
 // A failing fake-timer assertion must not leak fake timers into later tests.
 afterEach(() => {
   vi.useRealTimers();
