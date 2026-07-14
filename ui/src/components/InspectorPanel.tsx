@@ -182,10 +182,9 @@ export function InspectorPanel({
           ))}
         </div>
         <button
-          className="modal__close"
+          className="modal__close inspector__close"
           onClick={onClose}
           aria-label="Close inspector"
-          style={{ marginLeft: "auto" }}
         >
           ×
         </button>
@@ -197,10 +196,9 @@ export function InspectorPanel({
           <div className="inspector__field">
             <label className="inspector__field-label">Key</label>
             <button
-              className={`inspector__field-val${remapCapturing ? " inspector__field-val--capture" : ""}`}
+              className={`inspector__field-val inspector__capture-btn${remapCapturing ? " inspector__field-val--capture" : ""}`}
               onClick={captureRemapKey}
               disabled={remapCapturing}
-              style={{ textAlign: "left", minWidth: 120 }}
             >
               {remapCapturing ? "press a key…" : remapKey || "—"}
             </button>
@@ -212,10 +210,9 @@ export function InspectorPanel({
             <div className="inspector__field">
               <label className="inspector__field-label">Tap</label>
               <button
-                className={`inspector__field-val${tapCapturing ? " inspector__field-val--capture" : ""}`}
+                className={`inspector__field-val inspector__capture-btn--sm${tapCapturing ? " inspector__field-val--capture" : ""}`}
                 onClick={captureTapKey}
                 disabled={tapCapturing}
-                style={{ textAlign: "left", minWidth: 100 }}
               >
                 {tapCapturing ? "press a key…" : tapKey || "—"}
               </button>
@@ -236,10 +233,9 @@ export function InspectorPanel({
                 </select>
               ) : (
                 <button
-                  className={`inspector__field-val${holdCapturing ? " inspector__field-val--capture" : ""}`}
+                  className={`inspector__field-val inspector__capture-btn--sm${holdCapturing ? " inspector__field-val--capture" : ""}`}
                   onClick={captureHoldKey}
                   disabled={holdCapturing}
-                  style={{ textAlign: "left", minWidth: 100 }}
                 >
                   {holdCapturing ? "press a key…" : holdKey || "—"}
                 </button>
@@ -252,7 +248,7 @@ export function InspectorPanel({
                 type="checkbox"
                 checked={holdIsLayer}
                 onChange={(e) => setHoldIsLayer(e.target.checked)}
-                style={{ accentColor: "var(--teal)", width: 14, height: 14, marginTop: 6 }}
+                className="inspector__layer-checkbox"
               />
             </div>
 
@@ -260,12 +256,11 @@ export function InspectorPanel({
               <label className="inspector__field-label">Timeout ms</label>
               <input
                 type="number"
-                className="inspector__field-val"
+                className="inspector__field-val inspector__timeout-input"
                 placeholder="default"
                 value={timeoutMs}
                 onChange={(e) => setTimeoutMs(e.target.value)}
                 min={1}
-                style={{ width: 90 }}
               />
             </div>
           </>
@@ -288,7 +283,7 @@ export function InspectorPanel({
         )}
 
         {(kind === "disabled" || kind === "passthrough") && (
-          <span className="muted" style={{ fontSize: 12, alignSelf: "center" }}>
+          <span className="muted inspector__kind-hint">
             {kind === "disabled"
               ? "Key will be swallowed (no output)."
               : "Key passes through unchanged."}

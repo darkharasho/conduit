@@ -168,14 +168,14 @@ export function DevicesScreen() {
             <div className="confirm-panel__title">Change keyboard grab mode</div>
             <div className="confirm-panel__body">
               Currently <strong>all keyboards</strong> are grabbed automatically
-              (<span className="mono" style={{ fontSize: 11, color: "var(--text-lo)" }}>grab_all_keyboards = true</span>).
+              (<span className="mono devices__config-key">grab_all_keyboards = true</span>).
               Ungrabbing <strong>{pendingKbToggle.device.name}</strong> will
               switch to an explicit list. Only the currently-grabbed keyboards
               (minus this one) will be grabbed going forward.
             </div>
             {pendingKbToggle.currentlyGrabbed.filter((n) => n !== pendingKbToggle.device.name).length > 0 && (
               <>
-                <div className="muted" style={{ fontSize: 11 }}>Keyboards that will remain grabbed:</div>
+                <div className="muted devices__remain-label">Keyboards that will remain grabbed:</div>
                 <ul className="confirm-panel__list">
                   {pendingKbToggle.currentlyGrabbed
                     .filter((n) => n !== pendingKbToggle.device.name)
@@ -203,7 +203,7 @@ export function DevicesScreen() {
         )}
 
         {grabs && (
-          <label className="grab-toggle" style={{ fontSize: 12, display: "block", margin: "8px 0" }}>
+          <label className="grab-toggle devices__grab-all-label">
             <input
               type="checkbox"
               checked={grabs.grabAllMice}
@@ -222,7 +222,7 @@ export function DevicesScreen() {
         )}
 
         {devices.length === 0 && !loadError ? (
-          <p className="muted" style={{ fontSize: 12 }}>No devices found.</p>
+          <p className="muted devices__empty">No devices found.</p>
         ) : (
           <table className="devices-table">
             <thead>

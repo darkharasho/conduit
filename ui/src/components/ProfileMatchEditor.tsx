@@ -60,14 +60,13 @@ export function ProfileMatchEditor({ model, profileName, onApply }: Props) {
       <div className="inspector__field-label">
         Match — link “{profileName}” to an application
       </div>
-      <div style={{ display: "flex", gap: 10 }}>
+      <div className="match-editor__fields">
         {FIELDS.map((k) => (
-          <label key={k} className="inspector__field-label" style={{ flex: 1 }}>
+          <label key={k} className="inspector__field-label match-editor__field">
             {k}
             <input
               aria-label={k}
-              className="new-layer-input"
-              style={{ width: "100%", marginTop: 4 }}
+              className="new-layer-input match-editor__input"
               type="text"
               value={fields[k]}
               placeholder={k === "title" ? "regex, e.g. .*YouTube.*" : ""}
@@ -76,7 +75,7 @@ export function ProfileMatchEditor({ model, profileName, onApply }: Props) {
           </label>
         ))}
       </div>
-      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+      <div className="match-editor__actions">
         <button className="btn btn--primary" onClick={apply}>
           Apply match
         </button>

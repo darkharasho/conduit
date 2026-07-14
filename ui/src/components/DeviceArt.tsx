@@ -16,7 +16,7 @@ function MouseBody({ children }: { children?: React.ReactNode }) {
       <path d="M48 4 L 48 22" stroke="var(--bg-body)" strokeWidth="2" />
       <path d="M17 34 C 30 40 42 41 48 41 C 54 41 66 40 79 34" stroke="var(--bg-body)" strokeWidth="2" fill="none" />
       <rect x="42" y="16" width="12" height="24" rx="6" fill="var(--bg-body)" />
-      <rect x="44" y="18" width="8" height="20" rx="4" fill="var(--bg-key)" stroke="var(--teal)" strokeWidth="1" />
+      <rect x="44" y="18" width="8" height="20" rx="4" fill="var(--bg-key)" stroke="var(--accent)" strokeWidth="1" />
       {children}
     </>
   );
@@ -36,10 +36,10 @@ export function DeviceArt({ archetype, width = 96 }: Props) {
     >
       {archetype === "gaming-mouse" && (
         <MouseBody>
-          <path d="M19 50 L 26 48 L 27 56 L 20 58 Z" fill="var(--bg-body)" stroke="var(--teal)" strokeWidth="1" />
-          <path d="M20 61 L 27 59 L 28 67 L 21 69 Z" fill="var(--bg-body)" stroke="var(--teal)" strokeWidth="1" opacity=".7" />
-          <path d="M32 104 L 48 96 L 64 104" stroke="var(--teal)" strokeWidth="2" fill="none" strokeLinecap="round" opacity=".8" />
-          <path d="M35 112 L 48 105 L 61 112" stroke="var(--teal)" strokeWidth="2" fill="none" strokeLinecap="round" opacity=".4" />
+          <path d="M19 50 L 26 48 L 27 56 L 20 58 Z" fill="var(--bg-body)" stroke="var(--accent)" strokeWidth="1" />
+          <path d="M20 61 L 27 59 L 28 67 L 21 69 Z" fill="var(--bg-body)" stroke="var(--accent)" strokeWidth="1" opacity=".7" />
+          <path d="M32 104 L 48 96 L 64 104" stroke="var(--accent)" strokeWidth="2" fill="none" strokeLinecap="round" opacity=".8" />
+          <path d="M35 112 L 48 105 L 61 112" stroke="var(--accent)" strokeWidth="2" fill="none" strokeLinecap="round" opacity=".4" />
         </MouseBody>
       )}
       {archetype === "mmo-mouse" && (
@@ -51,7 +51,7 @@ export function DeviceArt({ archetype, width = 96 }: Props) {
                 key={`${r}-${c}`}
                 x={14 + c * 7} y={48 + r * 10}
                 width="6" height="8" rx="1.5"
-                fill="var(--bg-body)" stroke="var(--teal)" strokeWidth="0.8" opacity=".8"
+                fill="var(--bg-body)" stroke="var(--accent)" strokeWidth="0.8" opacity=".8"
               />
             )),
           )}
@@ -75,7 +75,7 @@ export function DeviceArt({ archetype, width = 96 }: Props) {
               />
             )),
           )}
-          <path d="M9 54 L 111 54" stroke="var(--teal)" strokeWidth="1.5" strokeLinecap="round" opacity=".5" />
+          <path d="M9 54 L 111 54" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" opacity=".5" />
         </>
       )}
     </svg>

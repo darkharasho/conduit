@@ -54,7 +54,7 @@ export function StatusScreen() {
                 <dd className="status-panel__dd">
                   <span className={`status-dot ${connected ? "status-dot--ok" : "status-dot--err"}`} />
                   {connected ? "connected" : "unreachable"}
-                  <span className="muted" style={{ fontSize: 11, marginLeft: 8 }}>{status.version}</span>
+                  <span className="muted status__version">{status.version}</span>
                 </dd>
               </div>
 
@@ -70,7 +70,7 @@ export function StatusScreen() {
               {/* Active profile */}
               <div className="status-panel__row">
                 <dt className="status-panel__dt">Profile</dt>
-                <dd className="status-panel__dd" style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
+                <dd className="status-panel__dd status__profile-val">
                   {status.active_profile}
                 </dd>
               </div>
@@ -84,7 +84,7 @@ export function StatusScreen() {
                       <span key={l} className="status-layer-chip">{l}</span>
                     ))
                   ) : (
-                    <span className="muted" style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>base</span>
+                    <span className="muted status__base-layer">base</span>
                   )}
                 </dd>
               </div>
@@ -94,10 +94,10 @@ export function StatusScreen() {
                 <div className="status-panel__row">
                   <dt className="status-panel__dt">Focus</dt>
                   <dd className="status-panel__dd">
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-hi)" }}>
+                    <span className="status__focus-process">
                       {status.focus.process}
                     </span>
-                    <span className="muted" style={{ fontSize: 11 }}> — {status.focus.title}</span>
+                    <span className="muted status__focus-title"> — {status.focus.title}</span>
                   </dd>
                 </div>
               )}
@@ -106,11 +106,11 @@ export function StatusScreen() {
               <div className="status-panel__row">
                 <dt className="status-panel__dt">Grabbed devices</dt>
                 <dd className="status-panel__dd">
-                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-hi)" }}>
+                  <span className="status__grab-count">
                     {status.grabbed_devices.length}
                   </span>
                   {status.grabbed_devices.length > 0 && (
-                    <span className="muted" style={{ fontSize: 11, fontFamily: "var(--font-mono)" }}>
+                    <span className="muted status__grab-list">
                       {" "}({status.grabbed_devices.join(", ")})
                     </span>
                   )}
@@ -121,7 +121,7 @@ export function StatusScreen() {
         )}
 
         {!status && !error && (
-          <span className="muted" style={{ fontSize: 12 }}>Loading status…</span>
+          <span className="muted status__loading">Loading status…</span>
         )}
       </div>
     </div>

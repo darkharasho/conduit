@@ -110,7 +110,7 @@ export function KeyTesterScreen() {
         title="Key Tester"
         sub={profile ? ` — ${profile}` : undefined}
       >
-        <span className="muted" style={{ fontSize: 11 }}>hover to pause scroll</span>
+        <span className="muted tester__scroll-hint">hover to pause scroll</span>
         <button className="btn" onClick={handleClear} aria-label="Clear key tester history">
           Clear
         </button>
@@ -126,13 +126,12 @@ export function KeyTesterScreen() {
         {/* Event list */}
         <div
           ref={listRef}
-          className="tester-list"
+          className="tester-list tester-list--flex"
           onMouseEnter={() => { hoverRef.current = true; }}
           onMouseLeave={() => { hoverRef.current = false; }}
           role="log"
           aria-label="Key event log"
           aria-live="polite"
-          style={{ flex: 1 }}
         >
           {displayRows.length === 0 ? (
             <div className="tester-empty">Press any key to start recording…</div>
