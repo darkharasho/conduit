@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { SetupStatus } from "../lib/client";
 import { SetupScreen } from "./Setup";
 
@@ -187,6 +187,11 @@ it("recovery shows error when restartEngine fails and still shows Copy report", 
   expect(screen.getByRole("button", { name: "Copy report for a bug" })).toBeInTheDocument();
 });
 
+// A failing fake-timer assertion must not leak fake timers into later tests.
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 it("re-checks on interval and on window focus", async () => {
   vi.useFakeTimers();
   mockSetupStatus.mockResolvedValue(ALL_BROKEN);
@@ -210,17 +215,17 @@ it("skips overlapping re-checks via in-flight guard", async () => {
   mockSetupStatus.mockReturnValue(statusPromise);
   render(<SetupScreen />);
   await act(async () => { await Promise.resolve(); });
-  const initial = mockSetupStatus.mock.calls.length;
-  // Advance timers twice without resolving the promise
+  // The mount recheck is guarded and still in flight (hanging promise).
+  expect(mockSetupStatus.mock.calls.length).toBe(1);
+  // Two ticks while in flight: both skipped by the guard.
   await act(async () => { vi.advanceTimersByTime(5100); });
   await act(async () => { vi.advanceTimersByTime(5100); });
-  // Should only have one additional call (the second timer fired but was skipped)
-  expect(mockSetupStatus.mock.calls.length).toBe(initial + 1);
-  // Resolve the first call
-  const resolver = resolveSetupStatus;
-  if (resolver) resolver(ALL_BROKEN);
+  expect(mockSetupStatus.mock.calls.length).toBe(1);
+  // Resolve the mount call; the guard clears and the next tick fetches again.
+  resolveSetupStatus!(ALL_BROKEN);
   await act(async () => { await Promise.resolve(); });
-  vi.useRealTimers();
+  await act(async () => { vi.advanceTimersByTime(5100); });
+  expect(mockSetupStatus.mock.calls.length).toBe(2);
 });
 
 it("recovery shows success state when daemon becomes connected", async () => {
