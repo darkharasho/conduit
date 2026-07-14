@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DeviceInfo } from "./client";
 import { parseConfigToml } from "./config-model";
 import {
+  appCountForDevice,
   appProfileCount,
   deviceOverrideCount,
   groupPhysicalDevices,
@@ -113,5 +114,66 @@ mouse4 = "copy"
     expect(rem).toHaveLength(1);
     expect(rem[0].name).toBe("Remembered device");
     expect(rem[0].name).not.toContain("1234");
+  });
+});
+
+describe("phase 6 nits", () => {
+  it("item 9: appCountForDevice counts non-default profiles with base keys or device section for phys", () => {
+    const model = parseConfigToml(`
+[profile.default.keys]
+capslock = "esc"
+
+[profile.firefox]
+match = { class = "firefox" }
+[profile.firefox.keys]
+f1 = "back"
+
+[profile.steam]
+match = { class = "steam" }
+[profile.steam.keys]
+
+[profile.default.device."046d:c24a/G600".keys]
+mouse4 = "copy"
+`);
+    const g502 = groupPhysicalDevices([
+      node({ vendor: 0x046d, product: 0x4099, class: "mouse", name: "G502 X", path: "/dev/input/event0" }),
+    ])[0];
+
+    // firefox has 1 base key → counts; steam has 0 base keys and no device section → doesn't count
+    expect(appCountForDevice(model, g502)).toBe(1);
+  });
+
+  it("item 9: appCountForDevice counts profiles with a device section matching phys", () => {
+    const model = parseConfigToml(`
+[profile.default.keys]
+
+[profile.gaming]
+match = { class = "steam" }
+[profile.gaming.keys]
+
+[profile.gaming.device."046d:c24a/G600".keys]
+mouse4 = "macro1"
+`);
+    const g600 = groupPhysicalDevices([
+      node({ vendor: 0x046d, product: 0xc24a, class: "mouse", name: "G600", id: "046d:c24a/G600", path: "/dev/input/event0" }),
+    ])[0];
+
+    // gaming has no base keys but has device section matching g600
+    expect(appCountForDevice(model, g600)).toBe(1);
+  });
+
+  it("item 10: uncurated selector with 'keyboard' in name gets archetype 'keyboard'", () => {
+    const result = resolveDevice(0x9999, 0xaaaa, "Acme Wireless Keyboard", "mouse");
+    expect(result.archetype).toBe("keyboard");
+  });
+
+  it("item 10: uncurated selector without 'keyboard' in name keeps mouse archetype", () => {
+    const result = resolveDevice(0x9999, 0xbbbb, "Acme Gaming Mouse", "mouse");
+    expect(result.archetype).toBe("mouse");
+  });
+
+  it("item 10: 'keyboard' match is case-insensitive", () => {
+    expect(resolveDevice(0x9999, 0xcccc, "KEYBOARD Pro", "mouse").archetype).toBe("keyboard");
+    expect(resolveDevice(0x9999, 0xdddd, "USB KeyBoard", "touchpad").archetype).toBe("keyboard");
   });
 });

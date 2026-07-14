@@ -55,7 +55,12 @@ export function resolveDevice(
 ): { name: string; archetype: Archetype } {
   const curated = CURATED[physKey(vendor, product)];
   if (curated) return { name: curated.name, archetype: curated.archetype };
-  const archetype: Archetype = cls === "keyboard" ? "keyboard" : "mouse";
+  // Uncurated: derive archetype from device class first; when class is not
+  // "keyboard" but the selector name contains "keyboard" (case-insensitive),
+  // treat it as a keyboard (e.g. remembered selectors with name-only format).
+  const isKeyboardByClass = cls === "keyboard";
+  const isKeyboardByName = /keyboard/i.test(fallbackName);
+  const archetype: Archetype = (isKeyboardByClass || isKeyboardByName) ? "keyboard" : "mouse";
   return { name: fallbackName, archetype };
 }
 
@@ -113,6 +118,26 @@ export function appProfileCount(model: ConfigModel): number {
   return model.profiles.filter(
     (p) => p.name !== "default" && Object.keys(p.keys ?? {}).length > 0,
   ).length;
+}
+
+/**
+ * Number of non-default profiles that are customized for a specific physical device:
+ * profiles with ≥1 base-layer key mapping OR a device section whose selector matches
+ * one of phys.nodes.
+ */
+export function appCountForDevice(model: ConfigModel, phys: PhysicalDevice): number {
+  let count = 0;
+  for (const profile of model.profiles) {
+    if (profile.name === "default") continue;
+    const hasBaseKeys = Object.keys(profile.keys ?? {}).length > 0;
+    const hasDeviceSection = Object.keys(profile.device ?? {}).some((sel) =>
+      phys.nodes.some((n) => selectorMatches(sel, n))
+    );
+    if (hasBaseKeys || hasDeviceSection) {
+      count++;
+    }
+  }
+  return count;
 }
 
 export function deviceOverrideCount(

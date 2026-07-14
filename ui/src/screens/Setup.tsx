@@ -73,6 +73,7 @@ export function SetupScreen({ onReady, variant = "firstrun" }: { onReady?: () =>
   const [copyConfirm, setCopyConfirm] = useState(false);
   const [restartError, setRestartError] = useState<string | null>(null);
   const recheckInFlightRef = useRef(false);
+  const intervalIdRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const recheck = async () => {
     try {
@@ -93,17 +94,42 @@ export function SetupScreen({ onReady, variant = "firstrun" }: { onReady?: () =>
     }
   };
 
+  // copyConfirm resets when status changes (e.g. after daemon reconnects)
+  useEffect(() => {
+    setCopyConfirm(false);
+  }, [status]);
+
   useEffect(() => {
     // Initial load goes through the guard too, so the first 5s tick can't
     // stack a concurrent fetch on a slow start.
     guardedRecheck();
     const id = setInterval(guardedRecheck, 5000);
+    intervalIdRef.current = id;
     window.addEventListener("focus", guardedRecheck);
     return () => {
       clearInterval(id);
+      intervalIdRef.current = null;
       window.removeEventListener("focus", guardedRecheck);
     };
   }, []);
+
+  // Derived: all setup steps are done
+  const allStepsDone = status
+    ? STEP_DEFS.every((d) => d.isDone(status))
+    : false;
+
+  // allSettled: once true, polling stops (focus listener stays — harmless)
+  const allSettled =
+    (variant === "firstrun" && !!status?.daemon_connected && allStepsDone) ||
+    (variant === "recovery" && !!status?.daemon_connected);
+
+  useEffect(() => {
+    if (!allSettled) return;
+    if (intervalIdRef.current !== null) {
+      clearInterval(intervalIdRef.current);
+      intervalIdRef.current = null;
+    }
+  }, [allSettled]);
 
   const handleRestartEngine = async () => {
     setRestartError(null);
@@ -178,6 +204,15 @@ export function SetupScreen({ onReady, variant = "firstrun" }: { onReady?: () =>
   }
 
   const allDone = status?.daemon_connected ?? false;
+
+  // Recovery variant: status not yet loaded → show a minimal spinner, never the first-run hero
+  if (variant === "recovery" && status === null) {
+    return (
+      <div className="setup setup__loading">
+        <span className="setup__spinner" aria-label="Loading…" />
+      </div>
+    );
+  }
 
   // Recovery variant: service was installed but daemon isn't connected → single card
   if (variant === "recovery" && status !== null && status.service_installed && !status.daemon_connected) {
@@ -259,14 +294,14 @@ export function SetupScreen({ onReady, variant = "firstrun" }: { onReady?: () =>
                   <span className="setup__step-error">{ui.errorText}</span>
                 )}
 
-                {/* Relogin notice for evdev */}
-                {def.key === "evdev" && ui.reloginNeeded && !def.isDone(status!) && (
+                {/* Relogin notice for uinput or evdev when pending a relogin */}
+                {(def.key === "uinput" || def.key === "evdev") && ui.reloginNeeded && !def.isDone(status!) && (
                   <span className="setup__step-relogin">
                     Log out and back in, then come back — your settings will be waiting.
                   </span>
                 )}
 
-                {/* Action buttons — shown only in attention state */}
+                {/* Action buttons — shown only in attention state; suppressed while relogin pending */}
                 {state === "attention" && def.key === "service" && (
                   <button
                     className="btn setup__step-btn"
@@ -275,7 +310,7 @@ export function SetupScreen({ onReady, variant = "firstrun" }: { onReady?: () =>
                     Set it up
                   </button>
                 )}
-                {state === "attention" && def.key === "uinput" && (
+                {state === "attention" && def.key === "uinput" && !ui.reloginNeeded && (
                   <button
                     className="btn setup__step-btn"
                     onClick={() => handleFixPermissions("uinput")}
@@ -283,7 +318,7 @@ export function SetupScreen({ onReady, variant = "firstrun" }: { onReady?: () =>
                     Allow
                   </button>
                 )}
-                {state === "attention" && def.key === "evdev" && (
+                {state === "attention" && def.key === "evdev" && !ui.reloginNeeded && (
                   <button
                     className="btn setup__step-btn"
                     onClick={() => handleFixPermissions("evdev")}

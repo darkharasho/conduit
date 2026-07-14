@@ -862,3 +862,43 @@ match = { class = "firefox" }
     expect(nowEl?.textContent).not.toContain("Normal job");
   });
 });
+
+describe("phase 6 nits", () => {
+  it("item 4: handleUseDefault no-ops when key has no mapping (setConfig NOT called)", async () => {
+    // Config with no mapping on key "q" — clicking "Use default" on "q" should be a no-op
+    const EMPTY_TOML = '[profile.default.keys]\n';
+    const setConfigCalls: string[] = [];
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockInvoke.mockImplementation((async (cmd: string, args?: { toml?: string }) => {
+      if (cmd === "get_config") return EMPTY_TOML;
+      if (cmd === "list_devices") return [];
+      if (cmd === "list_installed_apps") return [];
+      if (cmd === "set_config") {
+        setConfigCalls.push(args?.toml ?? "");
+        return undefined;
+      }
+      return undefined;
+    }) as any);
+    mockListen.mockResolvedValue(vi.fn());
+
+    const { container } = render(
+      <MappingsScreen railActiveProfile="default" onProfilesChange={() => {}} />
+    );
+
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); });
+
+    // Click key "q" — it has no mapping
+    const keycapQ = container.querySelector('button[title="q"]') as HTMLElement;
+    expect(keycapQ).toBeTruthy();
+    await act(async () => { keycapQ.click(); });
+
+    // Click "Use the button's normal behavior" (handleUseDefault)
+    const useDefaultBtn = await screen.findByText("Use the button's normal behavior");
+    await act(async () => { useDefaultBtn.click(); });
+
+    // setConfig must NOT have been called (no mapping existed, so no-op)
+    expect(setConfigCalls).toHaveLength(0);
+  });
+});

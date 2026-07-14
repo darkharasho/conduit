@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { listWindows, listInstalledApps } from "../lib/client";
 import type { FocusInfo, InstalledApp } from "../lib/client";
 import type { ConfigModel } from "../lib/config-model";
+import { matchInstalledApp } from "../lib/app-registry";
 
 interface AppPickerProps {
   model: ConfigModel;
@@ -84,8 +85,14 @@ export function AppPicker({ model, onPick, onClose }: AppPickerProps) {
     return true;
   });
 
+  function windowDisplayName(win: FocusInfo): string {
+    return matchInstalledApp(win.class, installed)?.name ?? win.class;
+  }
+
   function handleWindowPick(win: FocusInfo) {
-    onPick(win.class, win.class);
+    const matchedApp = matchInstalledApp(win.class, installed);
+    const name = matchedApp?.name ?? win.class;
+    onPick(name, win.class);
   }
 
   function handleInstalledPick(app: InstalledApp) {
@@ -122,17 +129,20 @@ export function AppPicker({ model, onPick, onClose }: AppPickerProps) {
           {!loading && filteredOpen.length > 0 && (
             <div className="app-picker__section">
               <div className="app-picker__section-label">Open now</div>
-              {filteredOpen.map((win) => (
-                <button
-                  key={win.class}
-                  className="app-picker__row"
-                  onClick={() => handleWindowPick(win)}
-                  title={win.title}
-                >
-                  <span className="app-pill__avatar">{win.class.charAt(0).toUpperCase()}</span>
-                  <span className="app-picker__row-name">{win.class}</span>
-                </button>
-              ))}
+              {filteredOpen.map((win) => {
+                const displayName = windowDisplayName(win);
+                return (
+                  <button
+                    key={win.class}
+                    className="app-picker__row"
+                    onClick={() => handleWindowPick(win)}
+                    title={win.title}
+                  >
+                    <span className="app-pill__avatar">{displayName.charAt(0).toUpperCase()}</span>
+                    <span className="app-picker__row-name">{displayName}</span>
+                  </button>
+                );
+              })}
             </div>
           )}
 

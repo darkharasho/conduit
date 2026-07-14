@@ -3,7 +3,7 @@ import { DeviceArt } from "../components/DeviceArt";
 import { ConduitError, listDevices, onStatus, type DeviceInfo } from "../lib/client";
 import type { ConfigModel } from "../lib/config-model";
 import {
-  appProfileCount,
+  appCountForDevice,
   deviceOverrideCount,
   groupPhysicalDevices,
   rememberedDevices,
@@ -20,7 +20,7 @@ interface Props {
 function investmentLine(model: ConfigModel | null, phys: PhysicalDevice): string {
   if (!model) return "";
   const overrides = deviceOverrideCount(model, phys);
-  const apps = appProfileCount(model);
+  const apps = appCountForDevice(model, phys);
   const parts: string[] = [];
   if (overrides > 0) parts.push(`${overrides} button${overrides === 1 ? "" : "s"} set just for this device`);
   if (apps > 0) parts.push(`custom in ${apps} app${apps === 1 ? "" : "s"}`);

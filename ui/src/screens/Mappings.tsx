@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { getConfig, setConfig, onConnection, onKeyEvent, listDevices, listInstalledApps } from "../lib/client";
 import type { DeviceInfo, ConduitError, InstalledApp } from "../lib/client";
 import {
@@ -71,6 +71,8 @@ export function MappingsScreen({
   const [newLayerPrompt, setNewLayerPrompt] = useState(false);
   const [newLayerName, setNewLayerName] = useState("");
   const [toast, setToast] = useState<ToastData | null>(null);
+  // Monotonically increasing id so each new toast gets a unique stable identity.
+  const toastIdRef = useRef(0);
 
   // App picker state
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -249,6 +251,7 @@ export function MappingsScreen({
 
         // Success toast with Undo
         setToast({
+          id: ++toastIdRef.current,
           kind: "success",
           message: description,
           actionLabel: "Undo",
@@ -278,6 +281,7 @@ export function MappingsScreen({
         const presentation = presentError(conduitErr);
 
         setToast({
+          id: ++toastIdRef.current,
           kind: "error",
           message: presentation.title,
           actionLabel: "Try again",
@@ -332,11 +336,13 @@ export function MappingsScreen({
   // "Use default": remove whatever mapping is currently in effect for this
   // key — the device override when one shadows the profile, else the
   // profile mapping — so the button reverts to its normal job.
+  // No-op (no toast, no setConfig) when the key has no mapping anywhere.
   const handleUseDefault = async () => {
     if (!model || !editingKey) return;
     const eff = getEffectiveAction(model, railActiveProfile, activeDev, activeLayer, editingKey);
-    const pills = appPills(model, installedApps);
-    const activePill = pills.find(p => p.profileName === railActiveProfile);
+    // Nothing mapped anywhere — skip entirely (don't write config, don't toast)
+    if (!eff) return;
+    const activePill = memoedPills.find(p => p.profileName === railActiveProfile);
     const isAppContext = activePill && activePill.kind !== "everywhere";
 
     if (eff?.source === "device" && activeDev) {
@@ -387,6 +393,13 @@ export function MappingsScreen({
     setNewLayerPrompt(false);
   };
 
+  // Memoized app pills — recomputed only when model or installedApps change.
+  // All four JSX consumers below receive this single derived value.
+  const memoedPills = useMemo(
+    () => (model ? appPills(model, installedApps) : []),
+    [model, installedApps]
+  );
+
   const layers = model ? listLayers(model, railActiveProfile) : ["base"];
   const effective = model && editingKey
     ? getEffectiveAction(model, railActiveProfile, activeDev, activeLayer, editingKey)
@@ -401,8 +414,7 @@ export function MappingsScreen({
   const displayAction = (() => {
     if (!model || !editingKey) return null;
     if (railActiveProfile === "default") return currentAction;
-    const pills = appPills(model, installedApps);
-    const activePill = pills.find(p => p.profileName === railActiveProfile);
+    const activePill = memoedPills.find(p => p.profileName === railActiveProfile);
     if (!activePill || activePill.kind === "everywhere") return currentAction;
     const withFallback = actionWithEverywhereFallback(model, railActiveProfile, activeDev, activeLayer, editingKey);
     return withFallback?.action ?? null;
@@ -459,7 +471,7 @@ export function MappingsScreen({
           <>
             {/* App pills bar */}
             <AppPillsBar
-              pills={appPills(model, installedApps)}
+              pills={memoedPills}
               active={railActiveProfile}
               onSelect={(name) => onSelectProfile?.(name)}
               onAdd={() => setPickerOpen(true)}
@@ -467,8 +479,7 @@ export function MappingsScreen({
 
             {/* App context strip — shown when an app/advanced profile is active */}
             {(() => {
-              const pills = appPills(model, installedApps);
-              const activePill = pills.find(p => p.profileName === railActiveProfile);
+              const activePill = memoedPills.find(p => p.profileName === railActiveProfile);
               if (!activePill || activePill.kind === "everywhere") return null;
               return (
                 <AppContextStrip
@@ -616,8 +627,7 @@ export function MappingsScreen({
                   onUseDefault={handleUseDefault}
                   onClose={() => setEditingKey(null)}
                   appContext={(() => {
-                    const pills = appPills(model, installedApps);
-                    const activePill = pills.find(p => p.profileName === railActiveProfile);
+                    const activePill = memoedPills.find(p => p.profileName === railActiveProfile);
                     if (!activePill || activePill.kind === "everywhere") return undefined;
                     const everywhereEff = actionWithEverywhereFallback(model, "default", activeDev, activeLayer, editingKey);
                     return {

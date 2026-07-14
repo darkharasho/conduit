@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { KeyboardViz } from "./KeyboardViz";
+import { KeyboardViz, chordLabel } from "./KeyboardViz";
 import { parseConfigToml } from "../lib/config-model";
 
 const model = parseConfigToml('[profile.default.keys]\na = "b"');
@@ -106,5 +106,41 @@ describe("KeyboardViz curated layouts", () => {
     expect(getByText("G20")).toBeTruthy();
     // G9 chip maps the factory-default numpad key.
     expect(container.querySelector('[data-key="kp1"]')).not.toBeNull();
+  });
+});
+
+describe("phase 6 nits", () => {
+  it("item 1: chord leftctrl+c keycap hint renders 'Ctrl +' not 'leftct'", () => {
+    // chordLabel(["leftctrl","c"]): "Ctrl" + " +" + "c" = "Ctrl +c" → slice(0,6) = "Ctrl +"
+    // The old approach ["leftctrl","c"].join("+").slice(0,6) = "leftct"
+    expect(chordLabel(["leftctrl", "c"])).toBe("Ctrl +");
+    // Ensure it does NOT use the raw key name approach
+    expect(chordLabel(["leftctrl", "c"])).not.toBe("leftct");
+  });
+
+  it("item 1: chordLabel maps leftshift to Shift and truncates at 6 chars", () => {
+    const result = chordLabel(["leftshift", "a"]);
+    // "Shift +a" → slice(0,6) = "Shift "
+    expect(result).toBe("Shift ");
+    // original approach would give "leftsh"
+    expect(result).not.toContain("leftsh");
+  });
+
+  it("item 1: keycap for chord action renders chordLabel output, not raw join", () => {
+    const model = parseConfigToml(
+      '[profile.default.keys]\na = "leftctrl+c"'
+    );
+    const { container } = render(
+      <KeyboardViz
+        model={model}
+        activeProfile="default"
+        activeLayer="base"
+        selectedKey={null}
+        onSelectKey={() => {}}
+      />
+    );
+    const capA = container.querySelector('button[title="a"]');
+    // Should NOT contain the raw "leftct" substring
+    expect(capA?.textContent).not.toContain("leftct");
   });
 });

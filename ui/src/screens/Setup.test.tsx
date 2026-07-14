@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SetupStatus } from "../lib/client";
 import { SetupScreen } from "./Setup";
 
@@ -253,4 +253,47 @@ it("recovery shows success state when daemon becomes connected", async () => {
   await waitFor(() => expect(screen.queryByText("Conduit's engine stopped")).not.toBeInTheDocument());
   expect(screen.getByText("Everything's running again.")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Start using Conduit" })).toBeInTheDocument();
+});
+
+describe("phase 6 nits", () => {
+  it("item 5: after ALL_GREEN status, advancing 15s adds no more setupStatus calls", async () => {
+    vi.useFakeTimers();
+    // First call returns ALL_GREEN immediately
+    mockSetupStatus.mockResolvedValue(ALL_GREEN);
+    render(<SetupScreen />);
+    // Flush microtasks so the initial recheck resolves
+    await act(async () => { await Promise.resolve(); });
+    const callsAfterResolve = mockSetupStatus.mock.calls.length;
+    // Advance 15s — polling should have stopped because allSettled=true
+    await act(async () => { vi.advanceTimersByTime(15000); });
+    // Give any enqueued microtasks a chance to run
+    await act(async () => { await Promise.resolve(); });
+    // No additional calls should have been made after the initial one
+    expect(mockSetupStatus.mock.calls.length).toBe(callsAfterResolve);
+  });
+
+  it("item 6: recovery variant with unresolved status shows spinner not first-run hero", async () => {
+    // Never resolves → status stays null
+    mockSetupStatus.mockReturnValue(new Promise(() => {}));
+    render(<SetupScreen variant="recovery" />);
+    // The first-run hero must NOT appear
+    expect(screen.queryByText("Let's get Conduit running")).toBeNull();
+    // The loading class must be present
+    expect(document.querySelector(".setup__loading")).not.toBeNull();
+  });
+
+  it("item 8: when relogin_needed, both uinput and evdev show relogin note and Allow is suppressed", async () => {
+    // Service running, uinput broken → uinput is the attention step
+    mockSetupStatus.mockResolvedValue({ ...ALL_BROKEN, service_running: true });
+    mockSetupFixPermissions.mockResolvedValue({ relogin_needed: true });
+    render(<SetupScreen />);
+    // Click Allow for uinput (the first attention step when service is running)
+    fireEvent.click(await screen.findByRole("button", { name: "Allow" }));
+    // Relogin note should appear
+    await waitFor(() =>
+      expect(screen.getAllByText("Log out and back in, then come back — your settings will be waiting.").length).toBeGreaterThan(0)
+    );
+    // Allow button should be suppressed (no more Allow buttons visible)
+    expect(screen.queryByRole("button", { name: "Allow" })).toBeNull();
+  });
 });

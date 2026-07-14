@@ -293,7 +293,7 @@ export function InspectorPanel({
         <button
           className="inspector__apply"
           onClick={handleSave}
-          disabled={saving}
+          disabled={saving || kind === "chord"}
         >
           {saving ? "Saving…" : "Apply"}
         </button>

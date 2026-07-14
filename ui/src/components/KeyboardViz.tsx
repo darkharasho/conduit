@@ -16,6 +16,25 @@ interface Props {
 }
 
 /**
+ * Human-readable short label for a chord action, truncated to 6 chars.
+ * Maps common modifiers to compact friendly names before joining with "+".
+ * Examples: ["leftctrl","c"] → "Ctrl +c" → sliced to "Ctrl +"
+ */
+const CHORD_MOD_NAMES: Record<string, string> = {
+  leftctrl: "Ctrl", rightctrl: "Ctrl",
+  leftshift: "Shift", rightshift: "Shift",
+  leftalt: "Alt", rightalt: "Alt",
+  leftmeta: "Super", rightmeta: "Super",
+};
+
+export function chordLabel(keys: string[]): string {
+  return keys
+    .map((k) => CHORD_MOD_NAMES[k.toLowerCase()] ?? k)
+    .join(" +")
+    .slice(0, 6);
+}
+
+/**
  * Short mono action hint for the key cap second line.
  * Matches mockup examples: `esc⁄ctrl`, `hold:shift`, `hold:nav`, `L:nav`, `∅`
  */
@@ -35,7 +54,7 @@ export function actionHint(action: ActionModel | null): string {
       return `${tap}⁄${hold}`;
     }
     case "chord":
-      return action.keys.join("+").slice(0, 6);
+      return chordLabel(action.keys);
     case "layer_toggle":
       return `L:${action.layer.slice(0, 4)}`;
     case "disabled":

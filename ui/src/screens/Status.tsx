@@ -1,20 +1,25 @@
 import { useEffect, useState } from "react";
-import { getStatus, onStatus, onConnection } from "../lib/client";
+import { getStatus, onStatus, onConnection, ConduitError } from "../lib/client";
 import type { Status as StatusData } from "../lib/client";
 import { SetupScreen } from "./Setup";
 import { Toolbar } from "../components/Toolbar";
+import { presentError } from "../lib/error-messages";
 
 export function StatusScreen() {
   const [status, setStatus] = useState<StatusData | null>(null);
   const [connected, setConnected] = useState<boolean | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [errorTitle, setErrorTitle] = useState<string | null>(null);
 
   useEffect(() => {
     getStatus()
-      .then((s) => { setStatus(s); setConnected(true); setError(null); })
-      .catch((err) => { setConnected(false); setError(String(err)); });
+      .then((s) => { setStatus(s); setConnected(true); setErrorTitle(null); })
+      .catch((err) => {
+        setConnected(false);
+        const ce = err instanceof ConduitError ? err : new ConduitError("unknown", String(err));
+        setErrorTitle(presentError(ce).title);
+      });
 
-    const unlistenStatus = onStatus((s) => { setStatus(s); setConnected(true); });
+    const unlistenStatus = onStatus((s) => { setStatus(s); setConnected(true); setErrorTitle(null); });
     const unlistenConn = onConnection((c) => {
       setConnected(c);
       if (c) getStatus().then(setStatus).catch(() => {});
@@ -34,7 +39,7 @@ export function StatusScreen() {
         {/* Connection banner */}
         {connected === false && (
           <div className="banner--error" role="alert">
-            Daemon unreachable{error ? ` — ${error}` : ""}
+            {errorTitle ?? "Conduit's engine isn't running"}
           </div>
         )}
         {connected === true && !status && (
@@ -120,7 +125,7 @@ export function StatusScreen() {
           </div>
         )}
 
-        {!status && !error && (
+        {!status && !errorTitle && (
           <span className="muted status__loading">Loading status…</span>
         )}
       </div>
