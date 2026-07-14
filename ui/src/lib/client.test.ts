@@ -24,8 +24,9 @@ import {
   onKeyEvent,
   onConnection,
   ConduitError,
+  listInstalledApps,
 } from "./client";
-import type { Status, DeviceInfo, WireEvent } from "./client";
+import type { Status, DeviceInfo, WireEvent, InstalledApp } from "./client";
 
 const mockInvoke = vi.mocked(invoke);
 const mockListen = vi.mocked(listen);
@@ -252,5 +253,33 @@ describe("typed errors", () => {
   it("setConfig resolves with the applied version", async () => {
     mockInvoke.mockResolvedValueOnce(42);
     await expect(setConfig("[profile.default.keys]\n")).resolves.toBe(42);
+  });
+});
+
+describe("listInstalledApps", () => {
+  it("calls invoke('list_installed_apps') and passes through the array", async () => {
+    const apps: InstalledApp[] = [
+      {
+        app_id: "org.mozilla.firefox",
+        name: "Firefox",
+        wm_class: "firefox",
+        categories: ["Network", "WebBrowser"],
+        icon: "data:image/png;base64,abc123",
+      },
+      {
+        app_id: "org.gnome.Nautilus",
+        name: "Files",
+        wm_class: null,
+        categories: ["System", "FileManager"],
+        icon: null,
+      },
+    ];
+    mockInvoke.mockResolvedValueOnce(apps);
+    const result = await listInstalledApps();
+    expect(mockInvoke).toHaveBeenCalledWith("list_installed_apps");
+    expect(result).toEqual(apps);
+    expect(result).toHaveLength(2);
+    expect(result[0].app_id).toBe("org.mozilla.firefox");
+    expect(result[1].icon).toBeNull();
   });
 });

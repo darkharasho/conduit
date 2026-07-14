@@ -547,6 +547,7 @@ dependencies = [
 name = "conduit-ui"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "conduit-proto",
  "libc",
  "serde",

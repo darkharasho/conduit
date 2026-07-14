@@ -158,6 +158,18 @@ export async function checkSetup(): Promise<SetupResult> {
   return call<SetupResult>("check_setup");
 }
 
+export interface InstalledApp {
+  app_id: string;
+  name: string;
+  wm_class: string | null;
+  categories: string[];
+  icon: string | null;
+}
+
+export async function listInstalledApps(): Promise<InstalledApp[]> {
+  return call<InstalledApp[]>("list_installed_apps");
+}
+
 // ---- Subscription event listeners ----
 
 /** Subscribe to live Status push events from the daemon */

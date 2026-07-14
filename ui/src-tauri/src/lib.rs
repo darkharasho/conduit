@@ -8,6 +8,8 @@ use conduit_proto::{Push, Request, Response};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
+mod apps;
+
 // ---- Re-export proto types as Tauri-serializable types ----
 // (conduit_proto already derives Serialize/Deserialize)
 
@@ -380,6 +382,30 @@ fn subscribe_loop(
     }
 }
 
+// ---- Desktop app listing ----
+
+#[tauri::command]
+async fn list_installed_apps() -> Result<Vec<apps::InstalledApp>, ErrorPayload> {
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or_else(|| ErrorPayload::new("internal", "HOME not set", ""))?;
+
+    let dirs = vec![
+        PathBuf::from("/usr/share/applications"),
+        home.join(".local/share/applications"),
+        PathBuf::from("/var/lib/flatpak/exports/share/applications"),
+    ];
+
+    let mut installed = apps::list_installed_apps_impl(&dirs);
+
+    // Resolve icons after parsing (parse returns raw Icon= value)
+    for app in &mut installed {
+        app.icon = app.icon.as_deref().and_then(apps::resolve_icon);
+    }
+
+    Ok(installed)
+}
+
 // ---- App entry point ----
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -402,6 +428,7 @@ pub fn run() {
             resume,
             capture_next_key,
             check_setup,
+            list_installed_apps,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
