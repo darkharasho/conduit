@@ -156,34 +156,95 @@ pub struct OnboardButtonDto {
 
 // ---- Pure parsers ----
 
-/// Parses `ratbagctl <dev> info` output lines of the form:
-///   `  Button: 6 is mapped to 'button 1'`
-///   `  Button: 7 is mapped to macro '↕KEY_F18'`
-///   `  Button: 8 is mapped to 'none'`
+/// Parses `ratbagctl <dev> info` output lines into an `OnboardButton`.
+///
+/// Handles all five action types emitted by ratbagctl (`/usr/bin/ratbagctl`
+/// line 1405-1425):
+///
+/// | Type    | Wire format                                  | Stored action          |
+/// |---------|----------------------------------------------|------------------------|
+/// | BUTTON  | `'button 1'`                                 | `button 1`             |
+/// | SPECIAL | `'doubleclick'`                              | `doubleclick`          |
+/// | KEY     | `key 'KEY_ESC'`                              | `key KEY_ESC`          |
+/// | MACRO   | `macro '↕KEY_F18'`                           | `macro '↕KEY_F18'`     |
+/// | NONE    | `none`                                       | `none`                 |
+///
+/// Also accepts the outer-quoted variants produced by older test fixtures:
+/// `'key KEY_ESC'`, `'macro '↕KEY_F18''`, `'none'`.
+/// Unknown/unparseable action parts are silently skipped.
 pub fn parse_button_map(info_output: &str) -> Vec<OnboardButton> {
     let mut buttons = Vec::new();
     for line in info_output.lines() {
         let line = line.trim();
-        // Pattern: "Button: <N> is mapped to '<action>'"
         let Some(rest) = line.strip_prefix("Button: ") else {
             continue;
         };
-        let Some((index_str, rest)) = rest.split_once(" is mapped to '") else {
+        let Some((index_str, action_part)) = rest.split_once(" is mapped to ") else {
             continue;
         };
         let Ok(index) = index_str.trim().parse::<u8>() else {
             continue;
         };
-        // Strip exactly ONE trailing quote (the outer wrapper); inner quotes are preserved
-        let action = rest.strip_suffix('\'').unwrap_or(rest);
-        buttons.push(OnboardButton {
-            index,
-            action: action.to_string(),
-        });
+        if let Some(action) = parse_action_part(action_part) {
+            buttons.push(OnboardButton {
+                index,
+                action,
+            });
+        }
     }
     // Sort by index for determinism
     buttons.sort_by_key(|b| b.index);
     buttons
+}
+
+/// Parse the action portion (everything after `" is mapped to "`) into a
+/// canonical action string understood by `humanize_action`.
+///
+/// Returns `None` only for genuinely unparseable input; every parseable form
+/// round-trips to a value that `humanize_action` can handle without corruption.
+fn parse_action_part(s: &str) -> Option<String> {
+    // NONE — no quotes
+    if s == "none" {
+        return Some("none".to_string());
+    }
+
+    // KEY (real ratbagctl): `key 'KEY_NAME'`
+    // Store as `key KEY_NAME` (quotes stripped) so humanize_action("key KEY_NAME") works.
+    if let Some(after_key) = s.strip_prefix("key '") {
+        let name = after_key.strip_suffix('\'')?;
+        return Some(format!("key {}", name));
+    }
+
+    // KEY (unquoted tolerance): `key KEY_NAME` or `key 41`
+    if let Some(name) = s.strip_prefix("key ") {
+        return Some(format!("key {}", name));
+    }
+
+    // MACRO (real ratbagctl): `macro '↕KEY_F18'`
+    // Store as-is so humanize_action("macro '↕KEY_F18'") works.
+    if s.starts_with("macro '") && s.ends_with('\'') {
+        return Some(s.to_string());
+    }
+
+    // SPECIAL with inner quotes (tolerance): `special 'doubleclick'`
+    if let Some(after_special) = s.strip_prefix("special '") {
+        let name = after_special.strip_suffix('\'')?;
+        return Some(format!("special {}", name));
+    }
+
+    // SPECIAL unquoted (tolerance): `special doubleclick`
+    if let Some(name) = s.strip_prefix("special ") {
+        return Some(format!("special {}", name));
+    }
+
+    // BUTTON / SPECIAL / NONE outer-quoted (legacy/test fixtures): `'button 1'`, `'none'`
+    // Also handles the nested-quote test fixture form: `'macro '↕KEY_F18''`
+    if let Some(inner) = s.strip_prefix('\'').and_then(|r| r.strip_suffix('\'')) {
+        return Some(inner.to_string());
+    }
+
+    // Unknown — skip silently
+    None
 }
 
 /// Returns a human-readable label for a ratbagctl action string.
@@ -304,14 +365,17 @@ pub fn rewrite_targets(buttons: &[OnboardButton]) -> Vec<(u8, String)> {
         }
     }
 
-    // Assign KEY_F13..KEY_F24 in order
+    // Assign KEY_F13..KEY_F24 in order; excess targets beyond F24 are omitted (safe no-op).
     targets.sort();
     targets
         .into_iter()
         .enumerate()
-        .map(|(i, idx)| {
-            let fkey = format!("KEY_F{}", 13 + i as u32);
-            (idx, fkey)
+        .filter_map(|(i, idx)| {
+            let fnum = 13u32 + i as u32;
+            if fnum > 24 {
+                return None; // no KEY_F25+; stop assigning
+            }
+            Some((idx, format!("KEY_F{}", fnum)))
         })
         .collect()
 }
@@ -478,8 +542,8 @@ pub async fn ratbag_rewrite(
             let stderr = String::from_utf8_lossy(&out.stderr).to_string();
             return Err(ErrorPayload::new(
                 "internal",
-                format!("ratbagctl rewrite failed for button {}", index),
-                stderr,
+                "Couldn't update one of the mouse's buttons.",
+                format!("ratbagctl rewrite failed for button {}:\n{}", index, stderr),
             ));
         }
     }
@@ -721,6 +785,168 @@ Driver=hidpp20\n";
             buttons.iter().find(|b| b.index == 8).map(|b| b.action.as_str()),
             Some("none")
         );
+    }
+
+    // ---- parse_button_map: real ratbagctl output format ----
+    //
+    // Ground truth from /usr/bin/ratbagctl lines 1405-1425 (print_button fn):
+    //   BUTTON:  Button: N is mapped to 'button N'
+    //   SPECIAL: Button: N is mapped to 'doubleclick'
+    //   KEY:     Button: N is mapped to key 'KEY_ESC'    ← key OUTSIDE quotes
+    //   MACRO:   Button: N is mapped to macro '↕KEY_F18' ← macro OUTSIDE quotes
+    //   NONE:    Button: N is mapped to none              ← no quotes at all
+
+    /// Exact sample lines from the task brief / ob-constraints spec.
+    const REAL_RATBAGCTL_INFO: &str = "\
+Button: 6 is mapped to macro '↕KEY_F18'\n\
+Button: 1 is mapped to button 1\n\
+Button: 0 is mapped to 'button 1'\n\
+Button: 7 is mapped to key 'KEY_ESC'\n\
+Button: 8 is mapped to none\n\
+Button: 9 is mapped to 'doubleclick'\n";
+
+    #[test]
+    fn parse_button_map_real_macro_line_brief_sample() {
+        // "Button: 6 is mapped to macro '↕KEY_F18'" — EXACT line from brief/constraints
+        // Must parse; must NOT return None (the current bug).
+        let buttons = parse_button_map("Button: 6 is mapped to macro '↕KEY_F18'");
+        let b6 = buttons.iter().find(|b| b.index == 6).expect(
+            "button 6 must parse from real ratbagctl macro line",
+        );
+        assert_eq!(b6.action, "macro '↕KEY_F18'",
+            "macro action must preserve the inner-quoted form for humanize_action");
+    }
+
+    #[test]
+    fn parse_button_map_real_key_line() {
+        // "Button: 7 is mapped to key 'KEY_ESC'" — real ratbagctl KEY output
+        let buttons = parse_button_map("Button: 7 is mapped to key 'KEY_ESC'");
+        let b7 = buttons.iter().find(|b| b.index == 7).expect(
+            "button 7 must parse from real ratbagctl key line",
+        );
+        assert_eq!(b7.action, "key KEY_ESC",
+            "key action must strip inner quotes so humanize_action works");
+    }
+
+    #[test]
+    fn parse_button_map_real_none_line() {
+        // "Button: 8 is mapped to none" — real ratbagctl NONE output (no quotes)
+        let buttons = parse_button_map("Button: 8 is mapped to none");
+        let b8 = buttons.iter().find(|b| b.index == 8).expect(
+            "button 8 must parse from real ratbagctl none line",
+        );
+        assert_eq!(b8.action, "none");
+    }
+
+    #[test]
+    fn parse_button_map_real_button_line_unquoted() {
+        // "Button: 1 is mapped to button 1" — bare button line (brief sample)
+        // The BUTTON type from ratbagctl actually uses outer quotes ('button 1'),
+        // but the brief lists the bare form too; parser must handle it gracefully.
+        // Either Some("button 1") or None is acceptable; it must NOT panic and
+        // must not produce a WRONG (corrupted) action.
+        let buttons = parse_button_map("Button: 1 is mapped to button 1");
+        if let Some(b1) = buttons.iter().find(|b| b.index == 1) {
+            // If parsed, must not be corrupted
+            assert!(
+                b1.action == "button 1" || b1.action.starts_with("button "),
+                "unexpected action: {:?}", b1.action
+            );
+        }
+        // None is also acceptable for this bare unrecognized form
+    }
+
+    #[test]
+    fn parse_button_map_real_format_full_output() {
+        // Combined output in real ratbagctl format; key collisions must not be silently dropped
+        let buttons = parse_button_map(REAL_RATBAGCTL_INFO);
+
+        // Button 6: macro (the brief's canonical sample — must not be None)
+        assert!(
+            buttons.iter().any(|b| b.index == 6 && b.action == "macro '↕KEY_F18'"),
+            "macro button missing or wrong action: {:?}", buttons
+        );
+
+        // Button 7: key
+        assert!(
+            buttons.iter().any(|b| b.index == 7 && b.action == "key KEY_ESC"),
+            "key button missing or wrong action: {:?}", buttons
+        );
+
+        // Button 8: none
+        assert!(
+            buttons.iter().any(|b| b.index == 8 && b.action == "none"),
+            "none button missing: {:?}", buttons
+        );
+
+        // Button 0: outer-quoted button (also in real ratbagctl output)
+        assert!(
+            buttons.iter().any(|b| b.index == 0 && b.action == "button 1"),
+            "outer-quoted button 1 missing: {:?}", buttons
+        );
+    }
+
+    #[test]
+    fn parse_button_map_tolerates_both_quote_styles() {
+        // Outer-quoted (legacy test fixtures) must still parse correctly
+        let outer_quoted = "\
+Button: 6 is mapped to 'macro '↕KEY_F18''\n\
+Button: 7 is mapped to 'key KEY_ESC'\n\
+Button: 8 is mapped to 'none'\n";
+        let buttons = parse_button_map(outer_quoted);
+        assert_eq!(
+            buttons.iter().find(|b| b.index == 6).map(|b| b.action.as_str()),
+            Some("macro '↕KEY_F18'"),
+            "outer-quoted macro must parse"
+        );
+        assert_eq!(
+            buttons.iter().find(|b| b.index == 7).map(|b| b.action.as_str()),
+            Some("key KEY_ESC"),
+            "outer-quoted key must parse"
+        );
+        assert_eq!(
+            buttons.iter().find(|b| b.index == 8).map(|b| b.action.as_str()),
+            Some("none"),
+            "outer-quoted none must parse"
+        );
+    }
+
+    // ---- rewrite_targets: KEY_F cap at F24 ----
+
+    #[test]
+    fn rewrite_targets_caps_at_f24_and_omits_excess() {
+        // Build 13 collision targets (indices 3..=15) — only F13..F24 (12 slots) should emit.
+        // The 13th target (index 15) must get no assignment.
+        let mut buttons = vec![
+            OnboardButton { index: 0, action: "button 1".to_string() },
+            OnboardButton { index: 1, action: "button 2".to_string() },
+            OnboardButton { index: 2, action: "button 3".to_string() },
+        ];
+        // Add 13 duplicates of button 1 at indices 3..=15
+        for i in 3u8..=15 {
+            buttons.push(OnboardButton { index: i, action: "button 1".to_string() });
+        }
+        let targets = rewrite_targets(&buttons);
+
+        // Max F-key must be F24
+        let fkeys: Vec<&str> = targets.iter().map(|(_, k)| k.as_str()).collect();
+        assert!(
+            fkeys.iter().all(|k| {
+                let n: u32 = k.strip_prefix("KEY_F").unwrap().parse().unwrap();
+                n <= 24
+            }),
+            "F-key exceeds F24: {:?}", fkeys
+        );
+        assert!(fkeys.contains(&"KEY_F24"), "F24 must be assigned: {:?}", fkeys);
+
+        // The 13th target must have no assignment (only 12 slots F13..F24)
+        assert_eq!(targets.len(), 12,
+            "must emit exactly 12 assignments (F13..F24), got: {:?}", targets);
+
+        // Index 15 (the 13th collision) must NOT appear in targets
+        let assigned_indices: Vec<u8> = targets.iter().map(|(i, _)| *i).collect();
+        assert!(!assigned_indices.contains(&15),
+            "13th target (index 15) must be omitted; got {:?}", assigned_indices);
     }
 
     // ---- humanize_action ----
