@@ -6,7 +6,6 @@ import type { ConfigModel } from "../lib/config-model";
 interface AppPickerProps {
   model: ConfigModel;
   onPick: (name: string, matchClass: string) => void;
-  onAdvanced: () => void;
   onClose: () => void;
 }
 
@@ -35,7 +34,7 @@ function existingClasses(model: ConfigModel): Set<string> {
   return classes;
 }
 
-export function AppPicker({ model, onPick, onAdvanced, onClose }: AppPickerProps) {
+export function AppPicker({ model, onPick, onClose }: AppPickerProps) {
   const [windows, setWindows] = useState<FocusInfo[]>([]);
   const [installed, setInstalled] = useState<InstalledApp[]>([]);
   const [search, setSearch] = useState("");
@@ -76,6 +75,9 @@ export function AppPicker({ model, onPick, onAdvanced, onClose }: AppPickerProps
     : openNow;
 
   const filteredInstalled = installed.filter((app) => {
+    // Exclude apps whose pick class already has a pill
+    const pickClass = (app.wm_class ?? app.app_id).toLowerCase();
+    if (taken.has(pickClass)) return false;
     if (query && !app.name.toLowerCase().includes(query) && !app.app_id.toLowerCase().includes(query)) {
       return false;
     }
@@ -157,14 +159,6 @@ export function AppPicker({ model, onPick, onAdvanced, onClose }: AppPickerProps
           {!loading && filteredOpen.length === 0 && filteredInstalled.length === 0 && (
             <div className="muted">No apps found.</div>
           )}
-        </div>
-        <div className="modal__footer">
-          <button
-            className="assign-adv-link"
-            onClick={onAdvanced}
-          >
-            Advanced: match a specific window…
-          </button>
         </div>
       </div>
     </div>

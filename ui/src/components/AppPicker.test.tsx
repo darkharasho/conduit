@@ -25,19 +25,37 @@ beforeEach(() => {
 
 describe("AppPicker", () => {
   it("lists open windows minus already-added apps, plus installed apps", async () => {
-    render(<AppPicker model={MODEL} onPick={() => {}} onAdvanced={() => {}} onClose={() => {}} />);
+    render(<AppPicker model={MODEL} onPick={() => {}} onClose={() => {}} />);
     await waitFor(() => expect(screen.getByText("Steam")).toBeInTheDocument());
     expect(screen.queryByText(/firefox/i)).toBeNull();     // already has a pill
     expect(screen.getByText("Dolphin")).toBeInTheDocument();
   });
 
-  it("picks an app and offers the advanced link", async () => {
+  it("picks an installed app", async () => {
     const onPick = vi.fn();
-    const onAdvanced = vi.fn();
-    render(<AppPicker model={MODEL} onPick={onPick} onAdvanced={onAdvanced} onClose={() => {}} />);
+    render(<AppPicker model={MODEL} onPick={onPick} onClose={() => {}} />);
     fireEvent.click(await screen.findByText("Dolphin"));
     expect(onPick).toHaveBeenCalledWith("Dolphin", "dolphin");
-    fireEvent.click(screen.getByRole("button", { name: "Advanced: match a specific window…" }));
-    expect(onAdvanced).toHaveBeenCalled();
+  });
+
+  it("does not render the advanced link", async () => {
+    render(<AppPicker model={MODEL} onPick={() => {}} onClose={() => {}} />);
+    await waitFor(() => expect(screen.getByText("Steam")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: /Advanced/i })).toBeNull();
+  });
+
+  it("installed app whose wm_class matches an existing pill is excluded while non-matching apps remain", async () => {
+    // Firefox already has a pill (class = "firefox"). The installed-apps list
+    // includes Firefox (wm_class "firefox") and Dolphin (wm_class "dolphin").
+    // Firefox must be absent; Dolphin must still appear.
+    mockListInstalledApps.mockResolvedValue([
+      { app_id: "org.mozilla.firefox", name: "Firefox", wm_class: "firefox", categories: ["WebBrowser"], icon: null },
+      { app_id: "org.kde.dolphin", name: "Dolphin", wm_class: "dolphin", categories: [], icon: null },
+    ]);
+    render(<AppPicker model={MODEL} onPick={() => {}} onClose={() => {}} />);
+    await waitFor(() => expect(screen.getByText("Dolphin")).toBeInTheDocument());
+    // Firefox installed row must not render — it already has a pill
+    expect(screen.queryByText("Firefox")).toBeNull();
+    expect(screen.getByText("Dolphin")).toBeInTheDocument();
   });
 });

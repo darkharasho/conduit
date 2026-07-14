@@ -371,6 +371,20 @@ export function MappingsScreen({
   const currentAction = effective?.action ?? null;
   const isDeviceOverride = effective?.source === "device";
 
+  // In app context (non-default profile), compute the display action using
+  // actionWithEverywhereFallback so the panel header shows the inherited action
+  // when the key is not set in the app profile (instead of "Normal job").
+  // tomlEcho and all save/remove paths continue to use currentAction / effective.
+  const displayAction = (() => {
+    if (!model || !editingKey) return null;
+    if (railActiveProfile === "default") return currentAction;
+    const pills = appPills(model, installedApps);
+    const activePill = pills.find(p => p.profileName === railActiveProfile);
+    if (!activePill || activePill.kind === "everywhere") return currentAction;
+    const withFallback = actionWithEverywhereFallback(model, railActiveProfile, activeDev, activeLayer, editingKey);
+    return withFallback?.action ?? null;
+  })();
+
   // TOML echo for inspector footer
   const tomlEcho = model && editingKey && currentAction
     ? actionToTomlLine(railActiveProfile, activeLayer, editingKey, currentAction)
@@ -573,7 +587,7 @@ export function MappingsScreen({
                   model={model}
                   activeProfile={railActiveProfile}
                   activeLayer={activeLayer}
-                  currentAction={currentAction}
+                  currentAction={displayAction}
                   tomlEcho={tomlEcho}
                   onSave={handleSaveAction}
                   onUseDefault={handleUseDefault}
@@ -598,7 +612,7 @@ export function MappingsScreen({
                   profileName={railActiveProfile}
                   onApply={async (match) => {
                     const updated = setProfileMatch(model, railActiveProfile, match);
-                    await applyWithUndoImpl(updated, "Profile match updated");
+                    await applyWithUndoImpl(updated, "App match updated");
                   }}
                 />
                 <div className="inspector">
@@ -627,10 +641,6 @@ export function MappingsScreen({
         <AppPicker
           model={model}
           onPick={handlePickApp}
-          onAdvanced={() => {
-            setPickerOpen(false);
-            // Advanced match flow: future expansion
-          }}
           onClose={() => setPickerOpen(false)}
         />
       )}

@@ -702,4 +702,39 @@ match = { class = "firefox" }
     const inheritedEl = container.querySelector('[class*="--inherited"]');
     expect(inheritedEl).not.toBeNull();
   });
+
+  it("AssignPanel header shows the inherited action label when selecting an Everywhere-mapped key in app context", async () => {
+    // key "a" is mapped to "b" (→ actionLabel: "Types b") in the default (Everywhere) profile.
+    // Firefox profile has no mapping for "a", so the panel should show the inherited label,
+    // not "Normal job" (which would appear if we used getEffectiveAction alone).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockInvoke.mockImplementation((async (cmd: string) => {
+      if (cmd === "get_config") return TWO_PROFILE_TOML;
+      if (cmd === "list_devices") return [];
+      if (cmd === "list_installed_apps") return [];
+      return undefined;
+    }) as any);
+    mockListen.mockResolvedValue(vi.fn());
+
+    const { container } = render(
+      <MappingsScreen railActiveProfile="firefox" onProfilesChange={() => {}} />
+    );
+
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); });
+
+    // Click key "a" on the keyboard viz to open the AssignPanel
+    const keycap = container.querySelector('button[title="a"]') as HTMLElement;
+    expect(keycap).toBeTruthy();
+    await act(async () => { keycap.click(); });
+
+    // The panel header "Right now it does: …" must show the inherited Everywhere label.
+    // key "b" → keyLabel("b") = "B" (single char, uppercased) → actionLabel = "Types B".
+    // "Normal job" would appear only if the fallback was not applied (getEffectiveAction alone
+    // returns null for an inherited key, yielding actionLabel(null) = "Normal job").
+    const nowEl = container.querySelector(".assign__now");
+    expect(nowEl).toBeTruthy();
+    expect(nowEl?.textContent).toContain("Types B");
+    expect(nowEl?.textContent).not.toContain("Normal job");
+  });
 });

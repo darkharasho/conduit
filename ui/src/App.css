@@ -1951,6 +1951,11 @@ button {
   font: 11.5px var(--font-ui);
 }
 
+.illo__tag-inherited {
+  fill: var(--text-lo);
+  font-size: 11px;
+}
+
 /* ── Home screen ─────────────────────────────────────────────────────── */
 .home { padding: 36px 48px; overflow-y: auto; }
 .home__title { font-size: 20px; font-weight: 650; color: var(--text-hi); }
