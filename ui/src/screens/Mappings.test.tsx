@@ -543,7 +543,9 @@ mouse4 = "back"
 
     const firefoxApp = {
       app_id: "org.mozilla.firefox",
-      name: "Firefox",
+      // Multi-word name: capitalize("firefox") can never produce this, so the
+      // assertion below discriminates the installed-app path from the fallback.
+      name: "Mozilla Firefox",
       wm_class: "firefox",
       categories: ["WebBrowser"],
       icon: null,
@@ -566,17 +568,12 @@ mouse4 = "back"
     await act(async () => { await Promise.resolve(); });
     await act(async () => { await Promise.resolve(); });
 
-    // The firefox pill must show "Firefox" (the installed app name),
-    // not "Firefox" from capitalize("firefox") — but crucially it must NOT
-    // show the raw class string "firefox" (lowercase) which indicates the
-    // installedApps list was not consulted.
-    // We assert the pill button text is exactly "Firefox".
-    // The firefox pill button should display "Firefox" as its label name.
-    // (button textContent also includes the avatar initial, so query .app-pill__name spans)
+    // The pill must show the installed app's name. "Mozilla Firefox" cannot
+    // be produced by the capitalize("firefox") fallback, so this fails if
+    // the installedApps fetch result is not actually consulted.
     const pillNames = Array.from(document.querySelectorAll(".app-pill .app-pill__name")).map(
       (el) => el.textContent
     );
-    // "Firefox" must appear as a pill name (from InstalledApp.name, not capitalize("firefox"))
-    expect(pillNames).toContain("Firefox");
+    expect(pillNames).toContain("Mozilla Firefox");
   });
 });
