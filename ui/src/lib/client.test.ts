@@ -25,8 +25,20 @@ import {
   onConnection,
   ConduitError,
   listInstalledApps,
+  setupStatus,
+  setupInstallService,
+  setupFixPermissions,
+  restartEngine,
+  collectReport,
 } from "./client";
-import type { Status, DeviceInfo, WireEvent, InstalledApp } from "./client";
+import type {
+  Status,
+  DeviceInfo,
+  WireEvent,
+  InstalledApp,
+  SetupStatus,
+  PermissionFixOutcome,
+} from "./client";
 
 const mockInvoke = vi.mocked(invoke);
 const mockListen = vi.mocked(listen);
@@ -281,5 +293,62 @@ describe("listInstalledApps", () => {
     expect(result).toHaveLength(2);
     expect(result[0].app_id).toBe("org.mozilla.firefox");
     expect(result[1].icon).toBeNull();
+  });
+});
+
+describe("setupStatus", () => {
+  it("calls invoke('setup_status') and returns SetupStatus", async () => {
+    const status: SetupStatus = {
+      service_installed: true,
+      service_running: true,
+      daemon_connected: true,
+      uinput_ok: true,
+      evdev_ok: true,
+      input_group: true,
+      config_ok: true,
+      binary_missing: false,
+      binary_path: "/usr/bin/conduit-daemon",
+      details: ["systemctl --user is-active: active"],
+    };
+    mockInvoke.mockResolvedValueOnce(status);
+    const result = await setupStatus();
+    expect(mockInvoke).toHaveBeenCalledWith("setup_status");
+    expect(result).toEqual(status);
+  });
+});
+
+describe("setupInstallService", () => {
+  it("calls invoke('setup_install_service') and resolves void", async () => {
+    mockInvoke.mockResolvedValueOnce(undefined);
+    await setupInstallService();
+    expect(mockInvoke).toHaveBeenCalledWith("setup_install_service");
+  });
+});
+
+describe("setupFixPermissions", () => {
+  it("calls invoke('setup_fix_permissions') and returns PermissionFixOutcome", async () => {
+    const outcome: PermissionFixOutcome = { relogin_needed: true };
+    mockInvoke.mockResolvedValueOnce(outcome);
+    const result = await setupFixPermissions();
+    expect(mockInvoke).toHaveBeenCalledWith("setup_fix_permissions");
+    expect(result.relogin_needed).toBe(true);
+  });
+});
+
+describe("restartEngine", () => {
+  it("calls invoke('restart_engine') and resolves void", async () => {
+    mockInvoke.mockResolvedValueOnce(undefined);
+    await restartEngine();
+    expect(mockInvoke).toHaveBeenCalledWith("restart_engine");
+  });
+});
+
+describe("collectReport", () => {
+  it("calls invoke('collect_report') and returns string", async () => {
+    const report = "== check ==\n{}\n\n== service ==\nactive\n\n";
+    mockInvoke.mockResolvedValueOnce(report);
+    const result = await collectReport();
+    expect(mockInvoke).toHaveBeenCalledWith("collect_report");
+    expect(result).toBe(report);
   });
 });

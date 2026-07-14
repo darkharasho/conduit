@@ -170,6 +170,43 @@ export async function listInstalledApps(): Promise<InstalledApp[]> {
   return call<InstalledApp[]>("list_installed_apps");
 }
 
+export interface SetupStatus {
+  service_installed: boolean;
+  service_running: boolean;
+  daemon_connected: boolean;
+  uinput_ok: boolean;
+  evdev_ok: boolean;
+  input_group: boolean;
+  config_ok: boolean;
+  binary_missing: boolean;
+  binary_path: string | null;
+  details: string[];
+}
+
+export interface PermissionFixOutcome {
+  relogin_needed: boolean;
+}
+
+export async function setupStatus(): Promise<SetupStatus> {
+  return call<SetupStatus>("setup_status");
+}
+
+export async function setupInstallService(): Promise<void> {
+  return call<void>("setup_install_service");
+}
+
+export async function setupFixPermissions(): Promise<PermissionFixOutcome> {
+  return call<PermissionFixOutcome>("setup_fix_permissions");
+}
+
+export async function restartEngine(): Promise<void> {
+  return call<void>("restart_engine");
+}
+
+export async function collectReport(): Promise<string> {
+  return call<string>("collect_report");
+}
+
 // ---- Subscription event listeners ----
 
 /** Subscribe to live Status push events from the daemon */

@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 mod apps;
+mod setup;
 
 // ---- Re-export proto types as Tauri-serializable types ----
 // (conduit_proto already derives Serialize/Deserialize)
@@ -199,6 +200,7 @@ async fn check_setup() -> Result<SetupResult, ErrorPayload> {
     let check: DaemonCheckOutput = serde_json::from_str(stdout.trim())
         .unwrap_or(DaemonCheckOutput {
             uinput: false,
+            evdev: false,
             input_group: false,
             config_ok: false,
         });
@@ -216,7 +218,7 @@ async fn check_setup() -> Result<SetupResult, ErrorPayload> {
 /// 2. `~/.local/bin/conduit-daemon`
 /// 3. `../target/debug/conduit-daemon` relative to the app executable
 /// 4. `../target/release/conduit-daemon` relative to the app executable
-fn find_conduit_daemon_binary() -> Option<std::path::PathBuf> {
+pub(crate) fn find_conduit_daemon_binary() -> Option<std::path::PathBuf> {
     // 1. PATH via `which`
     if let Ok(output) = std::process::Command::new("which").arg("conduit-daemon").output() {
         if output.status.success() {
@@ -284,6 +286,8 @@ pub struct SetupResult {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct DaemonCheckOutput {
     uinput: bool,
+    #[serde(default)]
+    evdev: bool,
     input_group: bool,
     config_ok: bool,
 }
@@ -429,6 +433,11 @@ pub fn run() {
             capture_next_key,
             check_setup,
             list_installed_apps,
+            setup::setup_status,
+            setup::setup_install_service,
+            setup::setup_fix_permissions,
+            setup::restart_engine,
+            setup::collect_report,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
