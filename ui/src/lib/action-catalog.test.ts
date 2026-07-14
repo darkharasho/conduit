@@ -5,6 +5,7 @@ import {
   entryForAction,
   entriesFor,
   parseComboInput,
+  parseKeyInput,
   popularEntries,
   searchCatalog,
 } from "./action-catalog";
@@ -45,5 +46,29 @@ describe("action catalog", () => {
       expect(e.label.length, e.id).toBeGreaterThan(0);
       expect(e.subtitle.length, e.id).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("parseKeyInput", () => {
+  it("returns key action for canonical key names", () => {
+    expect(parseKeyInput("esc")).toEqual({ kind: "key", key: "esc" });
+    expect(parseKeyInput("1")).toEqual({ kind: "key", key: "1" });
+    expect(parseKeyInput("f13")).toEqual({ kind: "key", key: "f13" });
+  });
+
+  it("resolves known aliases to canonical names", () => {
+    expect(parseKeyInput("escape")).toEqual({ kind: "key", key: "esc" });
+  });
+
+  it("returns null for combo queries (contains '+')", () => {
+    expect(parseKeyInput("ctrl+c")).toBeNull();
+  });
+
+  it("returns null for unknown key names", () => {
+    expect(parseKeyInput("notakey")).toBeNull();
+  });
+
+  it("trims and lowercases input", () => {
+    expect(parseKeyInput("  ESC  ")).toEqual({ kind: "key", key: "esc" });
   });
 });

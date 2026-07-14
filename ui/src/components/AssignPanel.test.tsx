@@ -148,4 +148,46 @@ describe("AssignPanel", () => {
     // In default order, Copy (popular shortcuts) comes before Back (popular keys)
     expect(copyIdx).toBeLessThan(backIdx);
   });
+
+  it("searching '1' shows synthesized 'Types 1' row and clicking saves {kind:'key',key:'1'}", async () => {
+    const { onSave } = renderPanel();
+    fireEvent.change(screen.getByPlaceholderText(/Search anything/), {
+      target: { value: "1" },
+    });
+    expect(screen.getByRole("button", { name: /Types 1/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Types 1/ }));
+    await waitFor(() =>
+      expect(onSave).toHaveBeenCalledWith({ kind: "key", key: "1" }),
+    );
+  });
+
+  it("searching 'zzzz' shows no-matches message and press-to-set row is present", () => {
+    renderPanel();
+    fireEvent.change(screen.getByPlaceholderText(/Search anything/), {
+      target: { value: "zzzz" },
+    });
+    expect(screen.getByText(/No matches — press the key on your keyboard instead/)).toBeInTheDocument();
+    // press-to-set row still present during search
+    expect(screen.getByRole("button", { name: /Press a key to type it/ })).toBeInTheDocument();
+  });
+
+  it("press-to-set row is visible during search", () => {
+    renderPanel();
+    fireEvent.change(screen.getByPlaceholderText(/Search anything/), {
+      target: { value: "esc" },
+    });
+    expect(screen.getByRole("button", { name: /Press a key to type it/ })).toBeInTheDocument();
+  });
+
+  it("searching 'esc' in app context shows synthesized key row (regression guard)", async () => {
+    const { onSave } = renderPanel({ appContext: { label: "Firefox", everywhereLabel: null } });
+    fireEvent.change(screen.getByPlaceholderText(/Search anything/), {
+      target: { value: "esc" },
+    });
+    expect(screen.getByRole("button", { name: /Types Esc/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Types Esc/ }));
+    await waitFor(() =>
+      expect(onSave).toHaveBeenCalledWith({ kind: "key", key: "esc" }),
+    );
+  });
 });

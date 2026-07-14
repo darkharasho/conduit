@@ -14,6 +14,7 @@
 
 import type { ActionModel } from "./config-model";
 import { chordLabel, registerCatalogLookup } from "./action-labels";
+import { KEY_NAME_SET } from "./key-names";
 
 export type CatalogCategory = "shortcuts" | "keys" | "media" | "system";
 
@@ -288,35 +289,12 @@ const KNOWN_ALIASES: Record<string, string> = {
   shift: "leftshift",
   meta: "leftmeta",
   super: "leftmeta",
+  escape: "esc",
 };
 
-const KNOWN_TOKENS = new Set([
-  "leftctrl",
-  "rightctrl",
-  "leftshift",
-  "rightshift",
-  "leftalt",
-  "rightalt",
-  "leftmeta",
-  "rightmeta",
-  "tab",
-  "esc",
-  "enter",
-  "space",
-  "backspace",
-  "delete",
-  "home",
-  "end",
-  "pageup",
-  "pagedown",
-  "up",
-  "down",
-  "left",
-  "right",
-  "print",
-  ...Array.from({ length: 12 }, (_, i) => `f${i + 1}`),
-  ..."abcdefghijklmnopqrstuvwxyz0123456789".split(""),
-]);
+// KEY_NAME_SET is the superset of all canonical key names (sync'd with keys.rs).
+// Using it here means combo vocabulary grows automatically as keys.rs grows.
+const KNOWN_TOKENS = KEY_NAME_SET;
 
 export function parseComboInput(query: string): ActionModel | null {
   const parts = query
@@ -333,5 +311,18 @@ export function parseComboInput(query: string): ActionModel | null {
     keys.push(canonical);
   }
   return { kind: "chord", keys };
+}
+
+/**
+ * Parses a single-key query (no "+" allowed).
+ * Trims and lowercases; resolves KNOWN_ALIASES; checks KEY_NAME_SET.
+ * Returns {kind:"key", key: canonical} if valid, else null.
+ */
+export function parseKeyInput(query: string): ActionModel | null {
+  const q = query.trim().toLowerCase();
+  if (!q || q.includes("+")) return null;
+  const canonical = KNOWN_ALIASES[q] ?? q;
+  if (!KEY_NAME_SET.has(canonical)) return null;
+  return { kind: "key", key: canonical };
 }
 

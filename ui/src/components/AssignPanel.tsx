@@ -6,6 +6,7 @@ import {
   popularEntries,
   entriesFor,
   parseComboInput,
+  parseKeyInput,
   entryForAction,
   chordLabel,
 } from "../lib/action-catalog";
@@ -101,6 +102,8 @@ export function AssignPanel({
   // user sees the named action (e.g. "Undo" for "ctrl+z") even if the text
   // search wouldn't match the formatted subtitle ("Ctrl + Z" vs "ctrl+z").
   const comboEntry: CatalogEntry | null = comboAction ? entryForAction(comboAction) : null;
+  // Single-key search: resolves when query has no "+" and is a known key name.
+  const keyAction = query ? parseKeyInput(query) : null;
   const catalogResults = query ? searchCatalog(query) : [];
   // Merge: text results first, then the combo-matched entry if not already present
   const mergedResults: CatalogEntry[] = comboEntry
@@ -190,8 +193,8 @@ export function AssignPanel({
 
       {/* Entry list */}
       <div className="assign__list">
-        {/* Press-to-set row: only in Keys category (or search) */}
-        {!query && category === "keys" && (
+        {/* Press-to-set row: in Keys category or during any search */}
+        {(!query && category === "keys") || query ? (
           <button
             className="cat-row"
             onClick={handleCapture}
@@ -206,7 +209,7 @@ export function AssignPanel({
                 : "Click, then press the physical key"}
             </div>
           </button>
-        )}
+        ) : null}
 
         {displayEntries.map((entry) => (
           <button
@@ -220,6 +223,20 @@ export function AssignPanel({
           </button>
         ))}
 
+        {/* Synthetic row for typed single key */}
+        {keyAction && keyAction.kind === "key" && (
+          <button
+            className="cat-row"
+            disabled={busy}
+            onClick={() => save(keyAction)}
+          >
+            <div className="cat-row__label">
+              Types {chordLabel([keyAction.key])}
+            </div>
+            <div className="cat-row__sub">The {chordLabel([keyAction.key])} key</div>
+          </button>
+        )}
+
         {/* Synthetic row for typed combo */}
         {comboAction && comboAction.kind === "chord" && (
           <button
@@ -232,6 +249,13 @@ export function AssignPanel({
             </div>
             <div className="cat-row__sub">Custom shortcut</div>
           </button>
+        )}
+
+        {/* No-results message when search yields nothing */}
+        {query && displayEntries.length === 0 && !keyAction && !comboAction && (
+          <div className="cat-row">
+            No matches — press the key on your keyboard instead
+          </div>
         )}
       </div>
 
