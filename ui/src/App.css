@@ -1443,62 +1443,6 @@ button {
   color: var(--text-hi);
 }
 
-.assign__capture {
-  border: 1px dashed var(--accent-border);
-  background: var(--accent-bg);
-  border-radius: var(--r6);
-  padding: 14px 12px;
-  text-align: center;
-  width: 100%;
-}
-
-.assign__capture:hover:not(:disabled) {
-  border-color: var(--accent);
-}
-
-.assign__capture-key {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--accent-bg);
-  border: 1px solid var(--accent-border);
-  border-bottom-width: 3px;
-  border-radius: var(--r6);
-  padding: 7px 20px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-hi);
-}
-
-.assign__capture-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--accent);
-}
-
-.assign__capture--live .assign__capture-dot {
-  animation: assign-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes assign-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .assign__capture--live .assign__capture-dot {
-    animation: none;
-  }
-}
-
-.assign__capture-sub {
-  display: block;
-  font-size: 11px;
-  color: var(--text-lo);
-  margin-top: 8px;
-}
-
 .assign__list {
   display: flex;
   flex-direction: column;

@@ -185,7 +185,7 @@ export function AssignPanel({
         {/* Press-to-set row: only in Keys category (or search) */}
         {!query && category === "keys" && (
           <button
-            className={`cat-row${capturing ? " assign__capture--live" : ""}`}
+            className="cat-row"
             onClick={handleCapture}
             disabled={capturing || busy}
           >
