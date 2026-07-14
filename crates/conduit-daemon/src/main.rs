@@ -11,6 +11,7 @@ use anyhow::Context;
 
 // Re-export the library crate's modules under `mod` aliases so that the
 // binary can use them without a separate crate dependency path.
+use conduit_daemon::check;
 use conduit_daemon::devices;
 use conduit_daemon::paths;
 use conduit_daemon::runloop;
@@ -42,7 +43,8 @@ fn main() -> anyhow::Result<()> {
     // The Tauri UI (Task 20) uses this for first-run setup guidance.
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(|s| s.as_str()) == Some("--check") {
-        return run_check();
+        println!("{}", check::run_check_json(&check::CheckPaths::default()));
+        return Ok(());
     }
 
     // Pin the monotonic time base before any thread reads it.
@@ -212,45 +214,3 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-// ── --check mode ──────────────────────────────────────────────────────────────
-
-/// Print JSON startup diagnostics and exit 0.
-fn run_check() -> anyhow::Result<()> {
-    let uinput_ok = fs::OpenOptions::new()
-        .write(true)
-        .custom_flags(nix::libc::O_NONBLOCK)
-        .open("/dev/uinput")
-        .is_ok();
-
-    let input_group_ok = check_input_group();
-
-    let config_path = paths::config_path();
-    let config_ok = if config_path.exists() {
-        match fs::read_to_string(&config_path) {
-            Ok(toml_str) => conduit_core::config::compile(&toml_str).is_ok(),
-            Err(_) => false,
-        }
-    } else {
-        true
-    };
-
-    println!(
-        "{{\"uinput\":{},\"input_group\":{},\"config_ok\":{}}}",
-        uinput_ok, input_group_ok, config_ok
-    );
-
-    Ok(())
-}
-
-/// Returns `true` if the calling process belongs to the `input` group.
-fn check_input_group() -> bool {
-    let input_gid = match nix::unistd::Group::from_name("input") {
-        Ok(Some(g)) => g.gid,
-        _ => return false,
-    };
-
-    match nix::unistd::getgroups() {
-        Ok(groups) => groups.contains(&input_gid),
-        Err(_) => false,
-    }
-}
