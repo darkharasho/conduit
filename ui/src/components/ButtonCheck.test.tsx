@@ -1,5 +1,5 @@
 /**
- * ButtonCheck component tests — Task 4.
+ * ButtonCheck component tests — Task 4 + Task 6 (fix wizard).
  *
  * Tests are written first (failing); implementation follows.
  *
@@ -7,7 +7,7 @@
  * The onKeyEvent function returns a Promise<() => void> (unlisten handle).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 
 // ── Mock Tauri APIs before importing anything that uses them ──────────────────
 
@@ -19,7 +19,10 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(),
 }));
 
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+
+const mockInvoke = vi.mocked(invoke);
 
 const mockListen = vi.mocked(listen);
 
@@ -246,6 +249,20 @@ describe("ButtonCheck — Done button, collisions, curated device", () => {
   });
 
   it("shows 'Fix this mouse's memory' button when onFix is provided (curated device)", async () => {
+    // Provide a ratbag_status mock so the wizard can proceed past status check
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "ratbag_status") {
+        return { daemon_running: true, device_id: "usb_046d_c099_if01", device_name: "Logitech G502 X PLUS" };
+      }
+      if (cmd === "ratbag_read_buttons") {
+        return [{ index: 0, action: "button 1", human: "Left click" }];
+      }
+      if (cmd === "ratbag_suggest_rewrites") {
+        return [];
+      }
+      return undefined;
+    });
+
     const { getEventCb } = setupListenMock();
     const onFix = vi.fn();
 
@@ -264,8 +281,15 @@ describe("ButtonCheck — Done button, collisions, curated device", () => {
     const fixBtn = screen.getByRole("button", { name: "Fix this mouse's memory" });
     expect(fixBtn).toBeInTheDocument();
 
+    // Clicking the fix button now starts the internal wizard (not calls onFix directly).
+    // The onFix prop gates whether the button appears; the wizard replaces the panel.
     await act(async () => { fireEvent.click(fixBtn); });
-    expect(onFix).toHaveBeenCalledTimes(1);
+    // Wizard should have started — panel content should no longer be the collision verdict
+    await waitFor(() => {
+      // Either in preparing/reading state or confirm sheet
+      const body = document.body.textContent ?? "";
+      expect(body).toMatch(/Preparing|Reading|will send its own signal|Rewrite/i);
+    });
   });
 });
 
@@ -503,3 +527,528 @@ describe("ButtonCheck — onFix gating via props", () => {
 });
 
 // Note: @testing-library/react runs cleanup() automatically via afterEach — no manual call needed.
+
+// ─── Task 6: Fix wizard tests ─────────────────────────────────────────────────
+//
+// These tests validate the onboard fix wizard that appears when the user clicks
+// "Fix this mouse's memory" in the collision verdict. All ratbag client calls
+// are mocked via vi.mocked(invoke).
+//
+// Wizard flow:
+//   1. ratbag_status() — if device missing, show preparing text
+//      → ratbag_stage_device_file() → ratbag_fix_setup(path) → re-status poll
+//   2. ratbag_read_buttons → confirm sheet
+//   3. ratbag_rewrite → success → auto re-run press-check phase
+
+/** Standard happy-path mock setup for the ratbag commands. */
+function setupRatbagHappyPath() {
+  // ratbag_status: device is already known to ratbagd
+  // ratbag_read_buttons: return two buttons where index 3 maps to the same
+  //   signal as index 0 (a collision), so suggestRewrites returns one target
+  // ratbag_suggest_rewrites: index 3 → KEY_F13
+  // ratbag_rewrite: void success
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  mockInvoke.mockImplementation((async (cmd: string) => {
+    switch (cmd) {
+      case "ratbag_status":
+        return {
+          daemon_running: true,
+          device_id: "usb_046d_c099_if01",
+          device_name: "Logitech G502 X PLUS",
+        };
+      case "ratbag_read_buttons":
+        return [
+          { index: 0, action: "button 1", human: "Left click" },
+          { index: 3, action: "button 1", human: "Left click" },
+        ] satisfies { index: number; action: string; human: string }[];
+      case "ratbag_suggest_rewrites":
+        return [[3, "macro +KEY_F13 -KEY_F13"]] as [number, string][];
+      case "ratbag_rewrite":
+        return undefined;
+      // Default: anything from beforeEach (get_config, list_devices, etc.) just resolves
+      default:
+        return undefined;
+    }
+  }) as any); // eslint-disable-line @typescript-eslint/no-explicit-any
+}
+
+describe("Fix wizard — happy path (device already in ratbagd)", () => {
+  it("shows preparing text after clicking 'Fix this mouse's memory'", async () => {
+    setupRatbagHappyPath();
+    const { getEventCb } = setupListenMock();
+    render(<ButtonCheck device={G502X} onClose={() => {}} onFix={() => {}} />);
+
+    const cb = getEventCb()!;
+    await fireKeyEvent(cb, "key:272", 0x110, "Logitech G502 X PLUS");
+    await fireKeyEvent(cb, "key:273", 0x111, "Logitech G502 X PLUS");
+    await fireKeyEvent(cb, "key:272", 0x110, "Logitech G502 X PLUS");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Done" })); });
+
+    // Click the fix button
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Fix this mouse's memory" }));
+    });
+
+    // Should show the wizard working (preparing / reading state)
+    // ratbag_status returned success → skip staging, go straight to reading buttons
+    await waitFor(() => {
+      // Either a loading/preparing indicator or the confirm sheet will appear
+      const body = document.body.textContent ?? "";
+      expect(body).toMatch(/Preparing|Reading|Checking|will send its own signal/i);
+    });
+  });
+
+  it("renders the confirm sheet with a button row and the exact footer", async () => {
+    setupRatbagHappyPath();
+    const { getEventCb } = setupListenMock();
+    render(<ButtonCheck device={G502X} onClose={() => {}} onFix={() => {}} />);
+
+    const cb = getEventCb()!;
+    await fireKeyEvent(cb, "key:272", 0x110, "Logitech G502 X PLUS");
+    await fireKeyEvent(cb, "key:273", 0x111, "Logitech G502 X PLUS");
+    await fireKeyEvent(cb, "key:272", 0x110, "Logitech G502 X PLUS");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Done" })); });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Fix this mouse's memory" }));
+    });
+
+    // Wait for the confirm sheet to appear
+    await waitFor(() => {
+      expect(screen.getByText(/will send its own signal/i)).toBeInTheDocument();
+    });
+
+    // Confirm sheet must show the verbatim footer
+    expect(screen.getByText(
+      "This changes the mouse's own memory — other computers (and G HUB) will see these assignments too."
+    )).toBeInTheDocument();
+
+    // Confirm sheet must show a "Left click → will send its own signal" row
+    // (the "Left click" comes from the human label in ratbag_read_buttons mock)
+    expect(screen.getByText(/Left click/i)).toBeInTheDocument();
+
+    // Cancel button must be present
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+
+    // "Rewrite N buttons" button must be present (N=1 from our mock)
+    expect(screen.getByRole("button", { name: /Rewrite 1 button/i })).toBeInTheDocument();
+  });
+
+  it("does NOT call ratbag_rewrite before the user clicks confirm", async () => {
+    setupRatbagHappyPath();
+    const { getEventCb } = setupListenMock();
+    render(<ButtonCheck device={G502X} onClose={() => {}} onFix={() => {}} />);
+
+    const cb = getEventCb()!;
+    await fireKeyEvent(cb, "key:272", 0x110, "Logitech G502 X PLUS");
+    await fireKeyEvent(cb, "key:273", 0x111, "Logitech G502 X PLUS");
+    await fireKeyEvent(cb, "key:272", 0x110, "Logitech G502 X PLUS");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Done" })); });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Fix this mouse's memory" }));
+    });
+
+    // Wait for confirm sheet to appear
+    await waitFor(() => {
+      expect(screen.getByText(/will send its own signal/i)).toBeInTheDocument();
+    });
+
+    // ratbag_rewrite must NOT have been called yet
+    const rewriteCalls = mockInvoke.mock.calls.filter((c) => c[0] === "ratbag_rewrite");
+    expect(rewriteCalls).toHaveLength(0);
+  });
+
+  it("calls ratbag_rewrite with the correct targets after confirm and enters re-check phase", async () => {
+    setupRatbagHappyPath();
+    const { getEventCb } = setupListenMock();
+    render(<ButtonCheck device={G502X} onClose={() => {}} onFix={() => {}} />);
+
+    const cb = getEventCb()!;
+    await fireKeyEvent(cb, "key:272", 0x110, "Logitech G502 X PLUS");
+    await fireKeyEvent(cb, "key:273", 0x111, "Logitech G502 X PLUS");
+    await fireKeyEvent(cb, "key:272", 0x110, "Logitech G502 X PLUS");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Done" })); });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Fix this mouse's memory" }));
+    });
+
+    // Wait for confirm sheet
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Rewrite 1 button/i })).toBeInTheDocument();
+    });
+
+    // Click confirm / rewrite button
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Rewrite 1 button/i }));
+    });
+
+    // Wait for re-check phase — should show "Press the fixed buttons to confirm"
+    await waitFor(() => {
+      expect(screen.getByText(/Press the fixed buttons to confirm/i)).toBeInTheDocument();
+    });
+
+    // ratbag_rewrite must have been called with the targets from ratbag_suggest_rewrites
+    const rewriteCall = mockInvoke.mock.calls.find((c) => c[0] === "ratbag_rewrite");
+    expect(rewriteCall).toBeDefined();
+    // targets should be [[3, "macro +KEY_F13 -KEY_F13"]]
+    expect(rewriteCall![1]).toMatchObject({
+      targets: [[3, "macro +KEY_F13 -KEY_F13"]],
+    });
+  });
+
+  it("after re-check press-then-done shows 'All N buttons are now distinct'", async () => {
+    setupRatbagHappyPath();
+    const { getEventCb: getEventCb1 } = setupListenMock();
+    render(<ButtonCheck device={G502X} onClose={() => {}} onFix={() => {}} />);
+
+    // First: trigger the collision
+    const cb1 = getEventCb1()!;
+    await fireKeyEvent(cb1, "key:272", 0x110, "Logitech G502 X PLUS");
+    await fireKeyEvent(cb1, "key:273", 0x111, "Logitech G502 X PLUS");
+    await fireKeyEvent(cb1, "key:272", 0x110, "Logitech G502 X PLUS");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Done" })); });
+
+    // Fix flow
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Fix this mouse's memory" }));
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Rewrite 1 button/i })).toBeInTheDocument();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Rewrite 1 button/i }));
+    });
+
+    // Now in re-check phase
+    await waitFor(() => {
+      expect(screen.getByText(/Press the fixed buttons to confirm/i)).toBeInTheDocument();
+    });
+
+    // Fire distinct presses and click Done
+    const cb2 = getEventCb1()!;
+    await fireKeyEvent(cb2, "key:272", 0x110, "Logitech G502 X PLUS");
+    await fireKeyEvent(cb2, "key:273", 0x111, "Logitech G502 X PLUS");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Done" })); });
+
+    await waitFor(() => {
+      expect(screen.getByText(/All \d+ buttons are now distinct/i)).toBeInTheDocument();
+    });
+  });
+
+  it("Cancel on confirm sheet returns to the collision verdict without calling rewrite", async () => {
+    setupRatbagHappyPath();
+    const { getEventCb } = setupListenMock();
+    render(<ButtonCheck device={G502X} onClose={() => {}} onFix={() => {}} />);
+
+    const cb = getEventCb()!;
+    await fireKeyEvent(cb, "key:272", 0x110, "Logitech G502 X PLUS");
+    await fireKeyEvent(cb, "key:273", 0x111, "Logitech G502 X PLUS");
+    await fireKeyEvent(cb, "key:272", 0x110, "Logitech G502 X PLUS");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Done" })); });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Fix this mouse's memory" }));
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    });
+
+    // Should be back to collision verdict
+    expect(
+      screen.getByText(
+        "1 of this mouse's buttons share signals, so Conduit can't tell them apart. This is stored in the mouse itself."
+      )
+    ).toBeInTheDocument();
+
+    // rewrite was NOT called
+    expect(mockInvoke.mock.calls.filter((c) => c[0] === "ratbag_rewrite")).toHaveLength(0);
+  });
+});
+
+describe("Fix wizard — device needs staging (not yet in ratbagd)", () => {
+  it("shows 'Preparing the fix' text when ratbagd does not know the device", async () => {
+    let statusCallCount = 0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockInvoke.mockImplementation((async (cmd: string) => {
+      switch (cmd) {
+        case "ratbag_status":
+          statusCallCount++;
+          if (statusCallCount <= 1) {
+            // First call: device not found
+            return { daemon_running: true, device_id: null, device_name: null };
+          }
+          // Subsequent poll calls: device now available
+          return {
+            daemon_running: true,
+            device_id: "usb_046d_c099_if01",
+            device_name: "Logitech G502 X PLUS",
+          };
+        case "ratbag_stage_device_file":
+          return "/tmp/ratbag-patch/logitech-g502-x-wireless.device";
+        case "ratbag_fix_setup":
+          return undefined;
+        case "ratbag_read_buttons":
+          return [
+            { index: 0, action: "button 1", human: "Left click" },
+            { index: 3, action: "button 1", human: "Left click" },
+          ] satisfies { index: number; action: string; human: string }[];
+        case "ratbag_suggest_rewrites":
+          return [[3, "macro +KEY_F13 -KEY_F13"]] as [number, string][];
+        case "ratbag_rewrite":
+          return undefined;
+        default:
+          return undefined;
+      }
+    }) as any); // eslint-disable-line @typescript-eslint/no-explicit-any
+
+    const { getEventCb } = setupListenMock();
+    render(<ButtonCheck device={G502X} onClose={() => {}} onFix={() => {}} />);
+
+    const cb = getEventCb()!;
+    await fireKeyEvent(cb, "key:272", 0x110, "Logitech G502 X PLUS");
+    await fireKeyEvent(cb, "key:273", 0x111, "Logitech G502 X PLUS");
+    await fireKeyEvent(cb, "key:272", 0x110, "Logitech G502 X PLUS");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Done" })); });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Fix this mouse's memory" }));
+    });
+
+    // At this point the component checks status (device_id: null), so it should
+    // show the "Preparing the fix" message while staging the device file.
+    await waitFor(() => {
+      expect(screen.getByText(/Preparing the fix/i)).toBeInTheDocument();
+    });
+  });
+});
+
+describe("Fix wizard — pkexec dismissed (permission-denied)", () => {
+  it("shows 'You closed the password prompt' inline when ratbag_fix_setup returns permission-denied", async () => {
+    let statusCallCount = 0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockInvoke.mockImplementation((async (cmd: string) => {
+      switch (cmd) {
+        case "ratbag_status":
+          statusCallCount++;
+          if (statusCallCount <= 1) {
+            return { daemon_running: true, device_id: null, device_name: null };
+          }
+          return { daemon_running: true, device_id: null, device_name: null };
+        case "ratbag_stage_device_file":
+          return "/tmp/ratbag-patch/logitech-g502-x-wireless.device";
+        case "ratbag_fix_setup": {
+          const err = { code: "permission-denied", message: "pkexec dismissed", detail: "exit code 126" };
+          return Promise.reject(err);
+        }
+        default:
+          return undefined;
+      }
+    }) as any); // eslint-disable-line @typescript-eslint/no-explicit-any
+
+    const { getEventCb } = setupListenMock();
+    render(<ButtonCheck device={G502X} onClose={() => {}} onFix={() => {}} />);
+
+    const cb = getEventCb()!;
+    await fireKeyEvent(cb, "key:272", 0x110, "Logitech G502 X PLUS");
+    await fireKeyEvent(cb, "key:273", 0x111, "Logitech G502 X PLUS");
+    await fireKeyEvent(cb, "key:272", 0x110, "Logitech G502 X PLUS");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Done" })); });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Fix this mouse's memory" }));
+    });
+
+    // Should show "You closed the password prompt" error inline
+    await waitFor(() => {
+      expect(screen.getByText(/You closed the password prompt/i)).toBeInTheDocument();
+    });
+
+    // Jargon ban: "permission-denied" code must not appear as user-facing text
+    const bodyText = document.body.textContent ?? "";
+    expect(bodyText).not.toMatch(/\bpolkit\b/i);
+    expect(bodyText).not.toMatch(/\bpkexec\b/i);
+    expect(bodyText).not.toMatch(/ratbagd/);
+  });
+
+  it("shows technical details pane with raw stderr after pkexec dismissal", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockInvoke.mockImplementation((async (cmd: string) => {
+      switch (cmd) {
+        case "ratbag_status":
+          return { daemon_running: true, device_id: null, device_name: null };
+        case "ratbag_stage_device_file":
+          return "/tmp/ratbag-patch/logitech-g502-x-wireless.device";
+        case "ratbag_fix_setup": {
+          const err = { code: "permission-denied", message: "pkexec dismissed", detail: "exit code 126" };
+          return Promise.reject(err);
+        }
+        default:
+          return undefined;
+      }
+    }) as any); // eslint-disable-line @typescript-eslint/no-explicit-any
+
+    const { getEventCb } = setupListenMock();
+    render(<ButtonCheck device={G502X} onClose={() => {}} onFix={() => {}} />);
+
+    const cb = getEventCb()!;
+    await fireKeyEvent(cb, "key:272", 0x110, "Logitech G502 X PLUS");
+    await fireKeyEvent(cb, "key:273", 0x111, "Logitech G502 X PLUS");
+    await fireKeyEvent(cb, "key:272", 0x110, "Logitech G502 X PLUS");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Done" })); });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Fix this mouse's memory" }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/You closed the password prompt/i)).toBeInTheDocument();
+    });
+
+    // Raw stderr is inside the "Show technical details" pane — not visible by default
+    expect(screen.queryByText(/exit code 126/)).toBeNull();
+
+    // Click show technical details
+    await act(async () => {
+      fireEvent.click(screen.getByText("Show technical details"));
+    });
+
+    // Now the raw detail should appear
+    expect(screen.getByText(/exit code 126/)).toBeInTheDocument();
+  });
+});
+
+describe("Fix wizard — rewrite failure", () => {
+  it("shows error and detail quarantine when ratbag_rewrite fails", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockInvoke.mockImplementation((async (cmd: string) => {
+      switch (cmd) {
+        case "ratbag_status":
+          return {
+            daemon_running: true,
+            device_id: "usb_046d_c099_if01",
+            device_name: "Logitech G502 X PLUS",
+          };
+        case "ratbag_read_buttons":
+          return [
+            { index: 0, action: "button 1", human: "Left click" },
+            { index: 3, action: "button 1", human: "Left click" },
+          ] satisfies { index: number; action: string; human: string }[];
+        case "ratbag_suggest_rewrites":
+          return [[3, "macro +KEY_F13 -KEY_F13"]] as [number, string][];
+        case "ratbag_rewrite": {
+          const err = { code: "internal", message: "ratbagctl failed", detail: "stderr: command failed on button 3" };
+          return Promise.reject(err);
+        }
+        default:
+          return undefined;
+      }
+    }) as any); // eslint-disable-line @typescript-eslint/no-explicit-any
+
+    const { getEventCb } = setupListenMock();
+    render(<ButtonCheck device={G502X} onClose={() => {}} onFix={() => {}} />);
+
+    const cb = getEventCb()!;
+    await fireKeyEvent(cb, "key:272", 0x110, "Logitech G502 X PLUS");
+    await fireKeyEvent(cb, "key:273", 0x111, "Logitech G502 X PLUS");
+    await fireKeyEvent(cb, "key:272", 0x110, "Logitech G502 X PLUS");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Done" })); });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Fix this mouse's memory" }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Rewrite 1 button/i })).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Rewrite 1 button/i }));
+    });
+
+    // Error title should appear inline (presentError maps "internal" → "Something went wrong")
+    await waitFor(() => {
+      expect(screen.getByText("Something went wrong")).toBeInTheDocument();
+    });
+
+    // Raw stderr is hidden by default (quarantine)
+    expect(screen.queryByText(/stderr: command failed on button 3/)).toBeNull();
+
+    // Click show technical details to reveal it
+    await act(async () => {
+      fireEvent.click(screen.getByText("Show technical details"));
+    });
+
+    expect(screen.getByText(/stderr: command failed on button 3/)).toBeInTheDocument();
+
+    // Jargon bans
+    const bodyText = document.body.textContent ?? "";
+    expect(bodyText).not.toMatch(/ratbagd/);
+    expect(bodyText).not.toMatch(/KEY_/);
+  });
+});
+
+describe("Fix wizard — jargon ban", () => {
+  it("does not show banned jargon in wizard UI (preparing stage)", async () => {
+    let statusCallCount = 0;
+    // Make it hang at staging so we can inspect the preparing text
+    let stageResolve: (() => void) | null = null;
+    const stagePending = new Promise<string>((resolve) => {
+      stageResolve = () => resolve("/tmp/patch/device");
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockInvoke.mockImplementation((async (cmd: string) => {
+      switch (cmd) {
+        case "ratbag_status":
+          statusCallCount++;
+          return statusCallCount <= 1
+            ? { daemon_running: true, device_id: null, device_name: null }
+            : { daemon_running: true, device_id: "usb_046d_c099_if01", device_name: "Logitech G502 X PLUS" };
+        case "ratbag_stage_device_file":
+          return stagePending;
+        default:
+          return undefined;
+      }
+    }) as any); // eslint-disable-line @typescript-eslint/no-explicit-any
+
+    const { getEventCb } = setupListenMock();
+    render(<ButtonCheck device={G502X} onClose={() => {}} onFix={() => {}} />);
+
+    const cb = getEventCb()!;
+    await fireKeyEvent(cb, "key:272", 0x110, "Logitech G502 X PLUS");
+    await fireKeyEvent(cb, "key:273", 0x111, "Logitech G502 X PLUS");
+    await fireKeyEvent(cb, "key:272", 0x110, "Logitech G502 X PLUS");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Done" })); });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Fix this mouse's memory" }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Preparing the fix/i)).toBeInTheDocument();
+    });
+
+    const bodyText = document.body.textContent ?? "";
+    expect(bodyText).not.toMatch(/\bdaemon\b/i);
+    expect(bodyText).not.toMatch(/\bsocket\b/i);
+    expect(bodyText).not.toMatch(/\buinput\b/i);
+    expect(bodyText).not.toMatch(/\budev\b/i);
+    expect(bodyText).not.toMatch(/\bsystemd\b/i);
+    expect(bodyText).not.toMatch(/\bpolkit\b/i);
+    expect(bodyText).not.toMatch(/ratbagd/);
+    expect(bodyText).not.toMatch(/HID\+\+/);
+    expect(bodyText).not.toMatch(/KEY_/);
+
+    // Resolve the pending promise to avoid dangling async
+    await act(async () => {
+      stageResolve!();
+      await new Promise((r) => setTimeout(r, 50));
+    });
+  });
+});

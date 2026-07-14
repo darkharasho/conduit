@@ -2194,3 +2194,128 @@ img.app-pill__avatar { object-fit: contain; }
   margin-top: 6px;
   font-family: var(--font-mono);
 }
+
+/* ── Fix wizard (Task 6) ── */
+
+.fix-wizard {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.fix-wizard__status {
+  font-size: 13px;
+  color: var(--text-hi);
+  line-height: 1.5;
+}
+
+.fix-wizard__spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border-control);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Confirm sheet */
+.fix-wizard--confirm {
+  gap: 14px;
+}
+
+.fix-wizard__confirm-heading {
+  font-size: 12px;
+  color: var(--text-mid);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.fix-wizard__change-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+}
+
+.fix-wizard__change-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.fix-wizard__change-label {
+  color: var(--text-hi);
+  font-weight: 500;
+}
+
+.fix-wizard__change-arrow {
+  color: var(--text-dim);
+}
+
+.fix-wizard__change-result {
+  color: var(--ok);
+}
+
+.fix-wizard__footer {
+  font-size: 12px;
+  color: var(--text-lo);
+  line-height: 1.5;
+  padding: 10px 12px;
+  border: 1px solid var(--amber-border);
+  border-radius: var(--r4);
+  background: rgba(217, 160, 77, 0.04);
+}
+
+.fix-wizard__confirm-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Error state */
+.fix-wizard--error {
+  gap: 10px;
+}
+
+.fix-wizard__error-title {
+  font-size: 13px;
+  color: var(--red);
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.fix-wizard__tech {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.fix-wizard__tech-body {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-lo);
+  background: var(--bg-rail);
+  border: 1px solid var(--border-structural);
+  border-radius: var(--r4);
+  padding: 8px 10px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+}
+
+.fix-wizard__error-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
