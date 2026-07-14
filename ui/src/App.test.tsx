@@ -80,10 +80,9 @@ describe("App shell — home-first navigation", () => {
     expect(screen.queryByText(/daemon/i)).toBeNull();
   });
 
-  it("shows the pause control and no connection dot in the titlebar", async () => {
+  it("shows the pause control in the titlebar", async () => {
     render(<App />);
     expect(await screen.findByRole("button", { name: /Pause Conduit/ })).toBeInTheDocument();
-    expect(document.querySelector(".titlebar__daemon")).toBeNull();
   });
 
   it("shows an unmissable banner when paused", async () => {

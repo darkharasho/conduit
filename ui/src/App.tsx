@@ -28,7 +28,7 @@ function App() {
   const [connected, setConnected] = useState<boolean | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
 
-  // Config model for profile rail
+  // Config model for active profile tracking
   const [configModel, setConfigModel] = useState<ConfigModel | null>(null);
   const [activeProfile, setActiveProfile] = useState("default");
 
@@ -102,7 +102,7 @@ function App() {
         )}
         <div className={`app-cols${isDeviceView ? "" : " app--no-rail"}`}>
         {/* Left rail — only in device view */}
-        {isDeviceView && view.kind === "device" && (
+        {view.kind === "device" && (
           <aside className="rail" aria-label="Navigation">
             {/* Back button */}
             <button className="rail__back" onClick={() => setView({ kind: "home" })}>

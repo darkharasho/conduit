@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { actionLabel, keyDisplayName, QUICK_PICKS } from "./action-labels";
-import { codeForKeyName } from "./keyboard-layout";
+import { actionLabel, keyDisplayName } from "./action-labels";
 
 describe("keyDisplayName", () => {
   it("names mouse controls the way a user sees them", () => {
@@ -63,24 +62,5 @@ describe("actionLabel", () => {
     await import("./action-catalog");
     expect(actionLabel({ kind: "chord", keys: ["leftctrl", "c"] })).toBe("Copy");
     expect(actionLabel({ kind: "chord", keys: ["leftalt", "f4"] })).toBe("Presses Alt + F4");
-  });
-});
-
-describe("QUICK_PICKS", () => {
-  it("every quick pick maps to a key the daemon knows", () => {
-    for (const pick of QUICK_PICKS) {
-      expect(
-        codeForKeyName(pick.key),
-        `quick pick "${pick.label}" (${pick.key}) has no evdev code`
-      ).not.toBeNull();
-    }
-  });
-
-  it("offers the media and navigation basics", () => {
-    const labels = QUICK_PICKS.map((p) => p.label);
-    expect(labels).toContain("Back");
-    expect(labels).toContain("Play / Pause");
-    expect(labels).toContain("Mute");
-    expect(labels).toContain("Screenshot");
   });
 });

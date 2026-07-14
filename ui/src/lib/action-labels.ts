@@ -149,26 +149,3 @@ export function actionLabel(action: ActionModel | null): string {
   }
 }
 
-export interface QuickPick {
-  /** Daemon key name written to the config. */
-  key: string;
-  label: string;
-  /** Optional dim annotation shown next to the label. */
-  hint?: string;
-}
-
-/**
- * One-click assignments. Every entry must be a single evdev key the daemon
- * already understands — combos (Ctrl+C) need engine support and are
- * deliberately absent.
- */
-export const QUICK_PICKS: QuickPick[] = [
-  { key: "back", label: "Back", hint: "browser / files" },
-  { key: "forward", label: "Forward", hint: "browser / files" },
-  { key: "btn_middle", label: "Middle click" },
-  { key: "print", label: "Screenshot" },
-  { key: "playpause", label: "Play / Pause" },
-  { key: "mute", label: "Mute" },
-  { key: "volumedown", label: "Volume down" },
-  { key: "volumeup", label: "Volume up" },
-];
