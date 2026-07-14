@@ -40,6 +40,12 @@ export interface DeviceLayout {
   /** Which event node of the device this layout describes. */
   node: "mouse" | "keyboard";
   groups: LayoutGroup[];
+  /**
+   * True when the device has prominent side buttons best shown in a right-profile
+   * (side-view) illustration rather than the default top-down view.
+   * DeviceArt and MouseIllustration both branch on this flag.
+   */
+  sideButtons?: boolean;
 }
 
 interface LayoutEntry {
@@ -120,9 +126,14 @@ const G600_KEYBOARD: DeviceLayout = {
   ],
 };
 
+// Keep-in-sync: the f13–f16 key codes here are written by the onboard-fix in
+// crates/conduit-core/src/onboard_fix.rs (Tasks 5-6). Labels are provisional
+// index-order assignments; Task 8 live-verifies and corrects if needed.
 const G502X_MOUSE: DeviceLayout = {
   title: "Logitech G502 X",
   node: "mouse",
+  // Side profile shown in DeviceArt / MouseIllustration when this is true.
+  sideButtons: true,
   groups: [
     {
       label: "Primary",
@@ -141,12 +152,38 @@ const G502X_MOUSE: DeviceLayout = {
     },
     WHEEL_GROUP,
     {
-      label: "Built-in — the mouse handles these itself",
+      label: "Top side buttons (after one-time fix)",
       buttons: [
-        { key: null, label: "G6 · DPI shift (sniper)", note: "Handled by firmware — changes DPI while held. Assign it a key in G HUB/logiops to make it mappable, then Detect." },
-        { key: null, label: "G7 · DPI down", note: "Handled by firmware. Assign in G HUB/logiops to make it mappable." },
-        { key: null, label: "G8 · DPI up", note: "Handled by firmware. Assign in G HUB/logiops to make it mappable." },
-        { key: null, label: "G9 · Profile cycle (base)", note: "Cycles onboard profiles; not remappable via input events." },
+        {
+          key: "f13",
+          label: "Top button",
+          note: "G6 · DPI-shift physical button — rewired to F13 by the one-time onboard fix. Until the fix runs, this button is handled by firmware and appears dimmed here.",
+        },
+        {
+          key: "f14",
+          label: "Front trigger",
+          note: "G7 · DPI-down physical button — rewired to F14 by the one-time onboard fix.",
+        },
+        {
+          key: "f15",
+          label: "Thumb button",
+          note: "G8 · DPI-up physical button — rewired to F15 by the one-time onboard fix.",
+        },
+        {
+          key: "f16",
+          label: "Rear trigger",
+          note: "G9-group side button — rewired to F16 by the one-time onboard fix.",
+        },
+      ],
+    },
+    {
+      label: "Built-in — not remappable",
+      buttons: [
+        {
+          key: null,
+          label: "G9 · Profile cycle (base)",
+          note: "Cycles onboard profiles; not remappable via input events.",
+        },
       ],
     },
   ],

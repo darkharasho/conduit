@@ -5,7 +5,7 @@ import { layoutFor } from "../lib/mouse-layouts";
 import { actionLabel } from "../lib/action-labels";
 import { CuratedLayout } from "./CuratedLayout";
 import { ExtraKeys } from "./ExtraKeys";
-import { MouseIllustration, ILLO_KEYS } from "./MouseIllustration";
+import { MouseIllustration, ILLO_KEYS, SIDE_ILLO_KEYS } from "./MouseIllustration";
 
 interface Props {
   model: ConfigModel;
@@ -110,7 +110,9 @@ export function MouseViz({
   };
 
   // Standard controls the mouse picture can place; everything else is a chip.
-  const illoKeys = ILLO_KEYS.filter(has);
+  // In side-view mode (devices with sideButtons), f13–f16 are also placed on the picture.
+  const sideView = curated?.sideButtons ?? false;
+  const illoKeys = (sideView ? SIDE_ILLO_KEYS : ILLO_KEYS).filter(has);
 
   const illustration = (
     <MouseIllustration
@@ -121,6 +123,8 @@ export function MouseViz({
       onSelectKey={onSelectKey}
       dev={dev}
       keys={illoKeys}
+      sideView={sideView}
+      layout={curated}
     />
   );
 

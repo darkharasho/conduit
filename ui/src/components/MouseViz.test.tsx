@@ -115,17 +115,20 @@ describe("MouseViz curated layouts", () => {
     );
     expect(getByLabelText("Logitech G502 X")).toBeTruthy();
     expect(getByText("G4 · Back")).toBeTruthy();
-    expect(getByText("G6 · DPI shift (sniper)")).toBeTruthy();
+    // After the onboard fix, G6–G8 become f13–f16 with human labels; G9 stays onboard.
+    expect(getByText("Top button")).toBeTruthy();
     // The mouse picture renders for curated devices too
     expect(container.querySelector('[data-illo-key="mouse4"]')).not.toBeNull();
-    // Chips never show raw evdev names: the Back chip is just its label
-    const backChip = container.querySelector('[data-key="mouse4"]')!;
+    // Chips never show raw evdev names: the Back chip is just its label.
+    // Use button[data-key] to find the curated chip, not the illustration marker.
+    const backChip = container.querySelector('button[data-key="mouse4"]')!;
     expect(backChip.textContent).toBe("G4 · Back");
     // Onboard controls are informational, not buttons.
+    // After the fix, only G9 profile-cycle remains as a null-key onboard chip.
     const onboard = container.querySelectorAll(".mousekey--onboard");
-    expect(onboard.length).toBe(4);
+    expect(onboard.length).toBe(1);
     // Mappable curated chips carry the canonical key.
-    expect(container.querySelector('[data-key="mouse4"]')).not.toBeNull();
+    expect(container.querySelector('button[data-key="mouse4"]')).not.toBeNull();
   });
 
   it("G600 keyboard node is handled by KeyboardViz, not MouseViz (mouse node here)", () => {
@@ -178,7 +181,8 @@ mouse4 = "back"
       <MouseViz model={model} activeProfile="default" activeLayer="base"
                 selectedKey={null} onSelectKey={() => {}} dev={g502} />
     );
-    const chip = container.querySelector('[data-key="mouse4"]')!;
+    // Use button[data-key] to find the curated chip, not the illustration marker.
+    const chip = container.querySelector('button[data-key="mouse4"]')!;
     expect(chip).not.toBeNull();
     expect(chip.className).toContain("mousekey--devspec");
   });

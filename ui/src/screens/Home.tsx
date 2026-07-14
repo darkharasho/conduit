@@ -9,6 +9,7 @@ import {
   rememberedDevices,
   type PhysicalDevice,
 } from "../lib/device-registry";
+import { layoutFor } from "../lib/mouse-layouts";
 import { presentError, type ErrorPresentation } from "../lib/error-messages";
 
 interface Props {
@@ -86,7 +87,7 @@ export function HomeScreen({ model, connected, onOpenDevice }: Props) {
       <div className="home__grid">
         {phys.map((d) => (
           <button key={d.key} className="device-card" onClick={() => onOpenDevice(d)}>
-            <span className="device-card__art"><DeviceArt archetype={d.archetype} /></span>
+            <span className="device-card__art"><DeviceArt archetype={d.archetype} sideView={d.nodes[0] ? layoutFor(d.nodes[0])?.sideButtons : false} /></span>
             <span className="device-card__info">
               <span className="device-card__name">{d.name}</span>
               <span className="device-card__state">
