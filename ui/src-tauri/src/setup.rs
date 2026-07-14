@@ -56,12 +56,6 @@ usermod -aG input {user}\n",
     Ok(script)
 }
 
-/// Infallible wrapper — panics on invalid username (for use in tests only via
-/// the checked variant; callers in commands always use the checked form).
-pub fn fix_permissions_script(user: &str) -> String {
-    fix_permissions_script_checked(user)
-        .unwrap_or_else(|e| panic!("fix_permissions_script: {}", e))
-}
 
 /// Assemble a multi-section diagnostic report.
 /// Each section is rendered as:
@@ -445,7 +439,7 @@ mod tests {
 
     #[test]
     fn fix_script_is_single_prompt_batch_and_validates_user() {
-        let s = fix_permissions_script("mstephens");
+        let s = fix_permissions_script_checked("mstephens").unwrap();
         assert!(s.starts_with("set -e\n"));
         assert!(s.contains("/etc/udev/rules.d/99-conduit.rules"));
         assert!(s.contains("udevadm control --reload"));
