@@ -67,7 +67,7 @@ const SIDE_MARKER_POS: Record<string, { x: number; y: number }> = {
   f13:        { x: 266, y: 144 }, // Top button    (~SideBody x=28, y=35)
   f14:        { x: 278, y: 173 }, // Front trigger (~SideBody x=32, y=44)
   f15:        { x: 246, y: 208 }, // Thumb button  (~SideBody x=22, y=55)
-  f16:        { x: 234, y: 243 }, // Rear trigger  (~SideBody x=18, y=66)
+  f16:        { x: 266, y: 314 }, // Rear trigger  (~SideBody x=28, y=88) — kept clear of the mouse4/5 strip markers
 };
 
 interface Props {
