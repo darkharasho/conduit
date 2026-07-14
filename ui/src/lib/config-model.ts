@@ -33,6 +33,8 @@ export interface ProfileModel {
   match?: Record<string, string>;
   /** Parent profile to inherit from */
   inherit?: string;
+  /** Whether this profile auto-switches on window focus; absent/undefined = true */
+  autoSwitch?: boolean;
   /** Base-layer key mappings (profile.keys table) */
   keys: Record<string, RawActionModel>;
   /** Named layers: layerName → keyName → action */
@@ -127,6 +129,7 @@ export function parseConfigToml(toml: string): ConfigModel {
 
     const match = rp["match"] as Record<string, string> | undefined;
     const inherit = rp["inherit"] as string | undefined;
+    const autoSwitch = rp["auto_switch"] as boolean | undefined;
     const rawKeys = (rp["keys"] as Record<string, RawActionModel> | undefined) ?? {};
     const rawLayers =
       (rp["layers"] as Record<string, Record<string, RawActionModel>> | undefined) ?? {};
@@ -148,7 +151,7 @@ export function parseConfigToml(toml: string): ConfigModel {
         )
       : undefined;
 
-    return {
+    const prof: ProfileModel = {
       name,
       match,
       inherit,
@@ -158,6 +161,8 @@ export function parseConfigToml(toml: string): ConfigModel {
       ),
       device,
     };
+    if (autoSwitch === false) prof.autoSwitch = false;
+    return prof;
   });
 
   return { settings, devices, profiles, _raw: raw };
@@ -179,6 +184,7 @@ export function serializeConfigToml(m: ConfigModel): string {
     const entry: Record<string, unknown> = {};
     if (prof.match !== undefined) entry["match"] = prof.match;
     if (prof.inherit !== undefined) entry["inherit"] = prof.inherit;
+    if (prof.autoSwitch === false) entry["auto_switch"] = false;
     if (prof.device !== undefined && Object.keys(prof.device).length > 0) {
       entry["device"] = Object.fromEntries(
         Object.entries(prof.device).map(([sel, ovr]) => {
@@ -687,6 +693,83 @@ export function setProfileMatch(
   const next = Object.keys(cleaned).length > 0 ? cleaned : undefined;
   const profiles = m.profiles.map((p, i) => (i === profIdx ? { ...p, match: next } : p));
   return { ...m, profiles };
+}
+
+/**
+ * Toggle the auto_switch flag for a profile.  `on === true` removes the key
+ * (the default is true); `on === false` sets `auto_switch = false` in TOML.
+ * Unknown profile → unchanged model.
+ */
+export function setProfileAutoSwitch(
+  m: ConfigModel,
+  profileName: string,
+  on: boolean
+): ConfigModel {
+  const profIdx = m.profiles.findIndex((p) => p.name === profileName);
+  if (profIdx === -1) return m;
+  const profiles = m.profiles.map((p, i) => {
+    if (i !== profIdx) return p;
+    const next = { ...p };
+    if (on) {
+      delete next.autoSwitch;
+    } else {
+      next.autoSwitch = false;
+    }
+    return next;
+  });
+  return { ...m, profiles };
+}
+
+/**
+ * Remove an app profile from the model.  Throws (without the word "profile")
+ * when asked to remove the default profile.  Deletes the profile's table from
+ * `_raw` so serialization does not resurrect it.
+ */
+export function removeProfile(m: ConfigModel, profileName: string): ConfigModel {
+  if (profileName === "default") {
+    throw new Error("the Everywhere settings cannot be removed");
+  }
+  const profiles = m.profiles.filter((p) => p.name !== profileName);
+
+  // Remove the profile's table from _raw so serialization doesn't resurrect it.
+  const rawProfile = (m._raw["profile"] as Record<string, unknown> | undefined) ?? {};
+  const newRawProfile = { ...rawProfile };
+  delete newRawProfile[profileName];
+  const _raw = { ...m._raw, profile: newRawProfile };
+
+  return { ...m, profiles, _raw };
+}
+
+/**
+ * Effective action for a key, with fallback to the default ("Everywhere") profile.
+ *
+ * - If profileName === "default": wraps getEffectiveAction for the default
+ *   profile with source "everywhere".
+ * - Otherwise: looks up the app profile's own effective action first → source
+ *   "app"; if not found, falls back to the default profile's effective action →
+ *   source "everywhere"; if still not found → null.
+ */
+export function actionWithEverywhereFallback(
+  m: ConfigModel,
+  profileName: string,
+  dev: DeviceIdent | null,
+  layer: string,
+  keyName: string
+): { action: ActionModel; source: "app" | "everywhere" } | null {
+  if (profileName === "default") {
+    const result = getEffectiveAction(m, "default", dev, layer, keyName);
+    return result ? { action: result.action, source: "everywhere" } : null;
+  }
+
+  // Try the app profile first.
+  const appResult = getEffectiveAction(m, profileName, dev, layer, keyName);
+  if (appResult) {
+    return { action: appResult.action, source: "app" };
+  }
+
+  // Fall back to the default ("Everywhere") profile.
+  const everywhereResult = getEffectiveAction(m, "default", dev, layer, keyName);
+  return everywhereResult ? { action: everywhereResult.action, source: "everywhere" } : null;
 }
 
 // ── Presentation helpers (pure, no side effects) ──────────────────────────────

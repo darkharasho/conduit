@@ -13,6 +13,9 @@ import {
   setMouseGrab,
   getProfileMatchLabel,
   actionToTomlLine,
+  setProfileAutoSwitch,
+  removeProfile,
+  actionWithEverywhereFallback,
 } from "./config-model";
 
 // The spec example TOML from crates/conduit-core/src/config.rs tests.
@@ -738,5 +741,48 @@ describe("chord actions", () => {
         keys: ["leftctrl", "leftshift", "t"],
       }),
     ).toContain('mouse5 = "leftctrl+leftshift+t"');
+  });
+});
+
+// ── Per-app helpers (autoSwitch, removeProfile, actionWithEverywhereFallback) ──
+
+describe("per-app helpers", () => {
+  const TOML = `
+[profile.default.keys]
+mouse4 = "leftctrl+c"
+
+[profile.firefox]
+match = { class = "firefox" }
+auto_switch = false
+[profile.firefox.keys]
+mouse4 = "back"
+`;
+  const m = parseConfigToml(TOML);
+
+  it("round-trips auto_switch and setProfileAutoSwitch toggles it", () => {
+    expect(m.profiles.find((p) => p.name === "firefox")?.autoSwitch).toBe(false);
+    const on = setProfileAutoSwitch(m, "firefox", true);
+    expect(serializeConfigToml(on)).not.toContain("auto_switch");
+    const off = setProfileAutoSwitch(on, "firefox", false);
+    expect(serializeConfigToml(off)).toContain("auto_switch = false");
+  });
+
+  it("removeProfile deletes the section and refuses default", () => {
+    const removed = removeProfile(m, "firefox");
+    expect(removed.profiles.map((p) => p.name)).toEqual(["default"]);
+    expect(serializeConfigToml(removed)).not.toContain("firefox");
+    expect(() => removeProfile(m, "default")).toThrow();
+  });
+
+  it("actionWithEverywhereFallback distinguishes overrides from inheritance", () => {
+    expect(actionWithEverywhereFallback(m, "firefox", null, "base", "mouse4"))
+      .toEqual({ action: { kind: "key", key: "back" }, source: "app" });
+    expect(actionWithEverywhereFallback(m, "firefox", null, "base", "mouse5")).toBeNull();
+    const withDefault = actionWithEverywhereFallback(m, "firefox", null, "base", "mouse4");
+    expect(withDefault?.source).toBe("app");
+    // Unmapped in app, mapped in default → everywhere
+    const m2 = parseConfigToml(TOML.replace('mouse4 = "back"', 'mouse5 = "back"'));
+    expect(actionWithEverywhereFallback(m2, "firefox", null, "base", "mouse4"))
+      .toEqual({ action: { kind: "chord", keys: ["leftctrl", "c"] }, source: "everywhere" });
   });
 });
