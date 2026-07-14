@@ -336,6 +336,12 @@ button {
   border-color: #7dd3fc;
 }
 
+.btn--ghost {
+  background: none;
+  border-color: transparent;
+  color: var(--text-mid);
+}
+
 /* ── Screen shell (shared wrapper for all four screens) ── */
 
 .screen-shell {
@@ -1757,6 +1763,59 @@ img.app-pill__avatar { object-fit: contain; }
 .app-picker__row-name { flex: 1; }
 .app-picker__row-sub { font-size: 11px; color: var(--text-lo); }
 
+/* ── App-picker advanced match form ─────────────────────────────────────── */
+.app-picker__advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 2px;
+}
+
+.app-picker__adv-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.app-picker__adv-label {
+  font-size: 12px;
+  color: var(--text-lo);
+}
+
+.app-picker__adv-input {
+  background: var(--bg-body);
+  border: 1px solid var(--border-control);
+  border-radius: var(--r4);
+  padding: 7px 10px;
+  color: var(--text-hi);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.app-picker__adv-input:focus {
+  border-color: var(--accent-border);
+}
+
+.app-picker__adv-actions {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.app-picker__adv-link {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  margin-top: 8px;
+  text-align: left;
+  padding: 4px 0;
+}
+
 /* ── Per-app overlay — context strip ─────────────────────────────────── */
 .app-strip { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border-structural); font-size: 13px; color: var(--text-mid); }
 .app-strip__desc { color: var(--text-lo); font-size: 12px; line-height: 1.5; }
@@ -1873,6 +1932,13 @@ img.app-pill__avatar { object-fit: contain; }
 .setup__copy-confirm {
   font-size: 12px;
   color: var(--accent);
+}
+
+.setup__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
 }
 
 /* ── Motion ───────────────────────────────────────────────────────────── */

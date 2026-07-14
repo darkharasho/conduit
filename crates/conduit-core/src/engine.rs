@@ -325,6 +325,22 @@ impl Engine {
     /// mid-hold so modifiers can't stick.
     pub fn release_device(&mut self, source: u16) -> &[Event] {
         self.out.clear();
+        // A tap-hold pending on the vanished device can never receive its release;
+        // resolve it as a tap now (press+release of the tap key) and drop any
+        // buffered events that came from the same slot.
+        if let Some(p) = &self.pending {
+            if p.source == Some(source) {
+                let p = self.pending.take().unwrap();
+                self.out.push(Event { key: p.tap, state: KeyState::Press, time_us: p.press_time_us });
+                self.out.push(Event { key: p.tap, state: KeyState::Release, time_us: p.press_time_us });
+                // Replay buffered events from OTHER slots through normal processing;
+                // drop the removed slot's. Mirror resolve()'s drain loop.
+                let buffered = std::mem::take(&mut self.buffer);
+                for (ev, slot) in buffered {
+                    if slot != Some(source) { self.process(ev, slot); }
+                }
+            }
+        }
         let keys: Vec<Key> = self.held.iter()
             .filter(|(_, h)| h.source == Some(source))
             .map(|(k, _)| *k)
@@ -810,5 +826,81 @@ mod tests {
         assert!(out.is_empty(), "LayerHeld emits no release events; got {out:?}");
         // layer gone: h → h (base layer passthrough)
         assert_eq!(e.handle_on(press("h", 300_000), Some(5)), &[press("h", 300_000)]);
+    }
+
+    // ── release_device + pending tap-hold ─────────────────────────────────────
+
+    #[test]
+    fn release_device_pending_taphold_resolves_as_tap() {
+        // tap-hold key pressed on slot 2 (pending opens); device disappears before
+        // release or timeout. Must resolve as tap (press+release of tap key) and
+        // leave no pending state for subsequent ticks.
+        let toml = "[profile.default.keys]\ncapslock = { tap = \"esc\", hold = \"leftctrl\" }";
+        let mut e = engine(toml);
+        // Press tap-hold key on slot 2 → pending open
+        assert!(e.handle_on(press("capslock", 0), Some(2)).is_empty());
+        assert!(e.next_deadline_us().is_some(), "pending should be open");
+
+        // Device slot 2 removed → must emit tap press+release
+        let out = e.release_device(2).to_vec();
+        assert!(
+            out.contains(&press("esc", 0)),
+            "expected esc-press in release_device output; got {out:?}"
+        );
+        assert!(
+            out.contains(&release("esc", 0)),
+            "expected esc-release in release_device output; got {out:?}"
+        );
+
+        // No leftctrl must appear
+        assert!(
+            !out.iter().any(|ev| ev.key == key("leftctrl")),
+            "leftctrl must NOT appear; got {out:?}"
+        );
+
+        // Pending is gone: a subsequent tick must emit nothing
+        let tick_out = e.tick(500_000).to_vec();
+        assert!(
+            tick_out.is_empty(),
+            "tick after release_device must emit nothing (pending cleared); got {tick_out:?}"
+        );
+
+        // next_deadline_us must be None
+        assert_eq!(e.next_deadline_us(), None, "no deadline should remain after pending cleared");
+    }
+
+    #[test]
+    fn release_device_drops_same_slot_buffered_replays_other_slot() {
+        // tap-hold on slot 2 (pending); two events buffered: one from slot 2 and one
+        // from slot 9.  release_device(2) must:
+        //   - resolve pending as tap
+        //   - drop the slot-2 buffered event
+        //   - replay the slot-9 buffered event through normal processing
+        let toml = "[profile.default.keys]\ncapslock = { tap = \"esc\", hold = \"leftctrl\" }\na = \"b\"";
+        let mut e = engine(toml);
+        // Open pending on slot 2
+        assert!(e.handle_on(press("capslock", 0), Some(2)).is_empty());
+        // Buffer an event from the SAME slot (slot 2) — must be dropped
+        let _ = e.handle_on(press("q", 10_000), Some(2));
+        // Buffer an event from a DIFFERENT slot (slot 9) — must replay
+        let _ = e.handle_on(press("a", 20_000), Some(9));
+
+        let out = e.release_device(2).to_vec();
+
+        // Tap resolved: esc press+release present
+        assert!(out.contains(&press("esc", 0)), "esc-press missing; got {out:?}");
+        assert!(out.contains(&release("esc", 0)), "esc-release missing; got {out:?}");
+
+        // 'q' from slot 2 must NOT appear
+        assert!(
+            !out.iter().any(|ev| ev.key == key("q")),
+            "'q' from same slot must be dropped; got {out:?}"
+        );
+
+        // 'a' from slot 9 replays and remaps to 'b'
+        assert!(
+            out.contains(&press("b", 20_000)),
+            "slot-9 'a' should replay as 'b'; got {out:?}"
+        );
     }
 }
