@@ -196,6 +196,68 @@ export async function collectReport(): Promise<string> {
   return call<string>("collect_report");
 }
 
+// ---- Ratbag / onboard-profile types ----
+
+export interface RatbagStatus {
+  daemon_running: boolean;
+  device_id: string | null;
+  device_name: string | null;
+}
+
+export interface OnboardButton {
+  index: number;
+  action: string;
+}
+
+export interface OnboardButtonDto {
+  index: number;
+  action: string;
+  human: string;
+}
+
+// ---- Ratbag commands ----
+
+/** Stage the patched G502 X device file to a temp dir; returns the temp path. */
+export async function ratbagStageDeviceFile(): Promise<string> {
+  return call<string>("ratbag_stage_device_file");
+}
+
+/** Query ratbagd daemon status and G502 X device presence. */
+export async function ratbagGetStatus(): Promise<RatbagStatus> {
+  return call<RatbagStatus>("ratbag_status");
+}
+
+/** Read the current onboard button map for a device. */
+export async function ratbagReadButtons(
+  deviceId: string
+): Promise<OnboardButtonDto[]> {
+  return call<OnboardButtonDto[]>("ratbag_read_buttons", {
+    deviceId,
+  });
+}
+
+/** Run the one-prompt pkexec setup: copy device data, install drop-in, restart ratbagd. */
+export async function ratbagFixSetup(
+  patchedDeviceTempPath: string
+): Promise<void> {
+  return call<void>("ratbag_fix_setup", { patchedDeviceTempPath });
+}
+
+/** Compute the suggested collision-fix rewrite targets from a button map. */
+export async function ratbagSuggestRewrites(
+  buttons: OnboardButton[]
+): Promise<[number, string][]> {
+  return call<[number, string][]>("ratbag_suggest_rewrites", { buttons });
+}
+
+/** Rewrite button mappings on the device (sequential ratbagctl calls). */
+export async function ratbagRewrite(
+  deviceId: string,
+  targets: [number, string][]
+): Promise<void> {
+  return call<void>("ratbag_rewrite", { deviceId, targets });
+}
+
 // ---- Subscription event listeners ----
 
 /** Subscribe to live Status push events from the daemon */

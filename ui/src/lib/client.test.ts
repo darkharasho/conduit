@@ -30,6 +30,12 @@ import {
   setupFixPermissions,
   restartEngine,
   collectReport,
+  ratbagStageDeviceFile,
+  ratbagGetStatus,
+  ratbagReadButtons,
+  ratbagFixSetup,
+  ratbagSuggestRewrites,
+  ratbagRewrite,
 } from "./client";
 import type {
   Status,
@@ -38,6 +44,9 @@ import type {
   InstalledApp,
   SetupStatus,
   PermissionFixOutcome,
+  RatbagStatus,
+  OnboardButtonDto,
+  OnboardButton,
 } from "./client";
 
 const mockInvoke = vi.mocked(invoke);
@@ -350,5 +359,96 @@ describe("collectReport", () => {
     const result = await collectReport();
     expect(mockInvoke).toHaveBeenCalledWith("collect_report");
     expect(result).toBe(report);
+  });
+});
+
+// ---- Ratbag command bindings ----
+
+describe("ratbagStageDeviceFile", () => {
+  it("calls invoke('ratbag_stage_device_file') and returns temp path", async () => {
+    const path = "/tmp/conduit-ratbag-Abc123/logitech-g502-x.device";
+    mockInvoke.mockResolvedValueOnce(path);
+    const result = await ratbagStageDeviceFile();
+    expect(mockInvoke).toHaveBeenCalledWith("ratbag_stage_device_file");
+    expect(result).toBe(path);
+  });
+});
+
+describe("ratbagGetStatus", () => {
+  it("calls invoke('ratbag_status') and returns RatbagStatus", async () => {
+    const status: RatbagStatus = {
+      daemon_running: true,
+      device_id: "logitech-g502-x-plus:usb:046d:c547:1",
+      device_name: "Logitech G502 X PLUS",
+    };
+    mockInvoke.mockResolvedValueOnce(status);
+    const result = await ratbagGetStatus();
+    expect(mockInvoke).toHaveBeenCalledWith("ratbag_status");
+    expect(result).toEqual(status);
+    expect(result.daemon_running).toBe(true);
+    expect(result.device_id).toBe("logitech-g502-x-plus:usb:046d:c547:1");
+  });
+});
+
+describe("ratbagReadButtons", () => {
+  it("calls invoke('ratbag_read_buttons') with deviceId and returns button dtos", async () => {
+    const buttons: OnboardButtonDto[] = [
+      { index: 0, action: "button 1", human: "Left click" },
+      { index: 5, action: "button 1", human: "Left click" },
+    ];
+    mockInvoke.mockResolvedValueOnce(buttons);
+    const result = await ratbagReadButtons("logitech-g502-x-plus:usb:046d:c547:1");
+    expect(mockInvoke).toHaveBeenCalledWith("ratbag_read_buttons", {
+      deviceId: "logitech-g502-x-plus:usb:046d:c547:1",
+    });
+    expect(result).toEqual(buttons);
+    expect(result[0].human).toBe("Left click");
+  });
+});
+
+describe("ratbagFixSetup", () => {
+  it("calls invoke('ratbag_fix_setup') with patchedDeviceTempPath", async () => {
+    const path = "/tmp/conduit-ratbag-Abc123/logitech-g502-x.device";
+    mockInvoke.mockResolvedValueOnce(undefined);
+    await ratbagFixSetup(path);
+    expect(mockInvoke).toHaveBeenCalledWith("ratbag_fix_setup", {
+      patchedDeviceTempPath: path,
+    });
+  });
+});
+
+describe("ratbagSuggestRewrites", () => {
+  it("calls invoke('ratbag_suggest_rewrites') with buttons and returns targets", async () => {
+    const buttons: OnboardButton[] = [
+      { index: 0, action: "button 1" },
+      { index: 5, action: "button 1" },
+      { index: 6, action: "button 1" },
+    ];
+    const targets: [number, string][] = [
+      [5, "KEY_F13"],
+      [6, "KEY_F14"],
+    ];
+    mockInvoke.mockResolvedValueOnce(targets);
+    const result = await ratbagSuggestRewrites(buttons);
+    expect(mockInvoke).toHaveBeenCalledWith("ratbag_suggest_rewrites", {
+      buttons,
+    });
+    expect(result).toEqual(targets);
+  });
+});
+
+describe("ratbagRewrite", () => {
+  it("calls invoke('ratbag_rewrite') with deviceId and targets", async () => {
+    const deviceId = "logitech-g502-x-plus:usb:046d:c547:1";
+    const targets: [number, string][] = [
+      [5, "KEY_F13"],
+      [6, "KEY_F14"],
+    ];
+    mockInvoke.mockResolvedValueOnce(undefined);
+    await ratbagRewrite(deviceId, targets);
+    expect(mockInvoke).toHaveBeenCalledWith("ratbag_rewrite", {
+      deviceId,
+      targets,
+    });
   });
 });

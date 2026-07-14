@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 mod apps;
+mod ratbag;
 mod setup;
 
 // ---- Re-export proto types as Tauri-serializable types ----
@@ -234,10 +235,7 @@ pub struct CapturedKey {
 fn spawn_status_subscription(app: AppHandle) {
     thread::spawn(move || {
         loop {
-            match subscribe_loop(&app, Request::SubscribeStatus, "conduit://status") {
-                Ok(_) => {}
-                Err(_) => {}
-            }
+            let _ = subscribe_loop(&app, Request::SubscribeStatus, "conduit://status");
             // Emit disconnected, wait, then retry
             let _ = app.emit("conduit://disconnected", ());
             thread::sleep(Duration::from_secs(1));
@@ -250,10 +248,7 @@ fn spawn_status_subscription(app: AppHandle) {
 fn spawn_events_subscription(app: AppHandle) {
     thread::spawn(move || {
         loop {
-            match subscribe_loop(&app, Request::SubscribeEvents, "conduit://event") {
-                Ok(_) => {}
-                Err(_) => {}
-            }
+            let _ = subscribe_loop(&app, Request::SubscribeEvents, "conduit://event");
             let _ = app.emit("conduit://disconnected", ());
             thread::sleep(Duration::from_secs(1));
         }
@@ -371,6 +366,12 @@ pub fn run() {
             setup::setup_fix_permissions,
             setup::restart_engine,
             setup::collect_report,
+            ratbag::ratbag_stage_device_file,
+            ratbag::ratbag_status,
+            ratbag::ratbag_read_buttons,
+            ratbag::ratbag_fix_setup,
+            ratbag::ratbag_suggest_rewrites,
+            ratbag::ratbag_rewrite,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

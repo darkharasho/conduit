@@ -191,7 +191,7 @@ pub fn list_installed_apps_impl(dirs: &[PathBuf]) -> Vec<InstalledApp> {
         }
     }
 
-    apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    apps.sort_by_key(|a: &InstalledApp| a.name.to_lowercase());
     apps
 }
 
