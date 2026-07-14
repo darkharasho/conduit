@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { ConfigModel, DeviceIdent } from "../lib/config-model";
-import { getEffectiveAction } from "../lib/config-model";
+import { getEffectiveAction, actionWithEverywhereFallback } from "../lib/config-model";
 import { keyNameForCode } from "../lib/keyboard-layout";
 import { actionLabel, keyDisplayName } from "../lib/action-labels";
 
@@ -39,6 +39,7 @@ export function ExtraKeys({
   primary,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
+  const overlayMode = activeProfile !== "default";
 
   if (codes.length === 0) return null;
   const primaryCodes = codes.filter(primary);
@@ -46,9 +47,15 @@ export function ExtraKeys({
 
   const chip = (code: number) => {
     const key = keyNameForCode(code);
-    const eff = getEffectiveAction(model, activeProfile, dev, activeLayer, key);
+    const eff = actionWithEverywhereFallback(model, activeProfile, dev, activeLayer, key);
     const hint = eff ? actionLabel(eff.action) : "";
     const isSelected = key === selectedKey;
+    const isInherited = overlayMode && eff?.source === "everywhere";
+    const isOverride = overlayMode && eff?.source === "app";
+    const rawEff = !overlayMode
+      ? getEffectiveAction(model, activeProfile, dev, activeLayer, key)
+      : null;
+    const isDevSpec = !overlayMode && rawEff?.source === "device";
     return (
       <button
         key={code}
@@ -56,7 +63,9 @@ export function ExtraKeys({
         className={[
           "mousekey",
           eff ? "mousekey--mapped" : "",
-          eff?.source === "device" ? "mousekey--devspec" : "",
+          isDevSpec ? "mousekey--devspec" : "",
+          isInherited ? "mousekey--inherited" : "",
+          isOverride ? "mousekey--override" : "",
           isSelected ? "mousekey--sel" : "",
         ]
           .filter(Boolean)

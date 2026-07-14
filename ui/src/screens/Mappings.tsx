@@ -240,6 +240,7 @@ export function MappingsScreen({
             applyWithUndoImpl(frame.prev, "Undone", true);
           },
         });
+        return true;
       } catch (err) {
         // Revert optimistic update
         if (prevSnapshot !== null) {
@@ -262,6 +263,7 @@ export function MappingsScreen({
             applyWithUndoImpl(updated, description, skipUndoPush);
           },
         });
+        return false;
       }
     },
     [] // stable — reads current model via modelRef at call time
@@ -440,8 +442,8 @@ export function MappingsScreen({
                   }}
                   onRemove={() => {
                     const updated = removeProfile(model, railActiveProfile);
-                    applyWithUndoImpl(updated, `${activePill.label} settings removed`).then(() => {
-                      onSelectProfile?.("default");
+                    applyWithUndoImpl(updated, `${activePill.label} settings removed`).then((ok) => {
+                      if (ok) onSelectProfile?.("default");
                     });
                   }}
                 />

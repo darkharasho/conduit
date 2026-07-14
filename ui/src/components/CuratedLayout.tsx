@@ -1,5 +1,5 @@
 import type { ConfigModel, DeviceIdent } from "../lib/config-model";
-import { actionWithEverywhereFallback } from "../lib/config-model";
+import { actionWithEverywhereFallback, getEffectiveAction } from "../lib/config-model";
 import type { DeviceLayout } from "../lib/mouse-layouts";
 import { actionLabel } from "../lib/action-labels";
 
@@ -56,6 +56,10 @@ export function CuratedLayout({
                 const isSelected = b.key === selectedKey;
                 const isInherited = overlayMode && eff?.source === "everywhere";
                 const isOverride = overlayMode && eff?.source === "app";
+                const rawEff = !overlayMode
+                  ? getEffectiveAction(model, activeProfile, dev, activeLayer, b.key)
+                  : null;
+                const isDevSpec = !overlayMode && rawEff?.source === "device";
                 return (
                   <button
                     key={b.label}
@@ -63,6 +67,7 @@ export function CuratedLayout({
                     className={[
                       "mousekey",
                       eff ? "mousekey--mapped" : "",
+                      isDevSpec ? "mousekey--devspec" : "",
                       isInherited ? "mousekey--inherited" : "",
                       isOverride ? "mousekey--override" : "",
                       isSelected ? "mousekey--sel" : "",

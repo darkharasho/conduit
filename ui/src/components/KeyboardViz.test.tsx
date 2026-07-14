@@ -54,6 +54,34 @@ describe("KeyboardViz capability filtering", () => {
   });
 });
 
+describe("KeyboardViz devspec class", () => {
+  it("key mapped under device section gets keycap--devspec in default profile", () => {
+    const TOML = `
+[profile.default.device."0001:0002/Weird Kbd".keys]
+a = "b"
+`;
+    const devKbd = {
+      name: "Weird Kbd",
+      vendor: 1,
+      product: 2,
+      keys: [30], // a = evdev code 30
+    };
+    const { container } = render(
+      <KeyboardViz
+        model={parseConfigToml(TOML)}
+        activeProfile="default"
+        activeLayer="base"
+        selectedKey={null}
+        onSelectKey={() => {}}
+        dev={devKbd}
+      />
+    );
+    const capA = container.querySelector('button[title="a"]')!;
+    expect(capA).not.toBeNull();
+    expect(capA.className).toContain("keycap--devspec");
+  });
+});
+
 describe("KeyboardViz curated layouts", () => {
   it("G600 keyboard node shows the labeled thumb grid with numpad defaults", () => {
     const g600kbd = {

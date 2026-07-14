@@ -1,5 +1,5 @@
 import type { ConfigModel, ActionModel, DeviceIdent } from "../lib/config-model";
-import { actionWithEverywhereFallback } from "../lib/config-model";
+import { actionWithEverywhereFallback, getEffectiveAction } from "../lib/config-model";
 import { ANSI_LAYOUT, codeForKeyName, keyNameForCode } from "../lib/keyboard-layout";
 import { layoutFor } from "../lib/mouse-layouts";
 import { CuratedLayout } from "./CuratedLayout";
@@ -108,6 +108,10 @@ export function KeyboardViz({
               const absent = declared !== null && code !== null && !declared.has(code);
               const isInherited = overlayMode && eff?.source === "everywhere";
               const isOverride = overlayMode && eff?.source === "app";
+              const rawEff = !overlayMode
+                ? getEffectiveAction(model, activeProfile, dev, activeLayer, cap.name)
+                : null;
+              const isDevSpec = !overlayMode && rawEff?.source === "device";
 
               return (
                 <button
@@ -115,6 +119,7 @@ export function KeyboardViz({
                   className={[
                     "keycap",
                     eff ? "keycap--mapped" : "",
+                    isDevSpec ? "keycap--devspec" : "",
                     isInherited ? "keycap--inherited" : "",
                     isOverride ? "keycap--override" : "",
                     isSelected ? "keycap--selected" : "",

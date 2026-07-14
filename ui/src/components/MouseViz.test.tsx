@@ -156,3 +156,31 @@ describe("MouseViz plain-language chips", () => {
     expect(wheel.textContent).not.toContain("volumeup");
   });
 });
+
+describe("CuratedLayout devspec class", () => {
+  it("chip mapped under device section gets mousekey--devspec in default profile", () => {
+    const TOML = `
+[profile.default.device."046d:4099/Logitech G502 X PLUS".keys]
+mouse4 = "back"
+`;
+    const model = parseConfigToml(TOML);
+    const g502 = {
+      name: "Logitech G502 X PLUS",
+      vendor: 0x046d,
+      product: 0x4099,
+      phys: "",
+      id: "046d:4099/Logitech G502 X PLUS",
+      keys: [0x110, 0x111, 0x112, 0x113, 0x114],
+      wheel: true,
+      hwheel: true,
+    };
+    const { container } = render(
+      <MouseViz model={model} activeProfile="default" activeLayer="base"
+                selectedKey={null} onSelectKey={() => {}} dev={g502} />
+    );
+    const chip = container.querySelector('[data-key="mouse4"]')!;
+    expect(chip).not.toBeNull();
+    expect(chip.className).toContain("mousekey--devspec");
+  });
+});
+

@@ -578,6 +578,96 @@ mouse4 = "back"
   });
 });
 
+describe("MappingsScreen — profile removal navigates to default only on success", () => {
+  const FIREFOX_TOML = `
+[profile.default.keys]
+
+[profile.firefox]
+match = { class = "firefox" }
+[profile.firefox.keys]
+`;
+
+  /** Navigate the 3-step remove flow: ⋯ → "Remove Firefox settings" → "Remove" */
+  async function triggerRemove(container: HTMLElement) {
+    // Step 1: open the ⋯ menu
+    const menuBtn = container.querySelector('button[aria-label="⋯"]') as HTMLElement;
+    expect(menuBtn).toBeTruthy();
+    await act(async () => { fireEvent.click(menuBtn); });
+
+    // Step 2: click "Remove … settings" menu item
+    const removeSettingsBtn = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("Remove") && b.textContent?.includes("settings")
+    ) as HTMLElement;
+    expect(removeSettingsBtn).toBeTruthy();
+    await act(async () => { fireEvent.click(removeSettingsBtn); });
+
+    // Step 3: click the confirm "Remove" button
+    const confirmRemoveBtn = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Remove"
+    ) as HTMLElement;
+    expect(confirmRemoveBtn).toBeTruthy();
+    await act(async () => { fireEvent.click(confirmRemoveBtn); });
+    await act(async () => { await Promise.resolve(); });
+  }
+
+  it("onSelectProfile('default') is called after successful profile removal", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockInvoke.mockImplementation((async (cmd: string) => {
+      if (cmd === "get_config") return FIREFOX_TOML;
+      if (cmd === "list_devices") return [];
+      if (cmd === "list_installed_apps") return [{ app_id: "org.mozilla.firefox", name: "Firefox", wm_class: "firefox", categories: [], icon: null }];
+      if (cmd === "set_config") return undefined; // success
+      return undefined;
+    }) as any);
+    mockListen.mockResolvedValue(vi.fn());
+
+    const onSelectProfile = vi.fn();
+    const { container } = render(
+      <MappingsScreen
+        railActiveProfile="firefox"
+        onProfilesChange={() => {}}
+        onSelectProfile={onSelectProfile}
+      />
+    );
+
+    // Wait for mount and load
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); });
+
+    await triggerRemove(container);
+
+    expect(onSelectProfile).toHaveBeenCalledWith("default");
+  });
+
+  it("onSelectProfile is NOT called when set_config rejects during profile removal", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockInvoke.mockImplementation((async (cmd: string) => {
+      if (cmd === "get_config") return FIREFOX_TOML;
+      if (cmd === "list_devices") return [];
+      if (cmd === "list_installed_apps") return [{ app_id: "org.mozilla.firefox", name: "Firefox", wm_class: "firefox", categories: [], icon: null }];
+      if (cmd === "set_config") throw new ConduitError("config-invalid", "rejected", "");
+      return undefined;
+    }) as any);
+    mockListen.mockResolvedValue(vi.fn());
+
+    const onSelectProfile = vi.fn();
+    const { container } = render(
+      <MappingsScreen
+        railActiveProfile="firefox"
+        onProfilesChange={() => {}}
+        onSelectProfile={onSelectProfile}
+      />
+    );
+
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); });
+
+    await triggerRemove(container);
+
+    expect(onSelectProfile).not.toHaveBeenCalledWith("default");
+  });
+});
+
 describe("MappingsScreen — per-app overlay inheritance", () => {
   const TWO_PROFILE_TOML = `
 [profile.default.keys]
