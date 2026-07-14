@@ -94,7 +94,9 @@ export function SetupScreen({ onReady, variant = "firstrun" }: { onReady?: () =>
   };
 
   useEffect(() => {
-    recheck();
+    // Initial load goes through the guard too, so the first 5s tick can't
+    // stack a concurrent fetch on a slow start.
+    guardedRecheck();
     const id = setInterval(guardedRecheck, 5000);
     window.addEventListener("focus", guardedRecheck);
     return () => {
