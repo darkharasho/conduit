@@ -1,0 +1,9 @@
+{
+  "name": "conduit-workspace",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix ui run dev",
+    "build": "npm --prefix ui run build",
+    "test": "npm --prefix ui exec vitest run"
+  }
+}
