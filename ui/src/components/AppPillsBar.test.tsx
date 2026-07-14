@@ -67,4 +67,39 @@ describe("AppPillsBar", () => {
     fireEvent.click(screen.getByRole("button", { name: "+ In an app…" }));
     expect(onAdd).toHaveBeenCalled();
   });
+
+  it("active pill has tabIndex 0 and others have tabIndex -1", () => {
+    render(
+      <AppPillsBar pills={PILLS} active="firefox" onSelect={vi.fn()} onAdd={vi.fn()} />,
+    );
+    const tabs = screen.getAllByRole("tab");
+    const everywhere = tabs.find((t) => t.textContent?.includes("Everywhere"))!;
+    const firefox = tabs.find((t) => t.textContent?.includes("Firefox"))!;
+    const slack = tabs.find((t) => t.textContent?.includes("Slack"))!;
+    expect(firefox).toHaveAttribute("tabindex", "0");
+    expect(everywhere).toHaveAttribute("tabindex", "-1");
+    expect(slack).toHaveAttribute("tabindex", "-1");
+  });
+
+  it("ArrowRight from active pill selects next pill and moves focus", () => {
+    const onSelect = vi.fn();
+    render(
+      <AppPillsBar pills={PILLS} active="everywhere" onSelect={onSelect} onAdd={vi.fn()} />,
+    );
+    const tabs = screen.getAllByRole("tab");
+    const everywhere = tabs.find((t) => t.textContent?.includes("Everywhere"))!;
+    fireEvent.keyDown(everywhere, { key: "ArrowRight" });
+    expect(onSelect).toHaveBeenCalledWith("firefox");
+  });
+
+  it("ArrowLeft wraps around to the last pill", () => {
+    const onSelect = vi.fn();
+    render(
+      <AppPillsBar pills={PILLS} active="everywhere" onSelect={onSelect} onAdd={vi.fn()} />,
+    );
+    const tabs = screen.getAllByRole("tab");
+    const everywhere = tabs.find((t) => t.textContent?.includes("Everywhere"))!;
+    fireEvent.keyDown(everywhere, { key: "ArrowLeft" });
+    expect(onSelect).toHaveBeenCalledWith("slack");
+  });
 });

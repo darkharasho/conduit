@@ -50,4 +50,19 @@ describe("AppContextStrip", () => {
     const btn = screen.getByRole("button", { name: "More options" });
     expect(btn.textContent).toBe("⋯");
   });
+
+  it("mouseDown on menu button while menu is open closes it exactly once (not re-opened)", () => {
+    render(<AppContextStrip pill={PILL} onToggleAutoSwitch={vi.fn()} onRemove={vi.fn()} />);
+    const menuBtn = screen.getByRole("button", { name: "More options" });
+    // Open the menu
+    fireEvent.click(menuBtn);
+    expect(screen.getByRole("button", { name: "Remove Firefox settings" })).toBeInTheDocument();
+    // Simulate the browser's mousedown on the button while menu is open.
+    // The document mousedown handler would close it; stopPropagation on the button must
+    // prevent that race so the subsequent click can toggle it closed (not re-open it).
+    fireEvent.mouseDown(menuBtn);
+    fireEvent.click(menuBtn);
+    // Menu should now be closed
+    expect(screen.queryByRole("button", { name: "Remove Firefox settings" })).toBeNull();
+  });
 });

@@ -1734,6 +1734,7 @@ button {
 /* ── App pills bar ───────────────────────────────────────────────────── */
 .app-pills { display: flex; align-items: center; gap: 6px; padding: 8px 16px; border-bottom: 1px solid var(--border-structural); flex-wrap: wrap; }
 .app-pills__label { font-size: 11px; color: var(--text-lo); margin-right: 4px; white-space: nowrap; }
+.app-pills__list { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .app-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border-control); background: none; color: var(--text-mid); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
 .app-pill:hover { background: var(--bg-key); color: var(--text-hi); }
 .app-pill--active { background: var(--accent-bg); border-color: var(--accent-border); color: var(--text-hi); }

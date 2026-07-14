@@ -21,10 +21,9 @@ export function AppContextStrip({ pill, onToggleAutoSwitch, onRemove }: AppConte
       }
     }
 
-    function onMouseDown(e: MouseEvent) {
+    function onMouseDown() {
       // Close if the click target is outside the menu button/list area.
       // We use document mousedown so any outside click dismisses the menu.
-      void e;
       setMenuOpen(false);
     }
 
@@ -55,6 +54,7 @@ export function AppContextStrip({ pill, onToggleAutoSwitch, onRemove }: AppConte
           <button
             className="app-strip__menu-btn"
             aria-label="More options"
+            onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
               setMenuOpen((v) => !v);
