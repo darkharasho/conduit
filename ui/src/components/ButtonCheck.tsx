@@ -74,6 +74,9 @@ export function ButtonCheck({ device, onClose, onFix }: Props) {
   const seenCodesRef = useRef<Set<number>>(new Set());
   // Ref to last code for transition tracking
   const lastCodeRef = useRef<number | null>(null);
+  // Tracks whether the component is still mounted — used by the poll loop to
+  // prevent state updates after unmount (avoids act() warnings in tests).
+  const mountedRef = useRef(true);
 
   const deviceName = device.name;
 
@@ -120,6 +123,14 @@ export function ButtonCheck({ device, onClose, onFix }: Props) {
     };
   }, [deviceName, isRecheck]);
 
+  // Track component lifetime so the poll loop can bail out after unmount.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   function handleDone() {
     const result = analyzePresses(samplesRef.current, device.class);
     setReport(result);
@@ -128,7 +139,6 @@ export function ButtonCheck({ device, onClose, onFix }: Props) {
   // ── Fix wizard logic ─────────────────────────────────────────────────────────
 
   const runFixWizard = useCallback(async () => {
-    setFixPhase({ kind: "preparing" });
     setShowTech(false);
 
     try {
@@ -138,9 +148,9 @@ export function ButtonCheck({ device, onClose, onFix }: Props) {
       let deviceId = status.device_id;
 
       if (!deviceId) {
-        // Device not yet known to ratbagd — need to stage + setup
-        // "Preparing the fix — you'll be asked for your password once."
-        // (phase "preparing" is already set above)
+        // Device not yet known to ratbagd — need to stage + setup.
+        // Only show "preparing" when the device is actually missing.
+        setFixPhase({ kind: "preparing" });
 
         let stagedPath: string;
         try {
@@ -185,10 +195,12 @@ export function ButtonCheck({ device, onClose, onFix }: Props) {
           return;
         }
 
-        // Poll for device to appear (≤10 s, 500 ms interval)
+        // Poll for device to appear (≤10 s, 500 ms interval).
+        // Bail out immediately if the component unmounts during the wait.
         const deadline = Date.now() + 10_000;
         while (Date.now() < deadline) {
           await new Promise((r) => setTimeout(r, 500));
+          if (!mountedRef.current) return; // component unmounted — stop
           try {
             const s2 = await ratbagGetStatus();
             if (s2.device_id) {
@@ -201,6 +213,7 @@ export function ButtonCheck({ device, onClose, onFix }: Props) {
         }
 
         if (!deviceId) {
+          if (!mountedRef.current) return; // unmounted before we could report
           setFixPhase({
             kind: "error",
             title: "The mouse wasn't found after setup",
@@ -506,7 +519,7 @@ export function ButtonCheck({ device, onClose, onFix }: Props) {
           <>
             <p className="btn-check__intro">
               {inRecheck
-                ? `Press the fixed buttons to confirm — any order.`
+                ? `Press the fixed buttons to confirm`
                 : `Press each button on your ${device.name} once — any order.`}
             </p>
             <p className="btn-check__tally" aria-live="polite">

@@ -6,7 +6,7 @@
  * Mocking convention: vi.mock("../lib/client") before importing the component.
  * The onKeyEvent function returns a Promise<() => void> (unlisten handle).
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 
 // ── Mock Tauri APIs before importing anything that uses them ──────────────────
@@ -107,6 +107,13 @@ beforeEach(() => {
   vi.clearAllMocks();
   // Default: listen returns a noop unlisten
   mockListen.mockResolvedValue(vi.fn());
+});
+
+// Restore real timers after every test, even if the test threw.
+// This guards against fake-timer leakage into unrelated tests — the project
+// has been bitten by this before (see memory/subagent-git-guardrails notes).
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 // ─── Render tests ────────────────────────────────────────────────────────────
@@ -573,7 +580,68 @@ function setupRatbagHappyPath() {
 }
 
 describe("Fix wizard — happy path (device already in ratbagd)", () => {
-  it("shows preparing text after clicking 'Fix this mouse's memory'", async () => {
+  it("goes straight to reading (never shows Preparing) when device is already in ratbagd", async () => {
+    // Use a deferred ratbag_status to freeze the wizard BEFORE the device-id
+    // check resolves. This lets us assert that the preparing phase is NOT set
+    // while we wait — if the old unconditional setFixPhase({ kind: "preparing" })
+    // were present, the "Preparing the fix" text would appear here.
+    let resolveStatus!: (v: unknown) => void;
+    const statusDeferred = new Promise((res) => { resolveStatus = res; });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockInvoke.mockImplementation((async (cmd: string) => {
+      if (cmd === "ratbag_status") return statusDeferred;
+      if (cmd === "ratbag_read_buttons") {
+        return [
+          { index: 0, action: "button 1", human: "Left click" },
+          { index: 3, action: "button 1", human: "Left click" },
+        ];
+      }
+      if (cmd === "ratbag_suggest_rewrites") return [[3, "macro +KEY_F13 -KEY_F13"]] as [number, string][];
+      return undefined;
+    }) as any); // eslint-disable-line @typescript-eslint/no-explicit-any
+
+    const { getEventCb } = setupListenMock();
+    render(<ButtonCheck device={G502X} onClose={() => {}} onFix={() => {}} />);
+
+    const cb = getEventCb()!;
+    await fireKeyEvent(cb, "key:272", 0x110, "Logitech G502 X PLUS");
+    await fireKeyEvent(cb, "key:273", 0x111, "Logitech G502 X PLUS");
+    await fireKeyEvent(cb, "key:272", 0x110, "Logitech G502 X PLUS");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Done" })); });
+
+    // Click the fix button — wizard starts, calls ratbag_status which hangs.
+    // Use synchronous fireEvent so the click is dispatched before we flush.
+    fireEvent.click(screen.getByRole("button", { name: "Fix this mouse's memory" }));
+
+    // Flush the initial microtask round that runs up to the first await
+    // (ratbag_status). At this point the status promise is still pending.
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // While ratbag_status is pending, "Preparing the fix" must NOT appear.
+    // (With the old broken code, setFixPhase({ kind: "preparing" }) fired
+    //  unconditionally BEFORE the await, so this assertion would FAIL with:
+    //  expected <p>Preparing the fix — you'll be asked for your password once.</p> to be null)
+    expect(screen.queryByText(/Preparing the fix/i)).toBeNull();
+
+    // Now resolve status with device already present — no preparing phase needed.
+    await act(async () => {
+      resolveStatus({ daemon_running: true, device_id: "usb_046d_c099_if01", device_name: "Logitech G502 X PLUS" });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // Wizard proceeds to confirm sheet — check it arrived without preparing
+    await waitFor(() => {
+      expect(screen.getByText(/will send its own signal/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Preparing the fix/i)).toBeNull();
+  });
+
+  it("'Preparing the fix' is NEVER visible when device is already in ratbagd — full wizard flow", async () => {
     setupRatbagHappyPath();
     const { getEventCb } = setupListenMock();
     render(<ButtonCheck device={G502X} onClose={() => {}} onFix={() => {}} />);
@@ -584,18 +652,18 @@ describe("Fix wizard — happy path (device already in ratbagd)", () => {
     await fireKeyEvent(cb, "key:272", 0x110, "Logitech G502 X PLUS");
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Done" })); });
 
-    // Click the fix button
+    // Start wizard
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Fix this mouse's memory" }));
     });
 
-    // Should show the wizard working (preparing / reading state)
-    // ratbag_status returned success → skip staging, go straight to reading buttons
+    // Wait until we reach the confirm sheet
     await waitFor(() => {
-      // Either a loading/preparing indicator or the confirm sheet will appear
-      const body = document.body.textContent ?? "";
-      expect(body).toMatch(/Preparing|Reading|Checking|will send its own signal/i);
+      expect(screen.getByText(/will send its own signal/i)).toBeInTheDocument();
     });
+
+    // "Preparing the fix" must not appear at confirm time either
+    expect(screen.queryByText("Preparing the fix — you'll be asked for your password once.")).toBeNull();
   });
 
   it("renders the confirm sheet with a button row and the exact footer", async () => {
@@ -684,9 +752,9 @@ describe("Fix wizard — happy path (device already in ratbagd)", () => {
       fireEvent.click(screen.getByRole("button", { name: /Rewrite 1 button/i }));
     });
 
-    // Wait for re-check phase — should show "Press the fixed buttons to confirm"
+    // Wait for re-check phase — should show exact copy "Press the fixed buttons to confirm"
     await waitFor(() => {
-      expect(screen.getByText(/Press the fixed buttons to confirm/i)).toBeInTheDocument();
+      expect(screen.getByText("Press the fixed buttons to confirm")).toBeInTheDocument();
     });
 
     // ratbag_rewrite must have been called with the targets from ratbag_suggest_rewrites
@@ -772,7 +840,15 @@ describe("Fix wizard — happy path (device already in ratbagd)", () => {
 });
 
 describe("Fix wizard — device needs staging (not yet in ratbagd)", () => {
-  it("shows 'Preparing the fix' text when ratbagd does not know the device", async () => {
+  // Use fake timers in this describe block so the 500 ms poll loop inside the
+  // component does not run past the end of the test and cause dangling state
+  // updates / act() warnings. The global afterEach(vi.useRealTimers) hook
+  // restores timers even if the test throws.
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  it("shows 'Preparing the fix' text when ratbagd does not know the device, then reaches confirm sheet", async () => {
     let statusCallCount = 0;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mockInvoke.mockImplementation((async (cmd: string) => {
@@ -783,7 +859,7 @@ describe("Fix wizard — device needs staging (not yet in ratbagd)", () => {
             // First call: device not found
             return { daemon_running: true, device_id: null, device_name: null };
           }
-          // Subsequent poll calls: device now available
+          // Poll calls: device now available
           return {
             daemon_running: true,
             device_id: "usb_046d_c099_if01",
@@ -816,15 +892,38 @@ describe("Fix wizard — device needs staging (not yet in ratbagd)", () => {
     await fireKeyEvent(cb, "key:272", 0x110, "Logitech G502 X PLUS");
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Done" })); });
 
+    // Start the fix wizard — status check + stage + fix_setup are all Promise-based;
+    // flush several microtask rounds inside act() so they resolve before we assert.
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Fix this mouse's memory" }));
+      // Multiple flushes to let the async chain (status → stage → fix_setup) complete.
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
     });
 
-    // At this point the component checks status (device_id: null), so it should
-    // show the "Preparing the fix" message while staging the device file.
-    await waitFor(() => {
-      expect(screen.getByText(/Preparing the fix/i)).toBeInTheDocument();
+    // Device was missing → component must show "Preparing the fix" now.
+    expect(screen.getByText(/Preparing the fix/i)).toBeInTheDocument();
+
+    // Advance the fake clock past one poll tick (500 ms) so the while-loop wakes
+    // and calls ratbag_status a second time. Use synchronous advanceTimersByTime
+    // inside act() — the same pattern as Setup.test.tsx and Toast.test.tsx in
+    // this project.
+    await act(async () => {
+      vi.advanceTimersByTime(600);
+      // Flush microtasks for the poll's ratbag_status call + subsequent
+      // read_buttons + suggest_rewrites calls.
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
     });
+
+    // The poll found the device; wizard should now be on the confirm sheet.
+    // Use direct expect (not waitFor) to avoid relying on setTimeout-based polling
+    // while fake timers are active.
+    expect(screen.getByText(/will send its own signal/i)).toBeInTheDocument();
   });
 });
 
