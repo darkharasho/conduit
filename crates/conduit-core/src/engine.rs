@@ -6,12 +6,27 @@ use crate::event::{Event, Key, KeyState};
 #[allow(dead_code)]
 enum HeldEntry { OutKey(Key), OutChord(Chord), LayerHeld(u8), Swallowed }
 
+/// A held entry with the source device slot that produced it.
+/// `source` is `None` when no device section matched (global mapping only).
+#[derive(Clone, Copy, Debug)]
+struct Held {
+    entry: HeldEntry,
+    source: Option<u16>,
+}
+
+impl Held {
+    fn new(entry: HeldEntry, source: Option<u16>) -> Self {
+        Self { entry, source }
+    }
+}
+
 struct Pending {
     phys: Key,
     tap: Key,
     hold: HoldAction,
     press_time_us: u64,
     deadline_us: u64,
+    source: Option<u16>,
 }
 
 enum Resolution {
@@ -23,7 +38,7 @@ pub struct Engine {
     cfg: CompiledConfig,
     profile_idx: usize,
     active_layers: Vec<u8>,     // stack; index 0 is always base layer 0 (Task 5)
-    held: HashMap<Key, HeldEntry>,
+    held: HashMap<Key, Held>,
     out: Vec<Event>,            // reused output buffer
     pending: Option<Pending>,
     /// Events buffered behind a pending tap-hold, with their device slot so
@@ -104,12 +119,12 @@ impl Engine {
             }
             Resolution::Hold => match p.hold {
                 HoldAction::Key(k) => {
-                    self.held.insert(p.phys, HeldEntry::OutKey(k));
+                    self.held.insert(p.phys, Held::new(HeldEntry::OutKey(k), p.source));
                     self.out.push(Event { key: k, state: KeyState::Press, time_us: p.press_time_us });
                 }
                 HoldAction::Layer(l) => {
                     self.active_layers.push(l);
-                    self.held.insert(p.phys, HeldEntry::LayerHeld(l));
+                    self.held.insert(p.phys, Held::new(HeldEntry::LayerHeld(l), p.source));
                 }
             },
         }
@@ -189,14 +204,14 @@ impl Engine {
         match ev.state {
             KeyState::Press => match self.lookup(ev.key, slot) {
                 Action::Key(out) => {
-                    self.held.insert(ev.key, HeldEntry::OutKey(out));
+                    self.held.insert(ev.key, Held::new(HeldEntry::OutKey(out), slot));
                     self.out.push(Event { key: out, ..ev });
                 }
                 Action::Passthrough => {
-                    self.held.insert(ev.key, HeldEntry::OutKey(ev.key));
+                    self.held.insert(ev.key, Held::new(HeldEntry::OutKey(ev.key), slot));
                     self.out.push(ev);
                 }
-                Action::Disabled => { self.held.insert(ev.key, HeldEntry::Swallowed); }
+                Action::Disabled => { self.held.insert(ev.key, Held::new(HeldEntry::Swallowed, slot)); }
                 Action::TapHold { tap, hold, timeout_us } => {
                     self.pending = Some(Pending {
                         phys: ev.key,
@@ -204,11 +219,12 @@ impl Engine {
                         hold,
                         press_time_us: ev.time_us,
                         deadline_us: ev.time_us + timeout_us,
+                        source: slot,
                     });
                 }
                 Action::LayerWhileHeld(n) => {
                     self.active_layers.push(n);
-                    self.held.insert(ev.key, HeldEntry::LayerHeld(n));
+                    self.held.insert(ev.key, Held::new(HeldEntry::LayerHeld(n), slot));
                 }
                 Action::LayerToggle(n) => {
                     if let Some(pos) = self.active_layers.iter().rposition(|&l| l == n) {
@@ -217,16 +233,16 @@ impl Engine {
                     } else {
                         self.active_layers.push(n);
                     }
-                    self.held.insert(ev.key, HeldEntry::Swallowed);
+                    self.held.insert(ev.key, Held::new(HeldEntry::Swallowed, slot));
                 }
                 Action::Chord(ch) => {
-                    self.held.insert(ev.key, HeldEntry::OutChord(ch));
+                    self.held.insert(ev.key, Held::new(HeldEntry::OutChord(ch), slot));
                     for k in ch.keys() {
                         self.out.push(Event { key: *k, state: KeyState::Press, time_us: ev.time_us });
                     }
                 }
             },
-            KeyState::Release => match self.held.remove(&ev.key) {
+            KeyState::Release => match self.held.remove(&ev.key).map(|h| h.entry) {
                 Some(HeldEntry::OutKey(out)) => self.out.push(Event { key: out, ..ev }),
                 Some(HeldEntry::OutChord(ch)) => {
                     for k in ch.keys().iter().rev() {
@@ -244,8 +260,8 @@ impl Engine {
                 }
                 None => self.out.push(ev),
             },
-            KeyState::Repeat => match self.held.get(&ev.key) {
-                Some(HeldEntry::OutKey(out)) => { let out = *out; self.out.push(Event { key: out, ..ev }); }
+            KeyState::Repeat => match self.held.get(&ev.key).map(|h| h.entry) {
+                Some(HeldEntry::OutKey(out)) => { self.out.push(Event { key: out, ..ev }); }
                 Some(HeldEntry::OutChord(ch)) => {
                     let last = *ch.keys().last().expect("chord len >= 2");
                     self.out.push(Event { key: last, ..ev });
@@ -266,10 +282,10 @@ impl Engine {
             self.out.push(Event { key: p.tap, state: KeyState::Release, time_us: p.press_time_us });
         }
         // Emit Release for every held OutKey or OutChord
-        for (_phys, entry) in &self.held {
-            if let HeldEntry::OutKey(k) = entry {
-                self.out.push(Event { key: *k, state: KeyState::Release, time_us: 0 });
-            } else if let HeldEntry::OutChord(ch) = entry {
+        for (_phys, h) in &self.held {
+            if let HeldEntry::OutKey(k) = h.entry {
+                self.out.push(Event { key: k, state: KeyState::Release, time_us: 0 });
+            } else if let HeldEntry::OutChord(ch) = h.entry {
                 for k in ch.keys().iter().rev() {
                     self.out.push(Event { key: *k, state: KeyState::Release, time_us: 0 });
                 }
@@ -302,6 +318,41 @@ impl Engine {
     /// Returns true if the engine is currently suspended.
     pub fn is_suspended(&self) -> bool {
         self.suspended
+    }
+
+    /// Emit releases for every output held by `source` and forget them.
+    /// Chords release in reverse order. Called when a device disappears
+    /// mid-hold so modifiers can't stick.
+    pub fn release_device(&mut self, source: u16) -> &[Event] {
+        self.out.clear();
+        let keys: Vec<Key> = self.held.iter()
+            .filter(|(_, h)| h.source == Some(source))
+            .map(|(k, _)| *k)
+            .collect();
+        for k in keys {
+            if let Some(h) = self.held.remove(&k) {
+                match h.entry {
+                    HeldEntry::OutKey(out) => {
+                        self.out.push(Event { key: out, state: KeyState::Release, time_us: 0 });
+                    }
+                    HeldEntry::OutChord(ch) => {
+                        for ck in ch.keys().iter().rev() {
+                            self.out.push(Event { key: *ck, state: KeyState::Release, time_us: 0 });
+                        }
+                    }
+                    HeldEntry::LayerHeld(l) => {
+                        // Mirror the Release arm: pop last occurrence, never pop pos 0
+                        if let Some(pos) = self.active_layers.iter().rposition(|&x| x == l) {
+                            if pos != 0 {
+                                self.active_layers.remove(pos);
+                            }
+                        }
+                    }
+                    HeldEntry::Swallowed => {}
+                }
+            }
+        }
+        &self.out
     }
 
     pub fn set_focus(&mut self, f: &crate::config::FocusFields) {
@@ -699,5 +750,65 @@ mod tests {
         e.set_focus(&focus("steam_app_123"));
         // Focus matches game's rule, but switching is paused: default stays live.
         assert_eq!(e.handle(press("a", 0)), &[press("b", 0)]);
+    }
+
+    // ── release_device ────────────────────────────────────────────────────────
+
+    #[test]
+    fn release_device_emits_release_and_clears_entry() {
+        // Press remapped key on slot 3; release_device(3) emits the release.
+        let mut e = engine("[profile.default.keys]\na = \"b\"");
+        e.handle_on(press("a", 0), Some(3)); // emits b-press, held on slot 3
+        let out = e.release_device(3).to_vec();
+        assert_eq!(out, vec![release("b", 0)]);
+        // A subsequent physical release of 'a' finds no held entry → passthrough (raw)
+        // but the key point is the 'b' entry was cleared (no second b-release):
+        let residual = e.handle_on(release("a", 10), Some(3)).to_vec();
+        assert!(!residual.iter().any(|ev| ev.key == key("b")),
+            "b-release must not appear after release_device cleared it; got {residual:?}");
+    }
+
+    #[test]
+    fn release_device_chord_emits_in_reverse() {
+        // Chord (ctrl+c) held on slot 2; release_device emits in reverse order.
+        let mut e = engine("[profile.default.keys]\nmouse4 = \"ctrl+c\"\n");
+        e.handle_on(press("mouse4", 0), Some(2));
+        let out = e.release_device(2).to_vec();
+        // reverse: c first, then ctrl
+        assert_eq!(out, vec![release("c", 0), release("leftctrl", 0)]);
+        // physical release now finds no chord entry → passes through as raw mouse4 release
+        // but must NOT re-emit c or ctrl
+        let residual = e.handle_on(release("mouse4", 10), Some(2)).to_vec();
+        assert!(!residual.iter().any(|ev| ev.key == key("c") || ev.key == key("leftctrl")),
+            "chord keys must not reappear after release_device; got {residual:?}");
+    }
+
+    #[test]
+    fn release_device_does_not_touch_other_slots() {
+        // Press on slot 1 and slot 3; release_device(3) only clears slot 3.
+        let mut e = engine("[profile.default.keys]\na = \"b\"\nb = \"c\"");
+        e.handle_on(press("a", 0), Some(1)); // held on slot 1
+        e.handle_on(press("b", 1), Some(3)); // held on slot 3
+        let out = e.release_device(3).to_vec();
+        assert_eq!(out, vec![release("c", 0)]); // only slot-3 entry released
+        // slot 1 entry still present: physical release of 'a' still pairs as 'b'
+        assert_eq!(e.handle_on(release("a", 20), Some(1)), &[release("b", 20)]);
+    }
+
+    #[test]
+    fn release_device_layer_held_pops_layer() {
+        // LayerHeld variant via tap-hold hold=layer: release_device pops the layer.
+        let toml = "[profile.default.keys]\nf = { tap = \"f\", hold = \"layer:nav\" }\n[profile.default.layers.nav]\nh = \"left\"";
+        let mut e = engine(toml);
+        e.handle_on(press("f", 0), Some(5)); // pending tap-hold on slot 5
+        e.tick(200_000); // resolve as hold → LayerHeld(nav) on slot 5
+        // nav layer active: h → left
+        assert_eq!(e.handle_on(press("h", 250_000), Some(5)), &[press("left", 250_000)]);
+        e.handle_on(release("h", 260_000), Some(5));
+        // release_device(5) should pop the nav layer, emitting no release events
+        let out = e.release_device(5).to_vec();
+        assert!(out.is_empty(), "LayerHeld emits no release events; got {out:?}");
+        // layer gone: h → h (base layer passthrough)
+        assert_eq!(e.handle_on(press("h", 300_000), Some(5)), &[press("h", 300_000)]);
     }
 }

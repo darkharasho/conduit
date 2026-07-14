@@ -298,10 +298,27 @@ pub fn run(
                 Vec::new()
             }
             Some(Msg::DeviceRemoved(p)) => {
+                // Resolve path→source-id→slot BEFORE removing from maps so we
+                // can flush any held outputs attributed to this device.
+                let removed_slot: Option<u16> = sources.get(&p)
+                    .and_then(|si| slots.get(&si.id).copied().flatten());
+
                 // The reader thread has already exited; dropping its handle
                 // joins it and releases the (already-dropped) device grab.
                 readers.remove(&p);
                 sources.remove(&p);
+
+                // Release held outputs attributed to the departed device BEFORE
+                // recomputing slots so the slot mapping is still valid.
+                let release_evs: Vec<Event> = if let Some(slot) = removed_slot {
+                    engine.release_device(slot).to_vec()
+                } else {
+                    Vec::new()
+                };
+                if !release_evs.is_empty() {
+                    emit_all(&out, &release_evs, &mut event_subs);
+                }
+
                 slots = compute_slots(&sources, &device_selectors);
                 let s = p.display().to_string();
                 grabbed_devices.retain(|g| g != &s);

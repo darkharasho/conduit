@@ -46,20 +46,20 @@ pub fn should_replace_binary(
     }
 }
 
-/// Validate a Unix username against [a-z_][a-z0-9_-]*.
+/// Validate a Unix username against [A-Za-z_][A-Za-z0-9_.-]*.
 /// Returns Err(msg) if invalid.
 pub fn fix_permissions_script_checked(user: &str) -> Result<String, String> {
-    // Validate: must match [a-z_][a-z0-9_-]*
+    // Validate: must match [A-Za-z_][A-Za-z0-9_.-]*
     if user.is_empty() {
         return Err(format!("invalid username: {:?}", user));
     }
     let mut chars = user.chars();
     let first = chars.next().unwrap();
-    if !matches!(first, 'a'..='z' | '_') {
+    if !matches!(first, 'a'..='z' | 'A'..='Z' | '_') {
         return Err(format!("invalid username: {:?}", user));
     }
     for c in chars {
-        if !matches!(c, 'a'..='z' | '0'..='9' | '_' | '-') {
+        if !matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' | '.') {
             return Err(format!("invalid username: {:?}", user));
         }
     }
@@ -556,6 +556,19 @@ mod tests {
         assert!(fix_permissions_script_checked("_sysuser").is_ok());
         assert!(fix_permissions_script_checked("user-name").is_ok());
         assert!(fix_permissions_script_checked("user123").is_ok());
+    }
+
+    #[test]
+    fn fix_script_accepts_relaxed_charset() {
+        // Uppercase and dot are legal (common on many distros)
+        assert!(fix_permissions_script_checked("John.Doe").is_ok());
+        assert!(fix_permissions_script_checked("ADMIN").is_ok());
+        assert!(fix_permissions_script_checked("User.Name-123").is_ok());
+        // leading digit still rejected
+        assert!(fix_permissions_script_checked("9user").is_err());
+        // space and dollar still rejected
+        assert!(fix_permissions_script_checked("bad name").is_err());
+        assert!(fix_permissions_script_checked("bad$name").is_err());
     }
 
     #[test]
