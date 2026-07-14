@@ -149,7 +149,7 @@ describe("App pills bar and picker (device view)", () => {
     await screen.findByText("Everywhere");
     fireEvent.click(screen.getByText("+ In an app…"));
     // Find the picker dialog
-    const picker = await screen.findByRole("dialog", { name: "Add app profile" });
+    const picker = await screen.findByRole("dialog", { name: "Add an app" });
     // Steam is in "Open now"
     expect(await screen.findByText("steam")).toBeInTheDocument();
     // Firefox is already a pill so its class must not appear in the picker dialog

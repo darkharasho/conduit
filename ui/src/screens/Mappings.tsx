@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { getConfig, setConfig, onConnection, onKeyEvent, listDevices } from "../lib/client";
+import { getConfig, setConfig, onConnection, onKeyEvent, listDevices, listInstalledApps } from "../lib/client";
 import type { DeviceInfo, ConduitError, InstalledApp } from "../lib/client";
 import {
   parseConfigToml,
@@ -70,7 +70,15 @@ export function MappingsScreen({
 
   // App picker state
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [installedApps] = useState<InstalledApp[]>([]); // fetched inside AppPicker on demand
+  const [installedApps, setInstalledApps] = useState<InstalledApp[]>([]);
+
+  useEffect(() => {
+    let alive = true;
+    listInstalledApps()
+      .then((apps) => { if (alive) setInstalledApps(apps); })
+      .catch(() => {}); // pills degrade gracefully to class names
+    return () => { alive = false; };
+  }, []);
 
   // Device tabs: grabbed devices, keyed by evdev path (unique even for twins)
   const [devices, setDevices] = useState<DeviceInfo[]>([]);

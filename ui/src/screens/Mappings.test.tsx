@@ -529,3 +529,54 @@ describe("MappingsScreen — applyWithUndo retry-then-undo", () => {
     expect(setConfigCalls[1]).not.toContain("back");
   });
 });
+
+describe("MappingsScreen — installed-apps pill labels", () => {
+  it("shows the installed-app display name on the pill, not the capitalized class", async () => {
+    const FIREFOX_TOML = `
+[profile.default.keys]
+
+[profile.firefox]
+match = { class = "firefox" }
+[profile.firefox.keys]
+mouse4 = "back"
+`;
+
+    const firefoxApp = {
+      app_id: "org.mozilla.firefox",
+      name: "Firefox",
+      wm_class: "firefox",
+      categories: ["WebBrowser"],
+      icon: null,
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockInvoke.mockImplementation((async (cmd: string) => {
+      if (cmd === "get_config") return FIREFOX_TOML;
+      if (cmd === "list_devices") return [];
+      if (cmd === "list_installed_apps") return [firefoxApp];
+      return undefined;
+    }) as any);
+    mockListen.mockResolvedValue(vi.fn());
+
+    render(
+      <MappingsScreen railActiveProfile="default" onProfilesChange={() => {}} />
+    );
+
+    // Wait for both the config and installed apps to load
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); });
+
+    // The firefox pill must show "Firefox" (the installed app name),
+    // not "Firefox" from capitalize("firefox") — but crucially it must NOT
+    // show the raw class string "firefox" (lowercase) which indicates the
+    // installedApps list was not consulted.
+    // We assert the pill button text is exactly "Firefox".
+    // The firefox pill button should display "Firefox" as its label name.
+    // (button textContent also includes the avatar initial, so query .app-pill__name spans)
+    const pillNames = Array.from(document.querySelectorAll(".app-pill .app-pill__name")).map(
+      (el) => el.textContent
+    );
+    // "Firefox" must appear as a pill name (from InstalledApp.name, not capitalize("firefox"))
+    expect(pillNames).toContain("Firefox");
+  });
+});

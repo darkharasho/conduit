@@ -98,7 +98,7 @@ export function AppPicker({ model, onPick, onAdvanced, onClose }: AppPickerProps
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label="Add app profile"
+        aria-label="Add an app"
       >
         <div className="modal__header">
           <span>In an app…</span>
