@@ -15,6 +15,8 @@ static KEYS: &[(&str, u16)] = &[
     ("space", 57), ("capslock", 58),
     ("f1", 59), ("f2", 60), ("f3", 61), ("f4", 62), ("f5", 63), ("f6", 64),
     ("f7", 65), ("f8", 66), ("f9", 67), ("f10", 68), ("f11", 87), ("f12", 88),
+    ("f13", 183), ("f14", 184), ("f15", 185), ("f16", 186), ("f17", 187), ("f18", 188),
+    ("f19", 189), ("f20", 190), ("f21", 191), ("f22", 192), ("f23", 193), ("f24", 194),
     // Numpad — G600-style MMO mice emit these from their keyboard node.
     ("numlock", 69), ("kp7", 71), ("kp8", 72), ("kp9", 73), ("kpminus", 74),
     ("kp4", 75), ("kp5", 76), ("kp6", 77), ("kpplus", 78), ("kp1", 79),
@@ -123,5 +125,22 @@ mod tests {
         }
         assert!(!is_wheel(Key(30)));
         assert!(!is_wheel(Key(272)));
+    }
+
+    #[test]
+    fn f13_f24_exist() {
+        for name in ["f13", "f14", "f15", "f16", "f17", "f18", "f19", "f20", "f21", "f22", "f23", "f24"] {
+            let k = from_name(name).expect(name);
+            assert_eq!(super::name(k), name);
+        }
+        // Specific code checks
+        assert_eq!(from_name("f13"), Some(Key(183)));
+        assert_eq!(from_name("f24"), Some(Key(194)));
+    }
+
+    #[test]
+    fn key_table_count_pinned() {
+        // Keep in sync with ui/src/lib/key-names.test.ts
+        assert_eq!(KEYS.len(), 134);
     }
 }

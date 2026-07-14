@@ -21,18 +21,22 @@ export interface KeyCap {
 /**
  * ANSI_LAYOUT rows:
  *   [0]  Esc + F1-F12 row  (15u total)
- *   [1]  Number row        (15u total)
- *   [2]  QWERTY row        (15u total)
- *   [3]  Home row (ASDF)   (15u total)
- *   [4]  Bottom row (ZXCV) (15u total)
- *   [5]  Mouse buttons     (exempt from 15u rule)
+ *   [1]  F13-F24 row       (12u total, rendered only on devices that declare them)
+ *   [2]  Number row        (15u total)
+ *   [3]  QWERTY row        (15u total)
+ *   [4]  Home row (ASDF)   (15u total)
+ *   [5]  Bottom row (ZXCV) (15u total)
+ *   [6]  Mouse buttons     (exempt from 15u rule)
  *
  * Navigation cluster (Home/End/PgUp/PgDn/arrows) is deliberately omitted from
  * the main grid in v1 to keep the layout simple; nav keys can be added in a
  * future iteration.
+ *
+ * F13-F24 row is included for devices that support them (e.g., G502 X with
+ * onboard profile). KeyboardViz filters layout rows by device-declared keys.
  */
 export const ANSI_LAYOUT: KeyCap[][] = [
-  // Row 0: Esc + F-key row
+  // Row 0: Esc + F-key row (F1-F12)
   // Standard ANSI TKL: Esc(1) gap(1) F1-F4(4×1) gap(0.5) F5-F8(4×1) gap(0.5) F9-F12(4×1)
   // = 1 + 1 + 4 + 0.5 + 4 + 0.5 + 4 = 15u
   // We model the gaps by giving Esc extra width so the grid sums cleanly to 15u:
@@ -51,6 +55,21 @@ export const ANSI_LAYOUT: KeyCap[][] = [
     { name: "f10",  label: "F10",  width: 1 },
     { name: "f11",  label: "F11",  width: 1 },
     { name: "f12",  label: "F12",  width: 1 },
+  ],
+  // Row 1: F13-F24 row (only rendered if device supports these keys)
+  [
+    { name: "f13",  label: "F13",  width: 1 },
+    { name: "f14",  label: "F14",  width: 1 },
+    { name: "f15",  label: "F15",  width: 1 },
+    { name: "f16",  label: "F16",  width: 1 },
+    { name: "f17",  label: "F17",  width: 1 },
+    { name: "f18",  label: "F18",  width: 1 },
+    { name: "f19",  label: "F19",  width: 1 },
+    { name: "f20",  label: "F20",  width: 1 },
+    { name: "f21",  label: "F21",  width: 1 },
+    { name: "f22",  label: "F22",  width: 1 },
+    { name: "f23",  label: "F23",  width: 1 },
+    { name: "f24",  label: "F24",  width: 1 },
   ],
   // Row 1: Number row
   // ` 1 2 3 4 5 6 7 8 9 0 - = Backspace
@@ -155,6 +174,8 @@ export const KEY_CODES: ReadonlyArray<readonly [string, number]> = [
   ["space", 57], ["capslock", 58],
   ["f1", 59], ["f2", 60], ["f3", 61], ["f4", 62], ["f5", 63], ["f6", 64],
   ["f7", 65], ["f8", 66], ["f9", 67], ["f10", 68], ["f11", 87], ["f12", 88],
+  ["f13", 183], ["f14", 184], ["f15", 185], ["f16", 186], ["f17", 187], ["f18", 188],
+  ["f19", 189], ["f20", 190], ["f21", 191], ["f22", 192], ["f23", 193], ["f24", 194],
   ["numlock", 69], ["kp7", 71], ["kp8", 72], ["kp9", 73], ["kpminus", 74],
   ["kp4", 75], ["kp5", 76], ["kp6", 77], ["kpplus", 78], ["kp1", 79],
   ["kp2", 80], ["kp3", 81], ["kp0", 82], ["kpdot", 83], ["kpenter", 96],
@@ -198,7 +219,8 @@ export const VALID_KEY_NAMES: ReadonlySet<string> = new Set([
   "grave", "leftshift", "backslash", "z", "x", "c", "v", "b", "n", "m",
   "comma", "dot", "slash", "rightshift", "kpasterisk", "leftalt", "space",
   "capslock", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10",
-  "f11", "f12", "rightctrl", "rightalt", "home", "up", "pageup", "left",
+  "f11", "f12", "f13", "f14", "f15", "f16", "f17", "f18", "f19", "f20", "f21", "f22", "f23", "f24",
+  "rightctrl", "rightalt", "home", "up", "pageup", "left",
   "right", "end", "down", "pagedown", "insert", "delete", "mute",
   "volumedown", "volumeup", "leftmeta", "rightmeta", "compose", "back",
   "forward", "nextsong", "playpause", "previoussong",

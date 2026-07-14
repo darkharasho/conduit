@@ -40,10 +40,11 @@ describe("ANSI_LAYOUT", () => {
     }
   });
 
-  it("main rows (0-5) each sum to 15u ±0.01 (mouse row exempt)", () => {
+  it("main rows sum to 15u ±0.01 (F13-F24 row 1 and mouse row exempt)", () => {
+    const F13_F24_ROW_IDX = 1;
     const MOUSE_ROW_IDX = 6;
     ANSI_LAYOUT.forEach((row, idx) => {
-      if (idx === MOUSE_ROW_IDX) return; // mouse row exempt
+      if (idx === F13_F24_ROW_IDX || idx === MOUSE_ROW_IDX) return; // F13-F24 and mouse rows exempt
       const sum = row.reduce((acc, cap) => acc + cap.width, 0);
       expect(
         Math.abs(sum - 15),
