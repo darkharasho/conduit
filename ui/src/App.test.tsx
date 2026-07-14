@@ -39,6 +39,7 @@ vi.mock("./lib/client", () => ({
   getConfig: vi.fn(async () => '[profile.default.keys]\na = "b"'),
   setConfig: vi.fn(async () => {}),
   listWindows: vi.fn(async () => []),
+  listInstalledApps: vi.fn(async () => []),
   listDevices: vi.fn(async () => [
     {
       path: "/dev/input/event0",
@@ -110,25 +111,29 @@ describe("App shell — home-first navigation", () => {
   });
 });
 
-describe("Plain-language profile rail and app picker", () => {
-  it("shows the default profile as Everywhere and app profiles with an auto badge", async () => {
+// Deleted rail tests (rewritten below as pills-bar/picker equivalents):
+//   - "shows the default profile as Everywhere and app profiles with an auto badge"
+//     (asserted AUTO badge on rail profiles — rail profiles section removed)
+//   - "app picker lists open apps and disables ones that already have a profile"
+//     (asserted rail "Profile for an app" modal — modal moved into AppPicker in Mappings)
+
+describe("App pills bar and picker (device view)", () => {
+  it("Everywhere pill is present in device view", async () => {
     const { getConfig } = await import("./lib/client");
     vi.mocked(getConfig).mockResolvedValue(
       '[profile.default.keys]\na = "b"\n[profile.firefox]\nmatch = { class = "firefox" }\n[profile.firefox.keys]\nmouse4 = "back"'
     );
     render(<App />);
-    // Navigate into device view to see profiles rail
     const card = await screen.findByRole("button", { name: /Logitech G502 X/ });
     fireEvent.click(card);
-    await screen.findByText("firefox");
-    expect(screen.getByText("Everywhere")).toBeInTheDocument();
-    expect(screen.getByText("AUTO")).toBeInTheDocument();
-    // The technical match label is gone from the rail
+    // The pills bar should show "Everywhere" for the default profile
+    expect(await screen.findByText("Everywhere")).toBeInTheDocument();
+    // The technical class label is not visible on pills
     expect(screen.queryByText("class:firefox")).not.toBeInTheDocument();
   });
 
-  it("app picker lists open apps and disables ones that already have a profile", async () => {
-    const { getConfig, listWindows } = await import("./lib/client");
+  it("picker Open now excludes classes that already have a pill", async () => {
+    const { getConfig, listWindows, listInstalledApps } = await import("./lib/client");
     vi.mocked(getConfig).mockResolvedValue(
       '[profile.default.keys]\na = "b"\n[profile.firefox]\nmatch = { class = "firefox" }\n[profile.firefox.keys]\nmouse4 = "back"'
     );
@@ -136,17 +141,22 @@ describe("Plain-language profile rail and app picker", () => {
       { process: "firefox", class: "firefox", title: "Home" },
       { process: "steam", class: "steam", title: "Steam" },
     ]);
+    vi.mocked(listInstalledApps).mockResolvedValue([]);
     render(<App />);
-    // Navigate into device view to see profiles rail with the add button
     const card = await screen.findByRole("button", { name: /Logitech G502 X/ });
     fireEvent.click(card);
-    await screen.findByText("firefox");
-    screen.getByText("+ Profile for an app…").click();
-    await screen.findByText("Profile for an app");
-    // Steam is pickable; Firefox already has a profile and is disabled.
-    const steamRow = (await screen.findByText("steam")).closest("button")!;
-    expect(steamRow).toBeEnabled();
-    const firefoxRow = screen.getByText(/already has a profile/).closest("button")!;
-    expect(firefoxRow).toBeDisabled();
+    // Wait for pills bar, then open the picker
+    await screen.findByText("Everywhere");
+    fireEvent.click(screen.getByText("+ In an app…"));
+    // Find the picker dialog
+    const picker = await screen.findByRole("dialog", { name: "Add app profile" });
+    // Steam is in "Open now"
+    expect(await screen.findByText("steam")).toBeInTheDocument();
+    // Firefox is already a pill so its class must not appear in the picker dialog
+    expect(picker.querySelector(".app-picker__row-name")?.textContent).not.toMatch(/firefox/i);
+    // Only "steam" row should be in open-now, not "firefox"
+    const rows = picker.querySelectorAll(".app-picker__row-name");
+    const rowTexts = Array.from(rows).map((r) => r.textContent);
+    expect(rowTexts).not.toContain("firefox");
   });
 });

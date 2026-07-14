@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { getConfig, setConfig, onConnection, onKeyEvent, listDevices } from "../lib/client";
-import type { DeviceInfo, ConduitError } from "../lib/client";
+import type { DeviceInfo, ConduitError, InstalledApp } from "../lib/client";
 import {
   parseConfigToml,
   serializeConfigToml,
@@ -17,6 +17,7 @@ import {
   deviceSectionFor,
   deviceSectionKey,
   selectorMatches,
+  addProfile,
 } from "../lib/config-model";
 import type { ConfigModel, ActionModel } from "../lib/config-model";
 import { KeyboardViz } from "../components/KeyboardViz";
@@ -26,16 +27,26 @@ import { AssignPanel } from "../components/AssignPanel";
 import { ProfileMatchEditor } from "../components/ProfileMatchEditor";
 import { Toast } from "../components/Toast";
 import type { ToastData } from "../components/Toast";
+import { AppPillsBar } from "../components/AppPillsBar";
+import { AppPicker } from "../components/AppPicker";
 import { presentError } from "../lib/error-messages";
 import { keyDisplayName, actionLabel } from "../lib/action-labels";
+import { appPills } from "../lib/app-registry";
+
+/** Lowercase, whitespace → underscore (mirrors old App.tsx handleSelectWindow logic) */
+function slug(name: string): string {
+  return name.toLowerCase().replace(/\s+/g, "_");
+}
 
 interface Props {
-  /** Rail-selected profile (controlled by App.tsx rail) */
+  /** Rail-selected profile (controlled by App.tsx) */
   railActiveProfile: string;
   /** Notify App.tsx when profile list changes */
   onProfilesChange: (names: string[]) => void;
   /** When set and a device with that path exists after load, make it the active tab (one-shot) */
   focusDevicePath?: string;
+  /** Called when a new profile is selected in the pills bar */
+  onSelectProfile?: (name: string) => void;
 }
 
 interface UndoFrame {
@@ -47,6 +58,7 @@ export function MappingsScreen({
   railActiveProfile,
   onProfilesChange,
   focusDevicePath,
+  onSelectProfile,
 }: Props) {
   const [model, setModel] = useState<ConfigModel | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -55,6 +67,10 @@ export function MappingsScreen({
   const [newLayerPrompt, setNewLayerPrompt] = useState(false);
   const [newLayerName, setNewLayerName] = useState("");
   const [toast, setToast] = useState<ToastData | null>(null);
+
+  // App picker state
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [installedApps] = useState<InstalledApp[]>([]); // fetched inside AppPicker on demand
 
   // Device tabs: grabbed devices, keyed by evdev path (unique even for twins)
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
@@ -239,6 +255,18 @@ export function MappingsScreen({
     [] // stable — reads current model via modelRef at call time
   );
 
+  const handlePickApp = useCallback(
+    async (name: string, matchClass: string) => {
+      if (!modelRef.current) return;
+      const profileName = slug(name);
+      const updated = addProfile(modelRef.current, profileName, matchClass);
+      setPickerOpen(false);
+      await applyWithUndoImpl(updated, `${name} added`);
+      onSelectProfile?.(profileName);
+    },
+    [applyWithUndoImpl, onSelectProfile]
+  );
+
   const handleSaveAction = async (action: ActionModel): Promise<void> => {
     if (!model || !editingKey) return;
     const updated =
@@ -374,6 +402,14 @@ export function MappingsScreen({
       <div className="screen-content">
         {model ? (
           <>
+            {/* App pills bar */}
+            <AppPillsBar
+              pills={appPills(model, installedApps)}
+              active={railActiveProfile}
+              onSelect={(name) => onSelectProfile?.(name)}
+              onAdd={() => setPickerOpen(true)}
+            />
+
             {/* Device tabs */}
             {(devices.length > 0 || offlineSections.length > 0) && (
               <div className="devtabs" role="tablist" aria-label="Devices">
@@ -533,6 +569,19 @@ export function MappingsScreen({
         <Toast
           toast={toast}
           onDismiss={() => setToast(null)}
+        />
+      )}
+
+      {/* App picker modal */}
+      {pickerOpen && model && (
+        <AppPicker
+          model={model}
+          onPick={handlePickApp}
+          onAdvanced={() => {
+            setPickerOpen(false);
+            // Advanced match flow: future expansion
+          }}
+          onClose={() => setPickerOpen(false)}
         />
       )}
     </div>

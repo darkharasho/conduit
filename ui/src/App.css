@@ -2034,3 +2034,29 @@ button {
 /* ── Detect hint text beside the Select by pressing button ──────────── */
 .devtabs__detect-hint { font-size: 12px; color: var(--text-lo); white-space: nowrap; }
 .assign-adv-link { background: none; border: none; color: var(--text-dim); font: inherit; font-size: 12px; cursor: pointer; margin-top: 8px; text-align: left; padding: 4px 0; }
+
+/* ── App pills bar ───────────────────────────────────────────────────── */
+.app-pills { display: flex; align-items: center; gap: 6px; padding: 8px 16px; border-bottom: 1px solid var(--border-structural); flex-wrap: wrap; }
+.app-pills__label { font-size: 11px; color: var(--text-lo); margin-right: 4px; white-space: nowrap; }
+.app-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border-control); background: none; color: var(--text-mid); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.app-pill:hover { background: var(--bg-key); color: var(--text-hi); }
+.app-pill--active { background: var(--teal-bg); border-color: var(--teal-border); color: var(--text-hi); }
+.app-pill--paused { opacity: 0.7; }
+.app-pill--add { border-style: dashed; color: var(--text-lo); }
+.app-pill--add:hover { color: var(--text-mid); }
+.app-pill__avatar { width: 18px; height: 18px; border-radius: 3px; background: var(--bg-key); display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: var(--text-lo); flex-shrink: 0; }
+img.app-pill__avatar { object-fit: contain; }
+.app-pill__name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+.app-pill__badge { font-size: 10px; color: var(--amber); border: 1px solid var(--amber-border); border-radius: 999px; padding: 1px 5px; }
+
+/* ── App picker modal ────────────────────────────────────────────────── */
+.app-picker { max-height: 540px; display: flex; flex-direction: column; }
+.app-picker__search { padding: 8px 12px; border-bottom: 1px solid var(--border-structural); }
+.app-picker__search input { width: 100%; background: none; border: none; outline: none; color: var(--text-hi); font: inherit; font-size: 13px; }
+.app-picker__section { padding: 6px 0; }
+.app-picker__section-label { font-size: 11px; color: var(--text-lo); padding: 4px 16px 2px; text-transform: uppercase; letter-spacing: 0.05em; }
+.app-picker__row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 16px; background: none; border: none; color: var(--text-mid); font: inherit; font-size: 13px; cursor: pointer; text-align: left; }
+.app-picker__row:hover { background: var(--bg-key); color: var(--text-hi); }
+.app-picker__row-name { flex: 1; }
+.app-picker__row-sub { font-size: 11px; color: var(--text-lo); }
+.modal__footer { padding: 8px 16px; border-top: 1px solid var(--border-structural); }
