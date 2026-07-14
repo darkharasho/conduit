@@ -119,7 +119,8 @@ export function InspectorPanel({
       case "passthrough":
         return { kind: "passthrough" };
       case "chord":
-        // Task 4 replaces this with a chord editor
+        // Chords are assigned from the catalog panel, not edited here;
+        // null keeps Apply a no-op so an existing chord can't be clobbered.
         return null;
     }
   }, [kind, remapKey, tapKey, holdKey, holdIsLayer, holdLayerName, timeoutMs, toggleLayer]);
