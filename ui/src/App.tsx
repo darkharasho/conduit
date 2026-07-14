@@ -8,7 +8,7 @@ import {
 } from "./lib/client";
 import type { Status } from "./lib/client";
 import { Titlebar } from "./components/Titlebar";
-import { SetupCheck } from "./components/SetupCheck";
+import { SetupScreen } from "./screens/Setup";
 import {
   parseConfigToml,
 } from "./lib/config-model";
@@ -116,7 +116,7 @@ function App() {
         <div className="main-area">
           {view.kind === "home" && (
             connected === false ? (
-              <div className="home-shell__recovery"><SetupCheck /></div>
+              <div className="home-shell__recovery"><SetupScreen variant="recovery" /></div>
             ) : (
               <>
                 <HomeScreen

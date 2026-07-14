@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { getStatus, onStatus, onConnection } from "../lib/client";
 import type { Status as StatusData } from "../lib/client";
-import { SetupCheck } from "../components/SetupCheck";
+import { SetupScreen } from "./Setup";
 import { Toolbar } from "../components/Toolbar";
 
 export function StatusScreen() {
@@ -42,7 +42,7 @@ export function StatusScreen() {
         )}
 
         {/* Setup check (when not connected) */}
-        {connected === false && <SetupCheck />}
+        {connected === false && <SetupScreen variant="recovery" />}
 
         {/* Status definition-list panels */}
         {status && (

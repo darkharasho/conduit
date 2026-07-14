@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import type { SetupStatus, PermissionFixOutcome } from "../lib/client";
-import { setupStatus, setupInstallService, setupFixPermissions } from "../lib/client";
+import { setupStatus, setupInstallService, setupFixPermissions, restartEngine, collectReport } from "../lib/client";
 import { presentError } from "../lib/error-messages";
 import type { ConduitError } from "../lib/client";
 import { DeviceArt } from "../components/DeviceArt";
@@ -61,7 +61,7 @@ function StepIcon({ state, number }: { state: StepState; number: number }) {
 
 // ---- Main component ---------------------------------------------------------
 
-export function SetupScreen({ onReady }: { onReady?: () => void }) {
+export function SetupScreen({ onReady, variant = "firstrun" }: { onReady?: () => void; variant?: "firstrun" | "recovery" }) {
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [activeFix, setActiveFix] = useState<ActiveFix>(null);
   const [stepUI, setStepUI] = useState<Record<string, StepUIState>>({
@@ -70,6 +70,8 @@ export function SetupScreen({ onReady }: { onReady?: () => void }) {
     evdev: { errorText: null, reloginNeeded: false },
   });
   const [showDetails, setShowDetails] = useState(false);
+  const [attemptedRestart, setAttemptedRestart] = useState(false);
+  const [copyConfirm, setCopyConfirm] = useState(false);
 
   const recheck = async () => {
     try {
@@ -83,6 +85,18 @@ export function SetupScreen({ onReady }: { onReady?: () => void }) {
   useEffect(() => {
     recheck();
   }, []);
+
+  const handleRestartEngine = async () => {
+    await restartEngine().catch(() => {});
+    await recheck();
+    setAttemptedRestart(true);
+  };
+
+  const handleCopyReport = async () => {
+    const report = await collectReport().catch(() => "");
+    await navigator.clipboard.writeText(report).catch(() => {});
+    setCopyConfirm(true);
+  };
 
   const handleInstallService = async () => {
     setActiveFix("service");
@@ -140,6 +154,31 @@ export function SetupScreen({ onReady }: { onReady?: () => void }) {
   }
 
   const allDone = status?.daemon_connected ?? false;
+
+  // Recovery variant: service was installed but daemon isn't connected → single card
+  if (variant === "recovery" && status !== null && status.service_installed && !status.daemon_connected) {
+    return (
+      <div className="setup">
+        <div className="setup__recovery-card">
+          <h2 className="setup__recovery-title">Conduit's engine stopped</h2>
+          <p className="setup__recovery-body">
+            Your buttons are back to their normal behavior until it starts again.
+          </p>
+          <button className="btn btn--primary" onClick={handleRestartEngine}>
+            Start it again
+          </button>
+          {attemptedRestart && !status.daemon_connected && (
+            <button className="btn setup__report-btn" onClick={handleCopyReport}>
+              Copy report for a bug
+            </button>
+          )}
+          {copyConfirm && (
+            <span className="setup__copy-confirm">Copied. Paste it into a bug report.</span>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="setup">

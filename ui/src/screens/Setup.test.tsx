@@ -13,12 +13,19 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
 const mockSetupStatus = vi.fn();
 const mockSetupInstallService = vi.fn();
 const mockSetupFixPermissions = vi.fn();
+const mockRestartEngine = vi.fn();
+const mockCollectReport = vi.fn();
 
 vi.mock("../lib/client", () => ({
   setupStatus: (...a: unknown[]) => mockSetupStatus(...a),
   setupInstallService: (...a: unknown[]) => mockSetupInstallService(...a),
   setupFixPermissions: (...a: unknown[]) => mockSetupFixPermissions(...a),
+  restartEngine: (...a: unknown[]) => mockRestartEngine(...a),
+  collectReport: (...a: unknown[]) => mockCollectReport(...a),
 }));
+
+// jsdom lacks navigator.clipboard — stub it for tests that use collectReport
+Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
 
 // ---- Shared fixtures --------------------------------------------------------
 
@@ -40,6 +47,9 @@ beforeEach(() => {
   mockSetupStatus.mockReset();
   mockSetupInstallService.mockReset();
   mockSetupFixPermissions.mockReset();
+  mockRestartEngine.mockReset();
+  mockCollectReport.mockReset();
+  vi.mocked(navigator.clipboard.writeText).mockResolvedValue(undefined);
 });
 
 // ---- Tests -----------------------------------------------------------------
@@ -129,4 +139,22 @@ it("shows waiting text while permission fix is in-flight for uinput", async () =
   await waitFor(() =>
     expect(screen.queryByText("Waiting for your password in the system dialog…")).not.toBeInTheDocument()
   );
+});
+
+it("recovery shows Start it again and escalates to Copy report", async () => {
+  mockSetupStatus.mockResolvedValue({ ...ALL_GREEN, daemon_connected: false, service_running: false });
+  mockRestartEngine.mockResolvedValue(undefined); // restart "succeeds" but daemon stays down
+  mockCollectReport.mockResolvedValue("== check ==\n{}");
+  render(<SetupScreen variant="recovery" />);
+  expect(await screen.findByText("Conduit's engine stopped")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Start it again" }));
+  await waitFor(() => expect(mockRestartEngine).toHaveBeenCalled());
+  fireEvent.click(await screen.findByRole("button", { name: "Copy report for a bug" }));
+  await waitFor(() => expect(screen.getByText("Copied. Paste it into a bug report.")).toBeInTheDocument());
+});
+
+it("recovery falls through to first-run when the service was never installed", async () => {
+  mockSetupStatus.mockResolvedValue(ALL_BROKEN); // service_installed false
+  render(<SetupScreen variant="recovery" />);
+  expect(await screen.findByText("Let's get Conduit running")).toBeInTheDocument();
 });
