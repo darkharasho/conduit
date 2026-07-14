@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react";
 import type { SetupStatus, PermissionFixOutcome } from "../lib/client";
-import { setupStatus, setupInstallService, setupFixPermissions, restartEngine, collectReport } from "../lib/client";
+import { setupStatus, setupInstallService, setupFixPermissions, restartEngine, collectReport, ConduitError } from "../lib/client";
 import { presentError } from "../lib/error-messages";
-import type { ConduitError } from "../lib/client";
 import { DeviceArt } from "../components/DeviceArt";
 
 // ---- Step derivation --------------------------------------------------------
@@ -72,6 +71,7 @@ export function SetupScreen({ onReady, variant = "firstrun" }: { onReady?: () =>
   const [showDetails, setShowDetails] = useState(false);
   const [attemptedRestart, setAttemptedRestart] = useState(false);
   const [copyConfirm, setCopyConfirm] = useState(false);
+  const [restartError, setRestartError] = useState<string | null>(null);
 
   const recheck = async () => {
     try {
@@ -87,9 +87,14 @@ export function SetupScreen({ onReady, variant = "firstrun" }: { onReady?: () =>
   }, []);
 
   const handleRestartEngine = async () => {
-    await restartEngine().catch(() => {});
-    await recheck();
+    setRestartError(null);
     setAttemptedRestart(true);
+    try {
+      await restartEngine();
+    } catch (e) {
+      setRestartError(presentError(e instanceof ConduitError ? e : new ConduitError("unknown", String(e))).title);
+    }
+    await recheck();
   };
 
   const handleCopyReport = async () => {
@@ -167,6 +172,7 @@ export function SetupScreen({ onReady, variant = "firstrun" }: { onReady?: () =>
           <button className="btn btn--primary" onClick={handleRestartEngine}>
             Start it again
           </button>
+          {restartError && <div className="setup__step-error" role="alert">{restartError}</div>}
           {attemptedRestart && !status.daemon_connected && (
             <button className="btn setup__report-btn" onClick={handleCopyReport}>
               Copy report for a bug

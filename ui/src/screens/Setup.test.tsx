@@ -10,6 +10,20 @@ import { SetupScreen } from "./Setup";
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
 
+const { ConduitError } = vi.hoisted(() => {
+  class MockConduitError extends Error {
+    code: string;
+    detail: string;
+    constructor(code: string, message: string, detail = "") {
+      super(message);
+      this.name = "ConduitError";
+      this.code = code;
+      this.detail = detail;
+    }
+  }
+  return { ConduitError: MockConduitError };
+});
+
 const mockSetupStatus = vi.fn();
 const mockSetupInstallService = vi.fn();
 const mockSetupFixPermissions = vi.fn();
@@ -17,6 +31,7 @@ const mockRestartEngine = vi.fn();
 const mockCollectReport = vi.fn();
 
 vi.mock("../lib/client", () => ({
+  ConduitError: ConduitError,
   setupStatus: (...a: unknown[]) => mockSetupStatus(...a),
   setupInstallService: (...a: unknown[]) => mockSetupInstallService(...a),
   setupFixPermissions: (...a: unknown[]) => mockSetupFixPermissions(...a),
@@ -157,4 +172,17 @@ it("recovery falls through to first-run when the service was never installed", a
   mockSetupStatus.mockResolvedValue(ALL_BROKEN); // service_installed false
   render(<SetupScreen variant="recovery" />);
   expect(await screen.findByText("Let's get Conduit running")).toBeInTheDocument();
+});
+
+it("recovery shows error when restartEngine fails and still shows Copy report", async () => {
+  mockSetupStatus.mockResolvedValue({ ...ALL_GREEN, daemon_connected: false, service_running: false });
+  mockRestartEngine.mockRejectedValue(new ConduitError("internal", "systemctl failed", "unit not found"));
+  mockCollectReport.mockResolvedValue("== check ==\n{}");
+  render(<SetupScreen variant="recovery" />);
+  expect(await screen.findByText("Conduit's engine stopped")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Start it again" }));
+  await waitFor(() => expect(mockRestartEngine).toHaveBeenCalled());
+  expect(await screen.findByText("Something went wrong")).toBeInTheDocument();
+  expect(screen.queryByText(/unit not found/)).toBeNull();
+  expect(screen.getByRole("button", { name: "Copy report for a bug" })).toBeInTheDocument();
 });
