@@ -804,49 +804,6 @@ button {
   border: 1px solid var(--border-control);
 }
 
-/* ── Device tabs (Mappings) ── */
-
-.devtabs {
-  display: flex;
-  gap: 4px;
-  margin: 2px 0 12px;
-  border-bottom: 1px solid var(--border-structural);
-  flex-wrap: wrap;
-}
-
-.devtab {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 6px 12px;
-  border: 1px solid var(--border-structural);
-  border-bottom: none;
-  border-radius: var(--r6) var(--r6) 0 0;
-  background: transparent;
-  color: var(--text-lo);
-  font-size: 12px;
-}
-
-.devtab--active {
-  background: var(--bg-key);
-  color: var(--text-hi);
-  border-color: var(--border-control);
-}
-
-.devtab--offline {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.devtab__cls {
-  font-size: 9px;
-  font-family: var(--font-mono);
-  color: var(--text-dim);
-  border: 1px solid var(--border-control);
-  padding: 0 5px;
-  border-radius: 3px;
-}
-
 /* ── Mouse visualization ── */
 
 .mouse-viz {
@@ -1039,8 +996,6 @@ button {
 }
 
 .devtabs__detect {
-  margin-left: auto;
-  align-self: center;
   font-size: 11px;
 }
 
@@ -1733,7 +1688,6 @@ button {
 /* ── Always-on job labels on the mouse diagram ───────────────────────── */
 .illo__joblabel { font-size: 11px; fill: var(--text-lo); pointer-events: none; }
 
-/* ── Detect hint text beside the Select by pressing button ──────────── */
 .devtabs__detect-hint { font-size: 12px; color: var(--text-lo); white-space: nowrap; }
 .assign-adv-link { background: none; border: none; color: var(--text-dim); font: inherit; font-size: 12px; cursor: pointer; margin-top: 8px; text-align: left; padding: 4px 0; }
 

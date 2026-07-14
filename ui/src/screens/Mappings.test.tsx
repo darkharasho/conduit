@@ -168,228 +168,138 @@ describe("MappingsScreen — Detect button", () => {
   });
 });
 
-describe("MappingsScreen — focusDevicePath one-shot", () => {
-  it("focuses the device tab once on load with focusDevicePath, and does not snap back on device list refresh", async () => {
-    const mouse1 = {
-      path: "/dev/input/event11",
-      name: "Mouse 1",
-      vendor: 0x046d,
-      product: 0x4099,
-      is_keyboard: false,
-      is_mouse: true,
-      grabbed: true,
-      id: "046d:4099/Mouse1",
-      class: "mouse",
-      phys: "usb-1",
-      keys: [],
-      wheel: true,
-      hwheel: true,
-    };
-    const mouse2 = {
-      path: "/dev/input/event12",
-      name: "Mouse 2",
-      vendor: 0x046d,
-      product: 0x409a,
-      is_keyboard: false,
-      is_mouse: true,
-      grabbed: true,
-      id: "046d:409a/Mouse2",
-      class: "mouse",
-      phys: "usb-2",
-      keys: [],
-      wheel: true,
-      hwheel: true,
-    };
+describe("MappingsScreen — single-device mode (focusDevicePath)", () => {
+  const mouse1 = {
+    path: "/dev/input/event11",
+    name: "Mouse 1",
+    vendor: 0x046d,
+    product: 0x4099,
+    is_keyboard: false,
+    is_mouse: true,
+    grabbed: true,
+    id: "046d:4099/Mouse1",
+    class: "mouse",
+    phys: "usb-1",
+    keys: [],
+    wheel: true,
+    hwheel: true,
+  };
+  const keyboard1 = {
+    path: "/dev/input/event5",
+    name: "Keyboard 1",
+    vendor: 0x1234,
+    product: 0x5678,
+    is_keyboard: true,
+    is_mouse: false,
+    grabbed: true,
+    id: "1234:5678/Keyboard1",
+    class: "keyboard",
+    phys: "usb-2",
+    keys: [],
+    wheel: false,
+    hwheel: false,
+  };
 
-    // Start with both devices, listen callback to trigger refresh.
-    // onConnection() registers TWO listeners: "conduit://connected" (cb(true))
-    // and "conduit://disconnected" (cb(false)).  We capture the connected one
-    // so we can fire it to exercise the reload path.
-    let connectedListenerCb: ((e: { payload: unknown }) => void) | null = null;
+  it("(a) renders ONLY the focus device — the other device's name is not in the document", async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mockInvoke.mockImplementation((async (cmd: string) => {
       if (cmd === "get_config") return MINIMAL_TOML;
-      if (cmd === "list_devices") return [mouse1, mouse2];
+      if (cmd === "list_devices") return [mouse1, keyboard1];
+      return undefined;
+    }) as any);
+    mockListen.mockResolvedValue(vi.fn());
+
+    render(
+      <MappingsScreen
+        railActiveProfile="default"
+        onProfilesChange={() => {}}
+        focusDevicePath="/dev/input/event11"
+      />
+    );
+
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); });
+
+    // No tab strip should exist at all
+    expect(document.querySelector('[role="tablist"][aria-label="Devices"]')).toBeNull();
+    // The other device's name must not appear anywhere
+    expect(document.body.textContent).not.toContain("Keyboard 1");
+  });
+
+  it("(b) unplug flow: device list reload without focus device shows disconnect message and Back button calls onBack", async () => {
+    let connectedListenerCb: ((e: { payload: unknown }) => void) | null = null;
+    let devicesInList = [mouse1];
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockInvoke.mockImplementation((async (cmd: string) => {
+      if (cmd === "get_config") return MINIMAL_TOML;
+      if (cmd === "list_devices") return devicesInList;
       return undefined;
     }) as any);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mockListen.mockImplementation((async (event: string, cb: (e: { payload: unknown }) => void) => {
-      if (event === "conduit://connected") {
-        connectedListenerCb = cb;
-      }
+      if (event === "conduit://connected") connectedListenerCb = cb;
       return vi.fn();
     }) as any);
 
-    // Render with focusDevicePath set to mouse2
-    const { container } = render(
+    const onBack = vi.fn();
+    render(
       <MappingsScreen
         railActiveProfile="default"
         onProfilesChange={() => {}}
-        focusDevicePath="/dev/input/event12"
+        focusDevicePath="/dev/input/event11"
+        onBack={onBack}
       />
     );
 
-    // Wait for initial load
+    // Initial load — device is present, no disconnect message
     await act(async () => { await Promise.resolve(); });
     await act(async () => { await Promise.resolve(); });
+    expect(document.body.textContent).not.toContain("isn't connected anymore");
 
-    // Verify mouse2 tab is active (has aria-selected=true)
-    // The device tabs container has role="tablist" aria-label="Devices"
-    const deviceTabsContainer = container.querySelector('[role="tablist"][aria-label="Devices"]');
-    expect(deviceTabsContainer).toBeTruthy();
-
-    const allDeviceTabs = Array.from(deviceTabsContainer?.querySelectorAll('[role="tab"]') || []);
-    const mouse2Tab = allDeviceTabs.find((btn) => btn.textContent?.includes("Mouse 2")) as HTMLButtonElement | undefined;
-    expect(mouse2Tab).toBeTruthy();
-    expect(mouse2Tab?.getAttribute("aria-selected")).toBe("true");
-
-    // User manually switches to mouse1
-    const mouse1Tab = allDeviceTabs.find((btn) => btn.textContent?.includes("Mouse 1")) as HTMLButtonElement | undefined;
-    expect(mouse1Tab).toBeTruthy();
-    await act(async () => { mouse1Tab?.click(); });
-
-    // Verify mouse1 is now active
-    expect(mouse1Tab?.getAttribute("aria-selected")).toBe("true");
-    expect(mouse2Tab?.getAttribute("aria-selected")).toBe("false");
-
-    // Simulate daemon reconnect by firing the "conduit://connected" Tauri event.
-    // onConnection() wraps the user callback as `() => cb(true)`, so the
-    // listener receives a raw Tauri event object (payload is null for these).
-    // Firing it causes loadConfig() + loadDevices() to run a second time,
-    // which is the reload path the guard must survive.
+    // Simulate device unplug: device list no longer contains the focus device
+    devicesInList = [];
     expect(connectedListenerCb).not.toBeNull();
     await act(async () => {
       connectedListenerCb!({ payload: null });
       await Promise.resolve();
     });
+    await act(async () => { await Promise.resolve(); });
 
-    // Verify mouse1 is STILL active (tab does not snap back to mouse2)
-    expect(mouse1Tab?.getAttribute("aria-selected")).toBe("true");
-    expect(mouse2Tab?.getAttribute("aria-selected")).toBe("false");
+    // Disconnect message should appear
+    expect(document.body.textContent).toContain("isn't connected anymore");
+    // Find the "Back to your devices" button
+    const allBtns = Array.from(document.querySelectorAll('button'));
+    const backToDevices = allBtns.find((b) => b.textContent?.includes("Back to your devices"));
+    expect(backToDevices).toBeTruthy();
+    await act(async () => { backToDevices!.click(); });
+    expect(onBack).toHaveBeenCalledTimes(1);
   });
-});
 
-describe("MappingsScreen — focusDevicePath no-flash", () => {
-  /**
-   * F2 regression guard: with focusDevicePath pointing to Mouse 2, Mouse 1
-   * (the first device) must never receive aria-selected="true" at any point
-   * during or after load, and Mouse 2 must be the active tab after load.
-   *
-   * The underlying bug: before the fix, activeDevPath initialised to null,
-   * so loadDevices fell through to devs[0] (Mouse 1) before the one-shot
-   * didFocus effect could switch to Mouse 2.  React 18's automatic batching
-   * collapses the two consecutive setActiveDevPath calls into one DOM commit
-   * in jsdom (so no intermediate "false → true → false" on mouse1 is
-   * observable via MutationObserver), but in a real browser the two
-   * synchronous commits cause a visible flash frame.
-   *
-   * The fix seeds the initial state from focusDevicePath so loadDevices
-   * always keeps mouse2 (prev === focusDevicePath and is in the list),
-   * eliminating the extra commit entirely.  This test asserts the final
-   * outcome is correct.  The mechanism fix is proven by the fact that
-   * loadDevices now returns focusDevicePath (not devs[0]) when prev matches.
-   */
-  it("Mouse 2 is selected after load and Mouse 1 (first device) is never selected", async () => {
-    const mouse1 = {
-      path: "/dev/input/event11",
-      name: "Mouse 1",
-      vendor: 0x046d,
-      product: 0x4099,
-      is_keyboard: false,
-      is_mouse: true,
-      grabbed: true,
-      id: "046d:4099/Mouse1",
-      class: "mouse",
-      phys: "usb-1",
-      keys: [],
-      wheel: true,
-      hwheel: true,
-    };
-    const mouse2 = {
-      path: "/dev/input/event12",
-      name: "Mouse 2",
-      vendor: 0x046d,
-      product: 0x409a,
-      is_keyboard: false,
-      is_mouse: true,
-      grabbed: true,
-      id: "046d:409a/Mouse2",
-      class: "mouse",
-      phys: "usb-2",
-      keys: [],
-      wheel: true,
-      hwheel: true,
-    };
-
+  it("(c) no-focusDevicePath fallback renders first device without a tab strip", async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mockInvoke.mockImplementation((async (cmd: string) => {
       if (cmd === "get_config") return MINIMAL_TOML;
-      if (cmd === "list_devices") return [mouse1, mouse2];
+      if (cmd === "list_devices") return [mouse1, keyboard1];
       return undefined;
     }) as any);
     mockListen.mockResolvedValue(vi.fn());
 
-    const { container } = render(
+    render(
       <MappingsScreen
         railActiveProfile="default"
         onProfilesChange={() => {}}
-        focusDevicePath="/dev/input/event12"
+        // No focusDevicePath — fallback to first device
       />
     );
 
-    // Wait for initial load (config + devices) and all effects to flush.
     await act(async () => { await Promise.resolve(); });
     await act(async () => { await Promise.resolve(); });
 
-    // Locate the device tabs after load.
-    const deviceTabsContainer = container.querySelector('[role="tablist"][aria-label="Devices"]');
-    expect(deviceTabsContainer).toBeTruthy();
-    const allDeviceTabs = Array.from(deviceTabsContainer?.querySelectorAll('[role="tab"]') || []);
-    const mouse1Tab = allDeviceTabs.find((btn) => btn.textContent?.includes("Mouse 1")) as HTMLButtonElement | undefined;
-    const mouse2Tab = allDeviceTabs.find((btn) => btn.textContent?.includes("Mouse 2")) as HTMLButtonElement | undefined;
-    expect(mouse1Tab).toBeTruthy();
-    expect(mouse2Tab).toBeTruthy();
-
-    // Mouse 2 must be the active tab after load.
-    expect(mouse2Tab?.getAttribute("aria-selected")).toBe("true");
-
-    // Mouse 1 must NOT be the active tab — not now and, critically, not
-    // at any intermediate render during the load sequence.
-    //
-    // We track this by re-rendering with a fresh component and observing
-    // aria-selected via MutationObserver across the entire load sequence.
-    // This directly detects the "Wooting flash" pattern (first device
-    // briefly selected before focusDevicePath takes effect).
-    const mouse1SelectedValues: string[] = [];
-    const { container: container2 } = render(
-      <MappingsScreen
-        railActiveProfile="default"
-        onProfilesChange={() => {}}
-        focusDevicePath="/dev/input/event12"
-      />
-    );
-
-    // Observe the devtabs element for attribute mutations on its children.
-    const observer = new MutationObserver(() => {
-      const tabList2 = container2.querySelector('[role="tablist"][aria-label="Devices"]');
-      const tabs2 = Array.from(tabList2?.querySelectorAll('[role="tab"]') || []);
-      const m1tab2 = tabs2.find((b) => b.textContent?.includes("Mouse 1"));
-      if (m1tab2) {
-        mouse1SelectedValues.push(m1tab2.getAttribute("aria-selected") ?? "absent");
-      }
-    });
-    observer.observe(container2, { subtree: true, attributes: true, attributeFilter: ["aria-selected"] });
-
-    await act(async () => { await Promise.resolve(); });
-    await act(async () => { await Promise.resolve(); });
-
-    observer.disconnect();
-
-    // Pre-fix: mouse1SelectedValues would contain "true" (the intermediate render
-    // where loadDevices picked devs[0] = Mouse 1 before didFocus corrected it).
-    // Post-fix: mouse1SelectedValues only contains "false" (or is empty if the
-    // tab never changed from Mouse 2).
-    expect(mouse1SelectedValues.every((v) => v !== "true")).toBe(true);
+    // No tab strip
+    expect(document.querySelector('[role="tablist"][aria-label="Devices"]')).toBeNull();
+    // "Select by pressing" button should appear (first device is active)
+    expect(document.body.textContent).toContain("Select by pressing");
   });
 });
 

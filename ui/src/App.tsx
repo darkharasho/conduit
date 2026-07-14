@@ -138,6 +138,7 @@ function App() {
               onProfilesChange={handleProfilesChange}
               focusDevicePath={view.devPath}
               onSelectProfile={setActiveProfile}
+              onBack={() => setView({ kind: "home" })}
             />
           )}
           {view.kind === "help" && (

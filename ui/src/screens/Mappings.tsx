@@ -16,7 +16,6 @@ import {
   removeDeviceAction,
   deviceSectionFor,
   deviceSectionKey,
-  selectorMatches,
   addProfile,
   actionWithEverywhereFallback,
   setProfileAutoSwitch,
@@ -47,10 +46,12 @@ interface Props {
   railActiveProfile: string;
   /** Notify App.tsx when profile list changes */
   onProfilesChange: (names: string[]) => void;
-  /** When set and a device with that path exists after load, make it the active tab (one-shot) */
+  /** The device to show in the editor. When absent, falls back to first grabbed device. No tab strip is rendered. */
   focusDevicePath?: string;
   /** Called when a new profile is selected in the pills bar */
   onSelectProfile?: (name: string) => void;
+  /** Called when the user wants to navigate back (e.g. device was unplugged). App passes () => setView({kind:"home"}). */
+  onBack?: () => void;
 }
 
 interface UndoFrame {
@@ -63,6 +64,7 @@ export function MappingsScreen({
   onProfilesChange,
   focusDevicePath,
   onSelectProfile,
+  onBack,
 }: Props) {
   const [model, setModel] = useState<ConfigModel | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -86,13 +88,11 @@ export function MappingsScreen({
     return () => { alive = false; };
   }, []);
 
-  // Device tabs: grabbed devices, keyed by evdev path (unique even for twins)
+  // Grabbed devices (full list — used for deviceScope / device-override paths)
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
-  // Seed initial selection from focusDevicePath so the first paint already
-  // shows the right tab (avoids a flash of the first device before the
-  // one-shot didFocus effect can fire after the device list loads).
-  const [activeDevPath, setActiveDevPath] = useState<string | null>(focusDevicePath ?? null);
-  // "This device only" scope for saves (resets on key/tab change)
+  // True after the first listDevices() call completes (success or failure)
+  const [devicesLoaded, setDevicesLoaded] = useState(false);
+  // "This device only" scope for saves (resets on key change)
   const [deviceScope, setDeviceScope] = useState(false);
   // Detect flow: waiting for a physical press on the active device
   const [detecting, setDetecting] = useState(false);
@@ -125,36 +125,15 @@ export function MappingsScreen({
     }
   }, []); // stable — no external deps
 
-  // One-shot: when focusDevicePath is provided and devices have loaded,
-  // select it once and never again, even if devices reload or connection restarts.
-  // Declared before loadDevices so the callback can mark it done on first load.
-  const didFocus = useRef(false);
-
   const loadDevices = useCallback(async () => {
     try {
       const devs = (await listDevices()).filter((d) => d.grabbed);
       setDevices(devs);
-      setActiveDevPath((prev) => {
-        // Keep current selection if it still exists in the new list
-        if (prev && devs.some((d) => d.path === prev)) return prev;
-        // Focus device requested and present → select it (also marks didFocus done below)
-        if (focusDevicePath && devs.some((d) => d.path === focusDevicePath)) {
-          return focusDevicePath;
-        }
-        // Fall back to first device only when no focus was requested or it's absent
-        return devs[0]?.path ?? null;
-      });
-      // If focusDevicePath was provided and exists, mark the one-shot done so
-      // the belt-and-suspenders effect doesn't fire unnecessarily.
-      if (focusDevicePath && devs.some((d) => d.path === focusDevicePath)) {
-        didFocus.current = true;
-      }
     } catch {
-      // Non-fatal: no tabs, keyboard view without device context
+      // Non-fatal: keyboard view without device context
+    } finally {
+      setDevicesLoaded(true);
     }
-  // focusDevicePath is a one-shot mount prop; adding it here is safe (it never
-  // changes across a component lifetime).
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -173,29 +152,28 @@ export function MappingsScreen({
     };
   }, [loadConfig, loadDevices]);
 
-  // Belt-and-suspenders: if loadDevices already marked didFocus done (because
-  // the device list included focusDevicePath on first load), this effect is a
-  // no-op. It fires as a fallback if the device list loads in multiple batches.
-  useEffect(() => {
-    if (!focusDevicePath || didFocus.current) return;
-    if (devices.some((d) => d.path === focusDevicePath)) {
-      setActiveDevPath(focusDevicePath);
-      didFocus.current = true;
-    }
-  }, [devices, focusDevicePath]);
-
   // When rail selects a different profile, reset layer & editing
   useEffect(() => {
     setActiveLayer("base");
     setEditingKey(null);
   }, [railActiveProfile]);
 
-  // Scope resets when the key or tab changes
+  // Scope resets when the key changes
   useEffect(() => {
     setDeviceScope(false);
-  }, [editingKey, activeDevPath]);
+  }, [editingKey]);
 
+  // Derive the active device: use focusDevicePath when given, else first grabbed device.
+  // No tab strip — the active device is fixed for this editor session.
+  const activeDevPath = focusDevicePath
+    ? (devices.find((d) => d.path === focusDevicePath)?.path ?? null)
+    : (devices[0]?.path ?? null);
   const activeDev = devices.find((d) => d.path === activeDevPath) ?? null;
+
+  // When focusDevicePath was provided and the device list has loaded but the
+  // device is absent (unplugged after the editor opened), show a recovery UI.
+  const focusDeviceGone =
+    !!focusDevicePath && devicesLoaded && !devices.some((d) => d.path === focusDevicePath);
 
   // Detect: select the first key pressed on the active device. HID
   // descriptors over-declare wildly (a 9-button mouse can declare 300
@@ -219,12 +197,6 @@ export function MappingsScreen({
       unlisten.then((f) => f());
     };
   }, [detecting, activeDevName]);
-
-  // Offline sections: device selectors in this profile with no grabbed match
-  const profileModel = model?.profiles.find((p) => p.name === railActiveProfile);
-  const offlineSections = Object.keys(profileModel?.device ?? {}).filter(
-    (sel) => !devices.some((d) => selectorMatches(sel, d))
-  );
 
   /**
    * Apply `updated` optimistically, persist, and offer Undo on success or
@@ -514,45 +486,30 @@ export function MappingsScreen({
               );
             })()}
 
-            {/* Device tabs */}
-            {(devices.length > 0 || offlineSections.length > 0) && (
-              <div className="devtabs" role="tablist" aria-label="Devices">
-                {devices.map((d) => (
-                  <button
-                    key={d.path}
-                    role="tab"
-                    aria-selected={d.path === activeDevPath}
-                    className={`devtab${d.path === activeDevPath ? " devtab--active" : ""}`}
-                    onClick={() => {
-                      setActiveDevPath(d.path);
-                      setEditingKey(null);
-                    }}
-                  >
-                    <span>{d.name}</span>
-                    <span className="devtab__cls">{d.class.toUpperCase()}</span>
-                  </button>
-                ))}
-                {offlineSections.map((sel) => (
-                  <span key={sel} className="devtab devtab--offline" title="Device not connected; overrides preserved">
-                    <span>{sel}</span>
-                    <span className="devtab__cls">OFFLINE</span>
+            {/* Device disconnected message */}
+            {focusDeviceGone && (
+              <div className="banner--error" role="alert" style={{ margin: "8px 16px" }}>
+                This device isn't connected anymore.{" "}
+                <button className="btn" onClick={() => onBack?.()}>
+                  Back to your devices
+                </button>
+              </div>
+            )}
+
+            {/* Detect bar — shown when a device is active */}
+            {activeDev && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "2px 0 12px" }}>
+                <button
+                  className={`btn devtabs__detect${detecting ? " devtabs__detect--active" : ""}`}
+                  onClick={() => setDetecting((v) => !v)}
+                  title="Press a physical button/key on this device to jump to its mapping"
+                >
+                  Select by pressing
+                </button>
+                {detecting && (
+                  <span className="devtabs__detect-hint">
+                    …then press the button on your device
                   </span>
-                ))}
-                {activeDev && (
-                  <>
-                    <button
-                      className={`btn devtabs__detect${detecting ? " devtabs__detect--active" : ""}`}
-                      onClick={() => setDetecting((v) => !v)}
-                      title="Press a physical button/key on this device to jump to its mapping"
-                    >
-                      Select by pressing
-                    </button>
-                    {detecting && (
-                      <span className="devtabs__detect-hint">
-                        …then press the button on your device
-                      </span>
-                    )}
-                  </>
                 )}
               </div>
             )}
