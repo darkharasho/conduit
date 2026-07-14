@@ -57,3 +57,15 @@ describe("G502X layout", () => {
     expect(keys).toContain("f16");
   });
 });
+
+describe("G600 layout", () => {
+  const layout = layoutFor({ vendor: 0x046d, product: 0xc24a });
+
+  it("is defined", () => {
+    expect(layout).not.toBeNull();
+  });
+
+  it("has sideButtons: true", () => {
+    expect(layout?.sideButtons).toBe(true);
+  });
+});

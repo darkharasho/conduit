@@ -68,6 +68,7 @@ const WHEEL_GROUP: LayoutGroup = {
 const G600_MOUSE: DeviceLayout = {
   title: "Logitech G600 — mouse buttons",
   node: "mouse",
+  sideButtons: true,
   groups: [
     {
       label: "Primary",
