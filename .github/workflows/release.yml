@@ -23,6 +23,9 @@ jobs:
             build-essential libxdo-dev libssl-dev \
             libayatana-appindicator3-dev librsvg2-dev
       - uses: Swatinem/rust-cache@v2
+      # externalBin validation: workspace builds need the sidecar (see ci.yml)
+      - name: Build daemon sidecar
+        run: bash scripts/prepare-sidecar.sh
       - run: cargo test --workspace
       - uses: actions/setup-node@v4
         with:
