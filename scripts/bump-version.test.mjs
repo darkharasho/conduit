@@ -8,18 +8,36 @@ import { bumpFiles } from "./bump-version.mjs";
 function scaffold() {
   const root = mkdtempSync(join(tmpdir(), "bump-"));
   mkdirSync(join(root, "ui/src-tauri"), { recursive: true });
+  mkdirSync(join(root, "crates/conduit-daemon"), { recursive: true });
+  mkdirSync(join(root, "crates/conduit-core"), { recursive: true });
+  mkdirSync(join(root, "crates/conduit-proto"), { recursive: true });
   writeFileSync(join(root, "ui/src-tauri/tauri.conf.json"), JSON.stringify({ version: "0.1.0" }, null, 2));
   writeFileSync(join(root, "ui/package.json"), JSON.stringify({ version: "0.1.0" }, null, 2));
   writeFileSync(join(root, "ui/src-tauri/Cargo.toml"), '[package]\nname = "conduit-ui"\nversion = "0.1.0"\n');
+  writeFileSync(
+    join(root, "crates/conduit-daemon/Cargo.toml"),
+    '[package]\nname = "conduit-daemon"\nversion = "0.1.0"\nedition = "2021"\n'
+  );
+  writeFileSync(
+    join(root, "crates/conduit-core/Cargo.toml"),
+    '[package]\nname = "conduit-core"\nversion = "0.1.0"\nedition = "2021"\n'
+  );
+  writeFileSync(
+    join(root, "crates/conduit-proto/Cargo.toml"),
+    '[package]\nname = "conduit-proto"\nversion = "0.1.0"\nedition = "2021"\n'
+  );
   return root;
 }
 
-test("rewrites all three files", () => {
+test("rewrites all files", () => {
   const root = scaffold();
   bumpFiles("0.2.0", root);
   assert.match(readFileSync(join(root, "ui/src-tauri/tauri.conf.json"), "utf8"), /"version": "0\.2\.0"/);
   assert.match(readFileSync(join(root, "ui/package.json"), "utf8"), /"version": "0\.2\.0"/);
   assert.match(readFileSync(join(root, "ui/src-tauri/Cargo.toml"), "utf8"), /^version = "0\.2\.0"$/m);
+  assert.match(readFileSync(join(root, "crates/conduit-daemon/Cargo.toml"), "utf8"), /^version = "0\.2\.0"$/m);
+  assert.match(readFileSync(join(root, "crates/conduit-core/Cargo.toml"), "utf8"), /^version = "0\.2\.0"$/m);
+  assert.match(readFileSync(join(root, "crates/conduit-proto/Cargo.toml"), "utf8"), /^version = "0\.2\.0"$/m);
 });
 
 test("rejects non-semver", () => {

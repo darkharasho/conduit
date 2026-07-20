@@ -3,6 +3,7 @@ import type { SetupStatus, PermissionFixOutcome } from "../lib/client";
 import { setupStatus, setupInstallService, setupFixPermissions, restartEngine, collectReport, ConduitError } from "../lib/client";
 import { presentError } from "../lib/error-messages";
 import { DeviceArt } from "../components/DeviceArt";
+import { isEngineOutdated } from "../lib/engine-update";
 
 // ---- Step derivation --------------------------------------------------------
 
@@ -35,13 +36,6 @@ const STEP_DEFS: StepDef[] = [
     isDone: (s) => s.evdev_ok,
   },
 ];
-
-// ---- Engine version drift ----------------------------------------------------
-
-/** True only when we know the engine's version and it differs from the app's. */
-function isEngineOutdated(s: SetupStatus): boolean {
-  return s.daemon_version !== null && s.daemon_version !== s.app_version;
-}
 
 // ---- Types ------------------------------------------------------------------
 

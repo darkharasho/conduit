@@ -108,7 +108,8 @@ The AppImage bundles both the UI and the `conduit-daemon` engine. On first
 run, the in-app **Setup** screen installs the engine for you (copies it to
 `~/.local/bin`, installs the systemd user unit, and starts it) and walks
 through the udev/permissions steps. When a new release ships a newer engine
-than the one installed, Setup shows an **Update now** button.
+than the one installed, the update prompt appears in **Settings** (and in
+Setup during recovery).
 
 Closing the window minimizes Conduit to the system tray. To launch Conduit
 automatically at login (starting in the tray), enable **Settings → Open on
