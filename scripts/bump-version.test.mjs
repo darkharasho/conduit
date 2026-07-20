@@ -25,3 +25,28 @@ test("rewrites all three files", () => {
 test("rejects non-semver", () => {
   assert.throws(() => bumpFiles("nope", scaffold()));
 });
+
+test("scopes version bump to [package] section only", () => {
+  const root = scaffold();
+  // Add a [dependencies.foo] section with its own version line BEFORE [package]
+  const cargoPath = join(root, "ui/src-tauri/Cargo.toml");
+  const cargo = `[dependencies.foo]
+version = "9.9.9"
+
+[package]
+name = "conduit-ui"
+version = "0.1.0"
+
+[dev-dependencies]
+something = "0.0.1"
+`;
+  writeFileSync(cargoPath, cargo);
+
+  bumpFiles("0.3.0", root);
+  const result = readFileSync(cargoPath, "utf8");
+
+  // [package] version should be updated
+  assert.match(result, /^\[package\](?:[^\[]*\n)*version = "0\.3\.0"/m);
+  // [dependencies.foo] version should NOT be touched
+  assert.match(result, /^\[dependencies\.foo\](?:[^\[]*\n)*version = "9\.9\.9"/m);
+});

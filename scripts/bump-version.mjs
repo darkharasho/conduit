@@ -12,8 +12,21 @@ export function bumpFiles(version, rootDir) {
   json("ui/src-tauri/tauri.conf.json");
   json("ui/package.json");
   const cargoPath = join(rootDir, "ui/src-tauri/Cargo.toml");
-  const cargo = readFileSync(cargoPath, "utf8")
-    .replace(/^version = ".*"$/m, `version = "${version}"`);
+  let cargo = readFileSync(cargoPath, "utf8");
+  // Scope the version replacement to the [package] section only
+  const packageIndex = cargo.indexOf("[package]");
+  const nextSectionIndex = cargo.indexOf("[", packageIndex + 1);
+  const beforePackage = cargo.substring(0, packageIndex);
+  const packageSection = cargo.substring(
+    packageIndex,
+    nextSectionIndex === -1 ? cargo.length : nextSectionIndex
+  );
+  const afterPackage = nextSectionIndex === -1 ? "" : cargo.substring(nextSectionIndex);
+  const updatedPackageSection = packageSection.replace(
+    /^version = ".*"$/m,
+    `version = "${version}"`
+  );
+  cargo = beforePackage + updatedPackageSection + afterPackage;
   writeFileSync(cargoPath, cargo);
 }
 
