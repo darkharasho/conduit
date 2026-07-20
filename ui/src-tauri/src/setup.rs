@@ -1,10 +1,11 @@
+use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{find_conduit_daemon_binary, one_shot, socket_path, ErrorPayload};
+use crate::{find_conduit_daemon_binary, socket_path, ErrorPayload};
 
 // ---- Constants ----
 
@@ -59,6 +60,38 @@ pub fn sidecar_candidate(exe_dir: &Path) -> PathBuf {
 /// we can't tell, so we don't nag.
 pub fn daemon_outdated(daemon: Option<&str>, app: &str) -> bool {
     matches!(daemon, Some(v) if v != app)
+}
+
+/// Bound how long a single blocking socket round-trip may take before we give
+/// up on it. `setup_status` runs on a poll every few seconds while the Setup
+/// screen is open — a daemon that accepts the connection but never writes a
+/// reply (hung, not crashed) must not be allowed to stall that poll forever.
+const VERSION_PROBE_TIMEOUT: Duration = Duration::from_millis(500);
+
+/// Fetch the running daemon's version over the socket, bounded by
+/// `VERSION_PROBE_TIMEOUT` so a connected-but-hung daemon can't block the
+/// caller indefinitely. Returns `None` on any failure (including timeout) —
+/// callers already treat "unknown version" as "don't nag about updates".
+fn fetch_daemon_version() -> Option<String> {
+    let stream = UnixStream::connect(socket_path()).ok()?;
+    stream.set_read_timeout(Some(VERSION_PROBE_TIMEOUT)).ok()?;
+    stream.set_write_timeout(Some(VERSION_PROBE_TIMEOUT)).ok()?;
+    let mut stream = stream;
+
+    let line = serde_json::to_string(&conduit_proto::Request::GetStatus).ok()?;
+    stream
+        .write_all(line.as_bytes())
+        .and_then(|_| stream.write_all(b"\n"))
+        .ok()?;
+
+    let mut reader = BufReader::new(&stream);
+    let mut resp_line = String::new();
+    reader.read_line(&mut resp_line).ok()?;
+
+    match serde_json::from_str::<conduit_proto::Response>(resp_line.trim()).ok()? {
+        conduit_proto::Response::Status(s) => Some(s.version),
+        _ => None,
+    }
 }
 
 /// Validate a Unix username against [A-Za-z_][A-Za-z0-9_.-]*.
@@ -196,11 +229,10 @@ pub async fn setup_status() -> Result<SetupStatus, ErrorPayload> {
 
     // 5. Daemon version via the socket — only ask if we know it's reachable,
     // so a down daemon doesn't cost us a second failed connection attempt.
+    // Bounded by VERSION_PROBE_TIMEOUT so a connected-but-hung daemon can't
+    // stall this poll (setup_status runs on a timer while Setup is open).
     let daemon_version = if daemon_connected {
-        match one_shot(&conduit_proto::Request::GetStatus) {
-            Ok(conduit_proto::Response::Status(s)) => Some(s.version),
-            _ => None,
-        }
+        fetch_daemon_version()
     } else {
         None
     };

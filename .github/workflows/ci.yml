@@ -23,6 +23,13 @@ jobs:
             build-essential libxdo-dev libssl-dev \
             libayatana-appindicator3-dev librsvg2-dev
       - uses: Swatinem/rust-cache@v2
+      # conduit-ui's tauri.conf.json declares bundle.externalBin, and the
+      # Tauri build script validates that the sidecar binary exists at cargo
+      # build time — without it, `cargo build`/`cargo test --workspace` fails
+      # outright since conduit-ui is a workspace member. ui/src-tauri/bin/ is
+      # gitignored, so a fresh checkout has nothing there until this runs.
+      - name: Build daemon sidecar
+        run: bash scripts/prepare-sidecar.sh
       - name: Test
         run: cargo test --workspace
       - name: Deny warnings
