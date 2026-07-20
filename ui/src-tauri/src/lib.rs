@@ -354,6 +354,38 @@ fn show_main_window(app: &AppHandle) {
     }
 }
 
+/// Tracks whether tray setup succeeded. When it didn't, there is no tray to
+/// restore the window from, so close-to-tray must not hide the window (the
+/// app should just exit normally on close instead of vanishing).
+static TRAY_OK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Build the tray icon/menu. Returns `Err` instead of panicking if any step
+/// fails (e.g. no bundle icon available) so the caller can fall back to a
+/// visible window rather than letting Tauri panic the whole process out of
+/// `.setup()`.
+fn build_tray(app: &tauri::App) -> tauri::Result<()> {
+    let icon = app
+        .default_window_icon()
+        .cloned()
+        .ok_or_else(|| tauri::Error::AssetNotFound("bundle icon".into()))?;
+
+    let open_item = MenuItem::with_id(app, "open", "Open Conduit", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open_item, &quit_item])?;
+    TrayIconBuilder::with_id("main-tray")
+        .icon(icon)
+        .menu(&menu)
+        .show_menu_on_left_click(true)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "open" => show_main_window(app),
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .build(app)?;
+
+    Ok(())
+}
+
 // ---- App entry point ----
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -366,30 +398,28 @@ pub fn run() {
             spawn_events_subscription(handle);
 
             let hidden = std::env::args().any(|a| a == "--hidden");
-            if !hidden {
+            let tray_ok = build_tray(app)
+                .map_err(|e| eprintln!("conduit-ui: tray unavailable: {e}"))
+                .is_ok();
+            TRAY_OK.store(tray_ok, std::sync::atomic::Ordering::SeqCst);
+
+            if !hidden || !tray_ok {
                 show_main_window(&app.handle());
             }
-
-            let open_item = MenuItem::with_id(app, "open", "Open Conduit", true, None::<&str>)?;
-            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open_item, &quit_item])?;
-            TrayIconBuilder::with_id("main-tray")
-                .icon(app.default_window_icon().cloned().expect("bundle icon set"))
-                .menu(&menu)
-                .show_menu_on_left_click(true)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "open" => show_main_window(app),
-                    "quit" => app.exit(0),
-                    _ => {}
-                })
-                .build(app)?;
 
             Ok(())
         })
         .on_window_event(|window, event| {
+            if window.label() != "main" {
+                return;
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+                if TRAY_OK.load(std::sync::atomic::Ordering::SeqCst) {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+                // If the tray isn't available, let the close proceed normally
+                // (a hidden window with no tray would be unreachable).
             }
         })
         .invoke_handler(tauri::generate_handler![
