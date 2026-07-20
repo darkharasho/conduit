@@ -6,7 +6,11 @@ use std::time::Duration;
 
 use conduit_proto::{Push, Request, Response};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter};
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::TrayIconBuilder,
+    AppHandle, Emitter, Manager,
+};
 
 mod apps;
 mod ratbag;
@@ -339,6 +343,17 @@ async fn list_installed_apps() -> Result<Vec<apps::InstalledApp>, ErrorPayload> 
     Ok(installed)
 }
 
+// ---- Tray / window visibility ----
+
+/// Show the main window and give it focus (used by the tray "Open" item and
+/// on normal, non-`--hidden` launch).
+fn show_main_window(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
+
 // ---- App entry point ----
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -349,7 +364,33 @@ pub fn run() {
             let handle = app.handle().clone();
             spawn_status_subscription(handle.clone());
             spawn_events_subscription(handle);
+
+            let hidden = std::env::args().any(|a| a == "--hidden");
+            if !hidden {
+                show_main_window(&app.handle());
+            }
+
+            let open_item = MenuItem::with_id(app, "open", "Open Conduit", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&open_item, &quit_item])?;
+            TrayIconBuilder::with_id("main-tray")
+                .icon(app.default_window_icon().cloned().expect("bundle icon set"))
+                .menu(&menu)
+                .show_menu_on_left_click(true)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "open" => show_main_window(app),
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .build(app)?;
+
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
         })
         .invoke_handler(tauri::generate_handler![
             get_status,
