@@ -175,6 +175,19 @@ async fn capture_next_key() -> Result<CapturedKey, ErrorPayload> {
 /// 3. `../target/debug/conduit-daemon` relative to the app executable
 /// 4. `../target/release/conduit-daemon` relative to the app executable
 pub(crate) fn find_conduit_daemon_binary() -> Option<std::path::PathBuf> {
+    // 0. Bundled sidecar next to the running app executable. This is how the
+    // AppImage ships conduit-daemon (Tauri `externalBin`), so it takes
+    // priority over anything else on the system — an AppImage always runs
+    // the daemon it was built and tested with.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            let sidecar = setup::sidecar_candidate(exe_dir);
+            if sidecar.exists() {
+                return Some(sidecar);
+            }
+        }
+    }
+
     // 1. PATH via `which`
     if let Ok(output) = std::process::Command::new("which").arg("conduit-daemon").output() {
         if output.status.success() {
@@ -197,14 +210,10 @@ pub(crate) fn find_conduit_daemon_binary() -> Option<std::path::PathBuf> {
         }
     }
 
-    // 3 & 4. Relative to the app executable (dev mode)
+    // 3 & 4. Relative to the app executable (dev mode) — the sidecar check
+    // above (step 0) already covers `exe_dir/conduit-daemon` directly.
     if let Ok(exe) = std::env::current_exe() {
         if let Some(exe_dir) = exe.parent() {
-            // Workspace builds put conduit-daemon right next to conduit-ui.
-            let sibling = exe_dir.join("conduit-daemon");
-            if sibling.exists() {
-                return Some(sibling);
-            }
             // Go up from target/{debug,release}/ to project root
             for profile in &["debug", "release"] {
                 let candidate = exe_dir

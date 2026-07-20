@@ -1,10 +1,10 @@
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{find_conduit_daemon_binary, socket_path, ErrorPayload};
+use crate::{find_conduit_daemon_binary, one_shot, socket_path, ErrorPayload};
 
 // ---- Constants ----
 
@@ -44,6 +44,21 @@ pub fn should_replace_binary(
             src_mtime > dest_mtime
         }
     }
+}
+
+/// Bundled-binary discovery: the Tauri `externalBin` sidecar sits right next
+/// to the app executable in the AppImage layout, named `conduit-daemon`
+/// (Tauri strips the target-triple suffix at bundle time). Preferred over
+/// the broader search in `find_conduit_daemon_binary` when present.
+pub fn sidecar_candidate(exe_dir: &Path) -> PathBuf {
+    exe_dir.join("conduit-daemon")
+}
+
+/// True only when we know the daemon's version and it differs from the app's.
+/// `None` (socket unreachable / daemon not running) is never "outdated" —
+/// we can't tell, so we don't nag.
+pub fn daemon_outdated(daemon: Option<&str>, app: &str) -> bool {
+    matches!(daemon, Some(v) if v != app)
 }
 
 /// Validate a Unix username against [A-Za-z_][A-Za-z0-9_.-]*.
@@ -104,6 +119,11 @@ pub struct SetupStatus {
     pub binary_missing: bool,
     pub binary_path: Option<String>,
     pub details: Vec<String>,
+    /// Version reported by the running daemon over the socket.
+    /// `None` when the socket is unreachable (daemon not running).
+    pub daemon_version: Option<String>,
+    /// This app build's own version (`CARGO_PKG_VERSION`).
+    pub app_version: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -174,6 +194,25 @@ pub async fn setup_status() -> Result<SetupStatus, ErrorPayload> {
             (true, None, false, false, false, false)
         };
 
+    // 5. Daemon version via the socket — only ask if we know it's reachable,
+    // so a down daemon doesn't cost us a second failed connection attempt.
+    let daemon_version = if daemon_connected {
+        match one_shot(&conduit_proto::Request::GetStatus) {
+            Ok(conduit_proto::Response::Status(s)) => Some(s.version),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    let app_version = env!("CARGO_PKG_VERSION").to_string();
+    if daemon_outdated(daemon_version.as_deref(), &app_version) {
+        details.push(format!(
+            "engine version drift: engine {} vs app {}",
+            daemon_version.as_deref().unwrap_or("?"),
+            app_version
+        ));
+    }
+
     Ok(SetupStatus {
         service_installed,
         service_running,
@@ -185,6 +224,8 @@ pub async fn setup_status() -> Result<SetupStatus, ErrorPayload> {
         binary_missing,
         binary_path,
         details,
+        daemon_version,
+        app_version,
     })
 }
 
@@ -452,6 +493,17 @@ fn find_conduit_daemon_binary_excluding(exclude: &std::path::Path) -> Option<Pat
     // the same priority list, skipping the one that equals `exclude`.
     // We re-implement the search inline to be able to skip mid-list.
 
+    // 0. Bundled sidecar next to the running app executable (see
+    // `find_conduit_daemon_binary` in lib.rs for why this comes first).
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            let sidecar = sidecar_candidate(exe_dir);
+            if sidecar.exists() && sidecar != exclude {
+                return Some(sidecar);
+            }
+        }
+    }
+
     // 1. PATH via `which`
     if let Ok(output) = std::process::Command::new("which").arg("conduit-daemon").output() {
         if output.status.success() {
@@ -474,13 +526,10 @@ fn find_conduit_daemon_binary_excluding(exclude: &std::path::Path) -> Option<Pat
         }
     }
 
-    // 3 & 4. Relative to the app executable (dev mode)
+    // 3 & 4. Relative to the app executable (dev mode) — the sidecar check
+    // above (step 0) already covers `exe_dir/conduit-daemon` directly.
     if let Ok(exe) = std::env::current_exe() {
         if let Some(exe_dir) = exe.parent() {
-            let sibling = exe_dir.join("conduit-daemon");
-            if sibling.exists() && sibling != exclude {
-                return Some(sibling);
-            }
             for profile in &["debug", "release"] {
                 let candidate = exe_dir
                     .parent()
@@ -616,5 +665,26 @@ mod tests {
             (2048, ts(50)),
             Some((1024, ts(100))),
         ));
+    }
+
+    // ---- sidecar_candidate / daemon_outdated unit tests ----
+
+    #[test]
+    fn sidecar_candidate_joins_exe_dir() {
+        assert_eq!(
+            sidecar_candidate(Path::new("/opt/conduit")),
+            PathBuf::from("/opt/conduit/conduit-daemon"),
+        );
+        assert_eq!(
+            sidecar_candidate(Path::new("/usr/bin")),
+            PathBuf::from("/usr/bin/conduit-daemon"),
+        );
+    }
+
+    #[test]
+    fn daemon_outdated_true_only_when_versions_differ() {
+        assert!(daemon_outdated(Some("0.0.9"), "0.1.0"));
+        assert!(!daemon_outdated(Some("0.1.0"), "0.1.0"));
+        assert!(!daemon_outdated(None, "0.1.0"));
     }
 }

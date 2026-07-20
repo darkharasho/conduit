@@ -170,6 +170,10 @@ export interface SetupStatus {
   binary_missing: boolean;
   binary_path: string | null;
   details: string[];
+  /** Version reported by the running daemon; null when the socket is unreachable. */
+  daemon_version: string | null;
+  /** This app build's own version. */
+  app_version: string;
 }
 
 export interface PermissionFixOutcome {

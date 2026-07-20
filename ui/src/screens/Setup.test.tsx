@@ -49,11 +49,13 @@ const ALL_BROKEN: SetupStatus = {
   uinput_ok: false, evdev_ok: false, input_group: false, config_ok: true,
   binary_missing: false,
   binary_path: "/home/u/.local/bin/conduit-daemon", details: [],
+  daemon_version: null, app_version: "0.1.0",
 };
 
 const ALL_GREEN: SetupStatus = {
   ...ALL_BROKEN, service_installed: true, service_running: true,
   daemon_connected: true, uinput_ok: true, evdev_ok: true,
+  daemon_version: "0.1.0",
 };
 
 // ---- Reset mocks before each test ------------------------------------------
@@ -253,6 +255,41 @@ it("recovery shows success state when daemon becomes connected", async () => {
   await waitFor(() => expect(screen.queryByText("Conduit's engine stopped")).not.toBeInTheDocument());
   expect(screen.getByText("Everything's running again.")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Start using Conduit" })).toBeInTheDocument();
+});
+
+describe("engine update affordance", () => {
+  it("shows Engine update available when daemon_version differs from app_version", async () => {
+    mockSetupStatus.mockResolvedValue({ ...ALL_GREEN, daemon_version: "0.0.9", app_version: "0.1.0" });
+    render(<SetupScreen />);
+    await screen.findByText("Let's get Conduit running");
+    expect(screen.getByText("Engine update available")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Update now" })).toBeInTheDocument();
+  });
+
+  it("hides the update affordance when versions match", async () => {
+    mockSetupStatus.mockResolvedValue({ ...ALL_GREEN, daemon_version: "0.1.0", app_version: "0.1.0" });
+    render(<SetupScreen />);
+    await screen.findByText("Let's get Conduit running");
+    expect(screen.queryByText("Engine update available")).toBeNull();
+  });
+
+  it("hides the update affordance when daemon_version is unknown", async () => {
+    mockSetupStatus.mockResolvedValue({ ...ALL_BROKEN, daemon_version: null, app_version: "0.1.0" });
+    render(<SetupScreen />);
+    await screen.findByText("Let's get Conduit running");
+    expect(screen.queryByText("Engine update available")).toBeNull();
+  });
+
+  it("calls setup_install_service on Update now and re-polls status", async () => {
+    mockSetupStatus
+      .mockResolvedValueOnce({ ...ALL_GREEN, daemon_version: "0.0.9", app_version: "0.1.0" })
+      .mockResolvedValue({ ...ALL_GREEN, daemon_version: "0.1.0", app_version: "0.1.0" });
+    mockSetupInstallService.mockResolvedValue(undefined);
+    render(<SetupScreen />);
+    fireEvent.click(await screen.findByRole("button", { name: "Update now" }));
+    await waitFor(() => expect(mockSetupInstallService).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByText("Engine update available")).toBeNull());
+  });
 });
 
 describe("phase 6 nits", () => {

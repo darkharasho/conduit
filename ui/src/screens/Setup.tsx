@@ -36,9 +36,16 @@ const STEP_DEFS: StepDef[] = [
   },
 ];
 
+// ---- Engine version drift ----------------------------------------------------
+
+/** True only when we know the engine's version and it differs from the app's. */
+function isEngineOutdated(s: SetupStatus): boolean {
+  return s.daemon_version !== null && s.daemon_version !== s.app_version;
+}
+
 // ---- Types ------------------------------------------------------------------
 
-type ActiveFix = "service" | "permissions" | null;
+type ActiveFix = "service" | "permissions" | "engine-update" | null;
 
 interface StepUIState {
   errorText: string | null;
@@ -72,6 +79,7 @@ export function SetupScreen({ onReady, variant = "firstrun" }: { onReady?: () =>
   const [attemptedRestart, setAttemptedRestart] = useState(false);
   const [copyConfirm, setCopyConfirm] = useState(false);
   const [restartError, setRestartError] = useState<string | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
   const recheckInFlightRef = useRef(false);
   const intervalIdRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -158,6 +166,21 @@ export function SetupScreen({ onReady, variant = "firstrun" }: { onReady?: () =>
         ...prev,
         service: { ...prev.service, errorText: pres.title },
       }));
+      setActiveFix(null);
+      return;
+    }
+    await recheck();
+    setActiveFix(null);
+  };
+
+  const handleUpdateEngine = async () => {
+    setActiveFix("engine-update");
+    setUpdateError(null);
+    try {
+      await setupInstallService();
+    } catch (err) {
+      const pres = presentError(err as ConduitError);
+      setUpdateError(pres.title);
       setActiveFix(null);
       return;
     }
@@ -338,6 +361,24 @@ export function SetupScreen({ onReady, variant = "firstrun" }: { onReady?: () =>
           );
         })}
       </ol>
+
+      {/* Engine update affordance — only shown once we know the engine's
+          version and it doesn't match this app build. */}
+      {status && isEngineOutdated(status) && (
+        <div className="setup__update" role="status">
+          <span className="setup__update-label">Engine update available</span>
+          <button
+            className="btn setup__update-btn"
+            disabled={activeFix !== null}
+            onClick={handleUpdateEngine}
+          >
+            {activeFix === "engine-update" ? "Updating…" : "Update now"}
+          </button>
+          {updateError && (
+            <span className="setup__step-error">{updateError}</span>
+          )}
+        </div>
+      )}
 
       {/* Primary CTA */}
       <button

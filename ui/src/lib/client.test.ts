@@ -318,6 +318,8 @@ describe("setupStatus", () => {
       binary_missing: false,
       binary_path: "/usr/bin/conduit-daemon",
       details: ["systemctl --user is-active: active"],
+      daemon_version: "0.1.0",
+      app_version: "0.1.0",
     };
     mockInvoke.mockResolvedValueOnce(status);
     const result = await setupStatus();

@@ -9,4 +9,5 @@ build
 target/
 ui/src-tauri/gen/
 ui/src-tauri/target/
+ui/src-tauri/bin/
 /package-lock.json
