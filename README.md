@@ -94,6 +94,32 @@ remapping at any time.
 
 ## Install
 
+### AppImage (recommended)
+
+Download `conduit_<version>_amd64.AppImage` from the
+[latest release](https://github.com/darkharasho/conduit/releases), make it
+executable, and run it:
+
+```bash
+chmod +x conduit_*_amd64.AppImage && ./conduit_*_amd64.AppImage
+```
+
+The AppImage bundles both the UI and the `conduit-daemon` engine. On first
+run, the in-app **Setup** screen installs the engine for you (copies it to
+`~/.local/bin`, installs the systemd user unit, and starts it) and walks
+through the udev/permissions steps. When a new release ships a newer engine
+than the one installed, Setup shows an **Update now** button.
+
+Closing the window minimizes Conduit to the system tray. To launch Conduit
+automatically at login (starting in the tray), enable **Settings → Open on
+startup** — this registers an autostart entry that runs the AppImage with
+`--hidden`.
+
+Releases are cut by pushing a tag: `npm run bump -- X.Y.Z`, commit, tag
+`vX.Y.Z`, push — the release workflow builds the AppImage and publishes it.
+
+### Manual install (from source)
+
 ### 1. udev rule (one-time, requires sudo)
 
 ```bash
@@ -157,6 +183,17 @@ Note: on systemd/logind desktops, `input_group` may report `false` even though t
 export PKG_CONFIG_PATH=/usr/lib64/pkgconfig
 cargo build --release
 ```
+
+**Building the AppImage locally:** `bash scripts/prepare-sidecar.sh` first
+(the workspace build fails without the bundled daemon sidecar), then
+`cd ui && npx tauri build`. On machines where linuxbrew shadows the system
+`pkg-config`, put `/usr/bin` first on `PATH`; on immutable distros that ship
+runtime libs without `.pc` files (e.g. Bazzite lacks `librsvg-2.0.pc` and an
+ayatana-appindicator dev package), the Tauri bundler needs shim `.pc` files
+pointing at the real libraries — CI runners install the proper `-dev`
+packages and don't need any of this. If bundling fails partway, delete
+`target/release/bundle/` before retrying (a failed run leaves an AppDir the
+next run can't overwrite).
 
 ## Config
 
