@@ -1,0 +1,84 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev libwebkit2gtk-4.1-dev \
+            build-essential libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci
+        working-directory: ui
+      - run: npx vitest run --maxWorkers=2
+        working-directory: ui
+
+  build:
+    name: AppImage
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version guard
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          conf=$(python3 -c "import json;print(json.load(open('ui/src-tauri/tauri.conf.json'))['version'])")
+          test "$tag" = "$conf" || { echo "tag v$tag != tauri.conf version $conf"; exit 1; }
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev libwebkit2gtk-4.1-dev \
+            build-essential libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev libfuse2
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci
+        working-directory: ui
+      - name: Build daemon sidecar
+        run: bash scripts/prepare-sidecar.sh
+      - name: Build AppImage
+        run: npx tauri build
+        working-directory: ui
+      - name: Create draft release with AppImage
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          appimage=$(ls target/release/bundle/appimage/*.AppImage)
+          gh release create "$GITHUB_REF_NAME" --draft --generate-notes \
+            --title "conduit $GITHUB_REF_NAME" "$appimage"
+
+  publish:
+    name: Publish release
+    needs: [test, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Undraft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false
