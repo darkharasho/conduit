@@ -16,12 +16,14 @@ import type { ConfigModel } from "./lib/config-model";
 import { MappingsScreen } from "./screens/Mappings";
 import { HomeScreen } from "./screens/Home";
 import { HelpScreen } from "./screens/Help";
+import { SettingsScreen } from "./screens/Settings";
 import type { PhysicalDevice } from "./lib/device-registry";
 
 type View =
   | { kind: "home" }
   | { kind: "device"; devPath: string; title: string }
-  | { kind: "help" };
+  | { kind: "help" }
+  | { kind: "settings" };
 
 function App() {
   const [view, setView] = useState<View>({ kind: "home" });
@@ -126,9 +128,14 @@ function App() {
                     setView({ kind: "device", devPath: d.primaryPath, title: d.name })
                   }
                 />
-                <button className="home-shell__help-link" onClick={() => setView({ kind: "help" })}>
-                  Help & troubleshooting
-                </button>
+                <div className="home-shell__links">
+                  <button className="home-shell__help-link" onClick={() => setView({ kind: "help" })}>
+                    Help & troubleshooting
+                  </button>
+                  <button className="home-shell__help-link" onClick={() => setView({ kind: "settings" })}>
+                    Settings
+                  </button>
+                </div>
               </>
             )
           )}
@@ -145,6 +152,12 @@ function App() {
             <div className="home-shell__help">
               <button className="home-shell__back" onClick={() => setView({ kind: "home" })}>‹ Your devices</button>
               <HelpScreen />
+            </div>
+          )}
+          {view.kind === "settings" && (
+            <div className="home-shell__help">
+              <button className="home-shell__back" onClick={() => setView({ kind: "home" })}>‹ Your devices</button>
+              <SettingsScreen />
             </div>
           )}
         </div>

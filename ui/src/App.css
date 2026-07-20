@@ -1651,6 +1651,8 @@ button {
 .rail__device-title { padding: 2px 10px 10px; font-size: 13px; font-weight: 650; color: var(--text-hi); border-bottom: 1px solid var(--border-structural); margin-bottom: 8px; }
 .home-shell__help-link { margin: 0 48px 24px; align-self: flex-start; background: none; border: none; color: var(--text-lo); font: inherit; font-size: 12.5px; cursor: pointer; border-bottom: 1px dotted var(--text-dim); padding: 0; }
 .home-shell__help-link:hover { color: var(--text-mid); }
+.home-shell__links { display: flex; gap: 20px; align-self: flex-start; }
+.home-shell__links .home-shell__help-link { margin: 0 0 24px; }
 .home-shell__back { background: none; border: none; color: var(--text-mid); font: inherit; font-size: 13px; cursor: pointer; padding: 12px 16px; text-align: left; }
 .home-shell__help { display: flex; flex-direction: column; overflow-y: auto; }
 .home-shell__recovery { display: flex; align-items: center; justify-content: center; height: 100%; }
@@ -1660,6 +1662,13 @@ button {
 .titlebar__pause:hover { border-color: var(--border-control); background: var(--bg-key); }
 .titlebar__pause:disabled { opacity: .5; cursor: default; }
 .pause-banner { display: flex; align-items: center; gap: 14px; justify-content: center; padding: 8px 16px; background: var(--amber-border); color: var(--text-hi); font-size: 13px; }
+
+/* ── Settings screen ─────────────────────────────────────────────────── */
+.settings { padding: 36px 48px; overflow-y: auto; }
+.settings__title { font-size: 20px; font-weight: 650; color: var(--text-hi); }
+.settings__row { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-top: 24px; padding: 16px 0; border-top: 1px solid var(--border-structural); }
+.settings__row-label { font-size: 14px; font-weight: 600; color: var(--text-hi); }
+.settings__row-desc { margin-top: 4px; font-size: 12.5px; color: var(--text-lo); }
 
 /* ── Help screen ─────────────────────────────────────────────────────── */
 .help { display: flex; flex-direction: column; min-height: 0; }
