@@ -94,7 +94,10 @@ function App() {
 
   return (
     <div className="app-shell">
-      <Titlebar />
+      <Titlebar
+        onOpenSettings={() => setView({ kind: "settings" })}
+        onOpenHelp={() => setView({ kind: "help" })}
+      />
       <div className="app-body">
         {status?.suspended === true && (
           <div className="pause-banner" role="status">
@@ -120,23 +123,13 @@ function App() {
             connected === false ? (
               <div className="home-shell__recovery"><SetupScreen variant="recovery" /></div>
             ) : (
-              <>
-                <HomeScreen
-                  model={configModel}
-                  connected={connected}
-                  onOpenDevice={(d: PhysicalDevice) =>
-                    setView({ kind: "device", devPath: d.primaryPath, title: d.name })
-                  }
-                />
-                <div className="home-shell__links">
-                  <button className="home-shell__help-link" onClick={() => setView({ kind: "help" })}>
-                    Help & troubleshooting
-                  </button>
-                  <button className="home-shell__help-link" onClick={() => setView({ kind: "settings" })}>
-                    Settings
-                  </button>
-                </div>
-              </>
+              <HomeScreen
+                model={configModel}
+                connected={connected}
+                onOpenDevice={(d: PhysicalDevice) =>
+                  setView({ kind: "device", devPath: d.primaryPath, title: d.name })
+                }
+              />
             )
           )}
           {view.kind === "device" && (

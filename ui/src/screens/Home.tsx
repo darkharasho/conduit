@@ -79,7 +79,7 @@ export function HomeScreen({ model, connected, onOpenDevice }: Props) {
 
       {loaded && !error && phys.length === 0 && (
         <div className="home__empty">
-          <DeviceArt archetype="mouse" width={72} />
+          <DeviceArt archetype="mouse" width={96} />
           <div className="home__empty-text">Plug in a mouse or keyboard to get started</div>
         </div>
       )}
@@ -87,7 +87,7 @@ export function HomeScreen({ model, connected, onOpenDevice }: Props) {
       <div className="home__grid">
         {phys.map((d) => (
           <button key={d.key} className="device-card" onClick={() => onOpenDevice(d)}>
-            <span className="device-card__art"><DeviceArt archetype={d.archetype} sideView={d.nodes[0] ? layoutFor(d.nodes[0])?.sideButtons : false} /></span>
+            <span className="device-card__art"><DeviceArt archetype={d.archetype} width={116} sideView={d.nodes[0] ? layoutFor(d.nodes[0])?.sideButtons : false} /></span>
             <span className="device-card__info">
               <span className="device-card__name">{d.name}</span>
               <span className="device-card__state">

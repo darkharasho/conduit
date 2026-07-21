@@ -107,9 +107,9 @@ describe("MouseIllustration — G502X side view", () => {
     expect(onSelectKey).toHaveBeenCalledWith("f13");
   });
 
-  it("f13 marker has the curated label 'Top button' in its aria-label", () => {
+  it("f13 marker has the curated label 'Side rear button' in its aria-label", () => {
     const { container } = renderG502XIllo({ selectedKey: "f13" });
     const marker = container.querySelector('[data-key="f13"]');
-    expect(marker?.getAttribute("aria-label")).toContain("Top button");
+    expect(marker?.getAttribute("aria-label")).toContain("Side rear button");
   });
 });

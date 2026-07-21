@@ -114,21 +114,22 @@ describe("MouseViz curated layouts", () => {
                 selectedKey={null} onSelectKey={() => {}} dev={g502} />
     );
     expect(getByLabelText("Logitech G502 X")).toBeTruthy();
-    expect(getByText("G4 · Back")).toBeTruthy();
-    // After the onboard fix, G6–G8 become f13–f16 with human labels; G9 stays onboard.
-    expect(getByText("Top button")).toBeTruthy();
-    // The mouse picture renders for curated devices too
-    expect(container.querySelector('[data-illo-key="mouse4"]')).not.toBeNull();
-    // Chips never show raw evdev names: the Back chip is just its label.
+    expect(getByText("Top front button")).toBeTruthy();
+    // After the onboard fix, the extra buttons carry f13–f21 with human labels.
+    expect(getByText("Side front button")).toBeTruthy();
+    // The mouse picture renders for curated devices too (photo top view:
+    // primary buttons on the picture; the side buttons live in the side view).
+    expect(container.querySelector('[data-illo-key="btn_left"]')).not.toBeNull();
+    // Chips never show raw evdev names: the chip is just its label.
     // Use button[data-key] to find the curated chip, not the illustration marker.
-    const backChip = container.querySelector('button[data-key="mouse4"]')!;
-    expect(backChip.textContent).toBe("G4 · Back");
+    const frontChip = container.querySelector('button[data-key="f20"]')!;
+    expect(frontChip.textContent).toBe("Top front button");
     // Onboard controls are informational, not buttons.
     // After the fix, only G9 profile-cycle remains as a null-key onboard chip.
     const onboard = container.querySelectorAll(".mousekey--onboard");
     expect(onboard.length).toBe(1);
     // Mappable curated chips carry the canonical key.
-    expect(container.querySelector('button[data-key="mouse4"]')).not.toBeNull();
+    expect(container.querySelector('button[data-key="f20"]')).not.toBeNull();
   });
 
   it("G600 keyboard node is handled by KeyboardViz, not MouseViz (mouse node here)", () => {

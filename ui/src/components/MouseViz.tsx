@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { ConfigModel, DeviceIdent } from "../lib/config-model";
 import { actionWithEverywhereFallback, getEffectiveAction } from "../lib/config-model";
 import { codeForKeyName } from "../lib/keyboard-layout";
@@ -43,6 +44,11 @@ export function MouseViz({
 }: Props) {
   const overlayMode = activeProfile !== "default";
   const curated = dev ? layoutFor(dev as { vendor: number; product: number; class?: string }) : null;
+  // Photo views (real product renders); primary buttons first, so open on top.
+  const photos = curated?.photos;
+  const [photoView, setPhotoView] = useState<"top" | "side">("top");
+  const activePhoto =
+    (photoView === "side" ? photos?.side : photos?.top) ?? photos?.top ?? photos?.side ?? null;
   const declared = dev?.keys && dev.keys.length > 0 ? new Set(dev.keys) : null;
   const has = (key: string) => {
     if (!declared) return true; // no capability data → show everything
@@ -111,8 +117,11 @@ export function MouseViz({
 
   // Standard controls the mouse picture can place; everything else is a chip.
   // In side-view mode (devices with sideButtons), f13–f16 are also placed on the picture.
+  // With a photo, the picture places exactly the keys its marker table knows.
   const sideView = curated?.sideButtons ?? false;
-  const illoKeys = (sideView ? SIDE_ILLO_KEYS : ILLO_KEYS).filter(has);
+  const illoKeys = activePhoto
+    ? Object.keys(activePhoto.markers).filter(has)
+    : (sideView ? SIDE_ILLO_KEYS : ILLO_KEYS).filter(has);
 
   const illustration = (
     <MouseIllustration
@@ -125,6 +134,7 @@ export function MouseViz({
       keys={illoKeys}
       sideView={sideView}
       layout={curated}
+      photo={activePhoto}
     />
   );
 
@@ -132,7 +142,29 @@ export function MouseViz({
     return (
       <div className="mouse-viz-wrap">
         <div className="mouse-viz-row">
-          {illustration}
+          <div className="illo-col">
+            {photos?.top && photos?.side && (
+              <div className="seg illo-col__toggle" role="tablist" aria-label="Mouse view">
+                <button
+                  className={`seg__btn${photoView === "top" ? " seg__btn--active" : ""}`}
+                  role="tab"
+                  aria-selected={photoView === "top"}
+                  onClick={() => setPhotoView("top")}
+                >
+                  Top
+                </button>
+                <button
+                  className={`seg__btn${photoView === "side" ? " seg__btn--active" : ""}`}
+                  role="tab"
+                  aria-selected={photoView === "side"}
+                  onClick={() => setPhotoView("side")}
+                >
+                  Side
+                </button>
+              </div>
+            )}
+            {illustration}
+          </div>
           <div className="mouse-viz-row__groups">
             <CuratedLayout
               layout={curated}

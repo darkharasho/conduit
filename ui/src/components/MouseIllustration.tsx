@@ -1,7 +1,7 @@
 import type { ConfigModel, DeviceIdent } from "../lib/config-model";
 import { actionWithEverywhereFallback, getEffectiveAction } from "../lib/config-model";
 import { actionLabel, keyDisplayName } from "../lib/action-labels";
-import type { DeviceLayout } from "../lib/mouse-layouts";
+import type { DeviceLayout, DevicePhoto } from "../lib/mouse-layouts";
 
 /** Standard controls the picture knows how to place (top-down view). */
 export const ILLO_KEYS = [
@@ -90,6 +90,29 @@ interface Props {
    * Keep-in-sync with mouse-layouts.ts G502X_MOUSE entry.
    */
   layout?: DeviceLayout | null;
+  /**
+   * Real product render to draw instead of the vector body. Marker positions
+   * come from the photo's own marker table (natural pixel space, scaled into
+   * the viewBox here), so photo layouts ignore MARKER_POS/SIDE_MARKER_POS.
+   */
+  photo?: DevicePhoto | null;
+}
+
+/**
+ * Region of the 560×500 viewBox a photo may occupy. The photo centers in the
+ * full box; the selection callout overlays it (solid tag background in photo
+ * mode) instead of reserving an empty left strip.
+ */
+const PHOTO_REGION = { x: 24, y: 8, w: 528, h: 484 };
+
+/** Fit a photo into PHOTO_REGION (contain, centered); returns placement + scale. */
+function photoPlacement(photo: DevicePhoto) {
+  const scale = Math.min(PHOTO_REGION.w / photo.width, PHOTO_REGION.h / photo.height);
+  const w = photo.width * scale;
+  const h = photo.height * scale;
+  const x = PHOTO_REGION.x + (PHOTO_REGION.w - w) / 2;
+  const y = PHOTO_REGION.y + (PHOTO_REGION.h - h) / 2;
+  return { x, y, w, h, scale };
 }
 
 /** Look up the curated human label for a key from the layout, or fall back to keyDisplayName. */
@@ -123,10 +146,29 @@ export function MouseIllustration({
   keys,
   sideView = false,
   layout = null,
+  photo = null,
 }: Props) {
-  const markerPos = sideView ? SIDE_MARKER_POS : MARKER_POS;
-  const candidateKeys = sideView ? SIDE_ILLO_KEYS : ILLO_KEYS;
-  const shown = (candidateKeys as readonly string[]).filter(
+  const placement = photo ? photoPlacement(photo) : null;
+  const markerPos: Record<string, { x: number; y: number }> =
+    photo && placement
+      ? Object.fromEntries(
+          Object.entries(photo.markers).map(([k, p]) => [
+            k,
+            {
+              x: placement.x + p.x * placement.scale,
+              y: placement.y + p.y * placement.scale,
+            },
+          ]),
+        )
+      : sideView
+        ? SIDE_MARKER_POS
+        : MARKER_POS;
+  const candidateKeys: readonly string[] = photo
+    ? Object.keys(photo.markers)
+    : sideView
+      ? SIDE_ILLO_KEYS
+      : ILLO_KEYS;
+  const shown = candidateKeys.filter(
     (k) => keys.includes(k) && k in markerPos,
   );
   const overlayMode = activeProfile !== "default";
@@ -143,12 +185,21 @@ export function MouseIllustration({
 
   return (
     <svg
-      className="illo"
+      className={photo ? "illo illo--photo" : "illo"}
       viewBox="0 0 560 500"
       role="group"
       aria-label="Mouse picture — click a button to change what it does"
     >
-      {sideView ? (
+      {photo && placement ? (
+        <image
+          className="illo__photo"
+          href={photo.src}
+          x={placement.x}
+          y={placement.y}
+          width={placement.w}
+          height={placement.h}
+        />
+      ) : sideView ? (
         /*
           Side-view (right-profile) static art — SideMouseBody from DeviceArt.tsx,
           scaled to fill the 560×500 viewBox using the same transform as top-down.

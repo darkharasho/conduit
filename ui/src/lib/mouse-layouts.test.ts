@@ -43,8 +43,8 @@ describe("G502X layout", () => {
     }
     // Verify specific labels
     const byKey = Object.fromEntries(fButtons.map((b) => [b.key, b.label]));
-    expect(byKey["f13"]).toBe("Top button");
-    expect(byKey["f14"]).toBe("Front trigger");
+    expect(byKey["f14"]).toBe("Side front button");
+    expect(byKey["f13"]).toBe("Side rear button");
     expect(byKey["f15"]).toBe("Thumb button");
     expect(byKey["f16"]).toBe("Rear trigger");
   });

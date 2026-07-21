@@ -35,6 +35,22 @@ export interface LayoutGroup {
   buttons: LayoutButton[];
 }
 
+/**
+ * A real product render for the click-the-picture view.
+ * `markers` places each mappable key on the image, in the image's natural
+ * pixel space (top-left origin). MouseIllustration scales both into its
+ * viewBox, so coordinates here never need to know about display size.
+ */
+export interface DevicePhoto {
+  /** Path under the app's public root, e.g. "/devices/g502x-top.png". */
+  src: string;
+  /** Natural pixel size of the image file. */
+  width: number;
+  height: number;
+  /** Marker centers per key name, in natural pixel coordinates. */
+  markers: Record<string, { x: number; y: number }>;
+}
+
 export interface DeviceLayout {
   title: string;
   /** Which event node of the device this layout describes. */
@@ -46,6 +62,12 @@ export interface DeviceLayout {
    * DeviceArt and MouseIllustration both branch on this flag.
    */
   sideButtons?: boolean;
+  /**
+   * Real product renders (transparent PNGs) for the click-the-picture view.
+   * When present, MouseIllustration draws the photo instead of vector art and
+   * MouseViz offers a Top/Side toggle for whichever views exist.
+   */
+  photos?: { top?: DevicePhoto; side?: DevicePhoto };
 }
 
 interface LayoutEntry {
@@ -135,6 +157,45 @@ const G502X_MOUSE: DeviceLayout = {
   node: "mouse",
   // Side profile shown in DeviceArt / MouseIllustration when this is true.
   sideButtons: true,
+  // Official product renders (transparent PNGs, ui/public/devices/).
+  // Marker coordinates are in each image's natural pixel space. Views split
+  // by where the physical control lives — top view: primary buttons, G8/G7
+  // on the left edge, G9 behind the wheel (the mechanical ratchet toggle
+  // above it emits nothing and gets no marker); side view: thumb buttons
+  // G4/G5 and the DPI-shift paddle.
+  photos: {
+    top: {
+      // ?v=3 busts webview caches from earlier crops (public/ assets keep
+      // their URL across builds, so stale copies survive otherwise).
+      src: "/devices/g502x-top.png?v=3",
+      width: 461,
+      height: 715,
+      markers: {
+        btn_left:   { x: 140, y: 218 },
+        btn_right:  { x: 345, y: 218 },
+        btn_middle: { x: 267, y: 183 },
+        // Top-left edge pair (printed G8 front, G7 rear). Live-verified
+        // 2026-07-20 via output capture: G8 emits F20, G7 emits F21 (onboard
+        // slots b10/b11, rewired from onboard specials by the one-time fix).
+        f20:        { x: 112, y: 126 }, // Top front button (G8)
+        f21:        { x: 106, y: 185 }, // Top rear button (G7)
+        f16:        { x: 267, y: 326 }, // G9 — behind the wheel
+      },
+    },
+    side: {
+      src: "/devices/g502x-side.png?v=3",
+      width: 949,
+      height: 509,
+      markers: {
+        // Side pair (printed G5 front / G4 rear), user-verified 2026-07-20:
+        // these are the F13/F14 buttons from the onboard fix (Solaar's b3
+        // "rear trigger" = F13 rear, b5 = F14 front) — NOT Back/Forward.
+        f14:        { x: 445, y: 275 }, // Side front button — types Space
+        f13:        { x: 565, y: 265 }, // Side rear button — types Esc
+        f15:        { x: 365, y: 350 }, // Thumb button (b4) — DPI-shift paddle
+      },
+    },
+  },
   groups: [
     {
       label: "Primary",
@@ -145,35 +206,38 @@ const G502X_MOUSE: DeviceLayout = {
       ],
     },
     {
-      label: "Thumb",
+      // Live-verified 2026-07-20: the top-left pair emits F20/F21 after the
+      // onboard fix rewired their special slots (b10/b11). Nothing on this
+      // mouse emits Back/Forward (mouse4/mouse5).
+      label: "Top pair",
       buttons: [
-        { key: "mouse4", label: "G4 · Back" },
-        { key: "mouse5", label: "G5 · Forward" },
+        { key: "f20", label: "Top front button", note: "Printed G8 — rewired to F20 by the one-time onboard fix (was an onboard DPI control)." },
+        { key: "f21", label: "Top rear button", note: "Printed G7 — rewired to F21 by the one-time onboard fix (was an onboard DPI control)." },
       ],
     },
     WHEEL_GROUP,
     {
-      label: "Top side buttons (after one-time fix)",
+      label: "Extra buttons (after one-time fix)",
       buttons: [
         {
-          key: "f13",
-          label: "Top button",
-          note: "G6 · DPI-shift physical button — rewired to F13 by the one-time onboard fix. Until the fix runs, this button is handled by firmware and appears dimmed here.",
+          key: "f14",
+          label: "Side front button",
+          note: "Front side (thumb) button, printed G5 — rewired to F14 by the one-time onboard fix (originally typed Space).",
         },
         {
-          key: "f14",
-          label: "Front trigger",
-          note: "G7 · DPI-down physical button — rewired to F14 by the one-time onboard fix.",
+          key: "f13",
+          label: "Side rear button",
+          note: "Rear side (thumb) button, printed G4 — rewired to F13 by the one-time onboard fix (originally typed Esc; Solaar names it the rear trigger).",
         },
         {
           key: "f15",
           label: "Thumb button",
-          note: "G8 · DPI-up physical button — rewired to F15 by the one-time onboard fix.",
+          note: "DPI-shift paddle by the thumb — rewired to F15 by the one-time onboard fix (originally typed v). Position live-verified 2026-07-20.",
         },
         {
           key: "f16",
           label: "Rear trigger",
-          note: "G9-group side button — rewired to F16 by the one-time onboard fix.",
+          note: "G9-group side button — rewired to F16 by the one-time onboard fix. NOTE: the 2026-07-20 Solaar dump shows the fourth button (b8) emitting F18, not F16 — verify with Detect.",
         },
       ],
     },
