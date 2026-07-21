@@ -9,6 +9,14 @@
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRFM0Q5MDM4QUI4NTBENzkKUldSNURZV3JPSkE5VHBVTHdlaStWcTNRbFBTOUNwTHRsaC9YL0ZFNUVmeER0S2RjOG43QVQ1WGcK",
+      "endpoints": [
+        "https://github.com/darkharasho/conduit/releases/latest/download/latest.json"
+      ]
+    }
+  },
   "app": {
     "windows": [
       {
@@ -31,6 +39,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": [
       "appimage"
     ],

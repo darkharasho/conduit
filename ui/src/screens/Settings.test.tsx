@@ -39,6 +39,12 @@ vi.mock("../lib/client", () => ({
   setupInstallService: (...a: unknown[]) => mockSetupInstallService(...a),
 }));
 
+// App updater: mock the wrapper lib so tests never touch the Tauri plugin.
+const mockCheckForAppUpdate = vi.fn();
+vi.mock("../lib/app-update", () => ({
+  checkForAppUpdate: (...a: unknown[]) => mockCheckForAppUpdate(...a),
+}));
+
 import { SettingsScreen } from "./Settings";
 
 const BASE_STATUS: SetupStatus = {
@@ -55,6 +61,8 @@ beforeEach(() => {
   mockSetupStatus.mockReset();
   mockSetupInstallService.mockReset();
   mockSetupStatus.mockResolvedValue(BASE_STATUS);
+  mockCheckForAppUpdate.mockReset();
+  mockCheckForAppUpdate.mockResolvedValue(null);
 });
 
 it("reflects isEnabled on mount and toggles on", async () => {
@@ -87,6 +95,30 @@ describe("engine update affordance", () => {
     render(<SettingsScreen />);
     await screen.findByRole("switch", { name: /open on startup/i });
     expect(screen.queryByText("Engine update available")).toBeNull();
+  });
+
+  it("hides the app update row when no update is available", async () => {
+    render(<SettingsScreen />);
+    await screen.findByRole("switch", { name: /open on startup/i });
+    expect(screen.queryByText("App update available")).toBeNull();
+  });
+
+  it("shows the app update row and installs on click", async () => {
+    const install = vi.fn(async () => {});
+    mockCheckForAppUpdate.mockResolvedValue({ version: "0.3.0", install });
+    render(<SettingsScreen />);
+    expect(await screen.findByText("App update available")).toBeInTheDocument();
+    expect(screen.getByText(/Conduit v0\.3\.0 is ready/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Update & restart" }));
+    await waitFor(() => expect(install).toHaveBeenCalled());
+  });
+
+  it("surfaces an error when install fails", async () => {
+    const install = vi.fn(async () => { throw new Error("network"); });
+    mockCheckForAppUpdate.mockResolvedValue({ version: "0.3.0", install });
+    render(<SettingsScreen />);
+    fireEvent.click(await screen.findByRole("button", { name: "Update & restart" }));
+    expect(await screen.findByText(/Couldn't install the update/)).toBeInTheDocument();
   });
 
   it("calls setupInstallService on Update now and re-polls setupStatus", async () => {

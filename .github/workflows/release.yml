@@ -67,15 +67,42 @@ jobs:
       - name: Build daemon sidecar
         run: bash scripts/prepare-sidecar.sh
       - name: Build AppImage
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build
         working-directory: ui
+      # latest.json is the updater feed: installed apps poll
+      # releases/latest/download/latest.json and compare versions.
+      - name: Generate updater manifest
+        run: |
+          appimage=$(ls target/release/bundle/appimage/*.AppImage)
+          sig=$(cat "$appimage.sig")
+          version="${GITHUB_REF_NAME#v}"
+          python3 - "$version" "$sig" "$(basename "$appimage")" <<'EOF'
+          import json, sys, datetime
+          version, sig, asset = sys.argv[1:4]
+          manifest = {
+              "version": version,
+              "notes": f"conduit v{version}",
+              "pub_date": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+              "platforms": {
+                  "linux-x86_64": {
+                      "signature": sig,
+                      "url": f"https://github.com/${{ github.repository }}/releases/download/v{version}/{asset}",
+                  }
+              },
+          }
+          open("latest.json", "w").write(json.dumps(manifest, indent=2))
+          EOF
+          cat latest.json
       - name: Create draft release with AppImage
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           appimage=$(ls target/release/bundle/appimage/*.AppImage)
           gh release create "$GITHUB_REF_NAME" --draft --generate-notes \
-            --title "conduit $GITHUB_REF_NAME" "$appimage"
+            --title "conduit $GITHUB_REF_NAME" "$appimage" "$appimage.sig" latest.json
 
   publish:
     name: Publish release

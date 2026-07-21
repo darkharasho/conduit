@@ -4,6 +4,8 @@ import type { SetupStatus } from "../lib/client";
 import { setupStatus, setupInstallService, ConduitError } from "../lib/client";
 import { presentError } from "../lib/error-messages";
 import { isEngineOutdated } from "../lib/engine-update";
+import { checkForAppUpdate } from "../lib/app-update";
+import type { AppUpdate } from "../lib/app-update";
 
 export function SettingsScreen() {
   const [enabled, setEnabled] = useState(false);
@@ -11,6 +13,9 @@ export function SettingsScreen() {
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [updating, setUpdating] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
+  const [appUpdate, setAppUpdate] = useState<AppUpdate | null>(null);
+  const [installingApp, setInstallingApp] = useState(false);
+  const [appUpdateError, setAppUpdateError] = useState<string | null>(null);
 
   useEffect(() => {
     isEnabled()
@@ -29,7 +34,20 @@ export function SettingsScreen() {
 
   useEffect(() => {
     recheckEngine();
+    checkForAppUpdate().then(setAppUpdate);
   }, []);
+
+  async function handleUpdateApp() {
+    if (!appUpdate) return;
+    setInstallingApp(true);
+    setAppUpdateError(null);
+    try {
+      await appUpdate.install(); // relaunches on success
+    } catch {
+      setAppUpdateError("Couldn't install the update. Check your connection and try again.");
+      setInstallingApp(false);
+    }
+  }
 
   async function toggle() {
     setError(null);
@@ -79,6 +97,29 @@ export function SettingsScreen() {
           {enabled ? "On" : "Off"}
         </button>
       </div>
+      {appUpdate && (
+        <div className="settings__row">
+          <div className="settings__row-text">
+            <div className="settings__row-label">App update available</div>
+            <div className="settings__row-desc">
+              Conduit v{appUpdate.version} is ready to install. The app restarts
+              when it finishes.
+            </div>
+          </div>
+          <button
+            className="btn btn--primary"
+            disabled={installingApp}
+            onClick={handleUpdateApp}
+          >
+            {installingApp ? "Installing…" : "Update & restart"}
+          </button>
+        </div>
+      )}
+      {appUpdateError && (
+        <div className="home__error" role="alert">
+          <div className="home__error-title">{appUpdateError}</div>
+        </div>
+      )}
       {status && isEngineOutdated(status) && (
         <div className="settings__row">
           <div className="settings__row-text">
