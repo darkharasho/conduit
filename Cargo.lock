@@ -530,7 +530,7 @@ dependencies = [
 
 [[package]]
 name = "conduit-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "indexmap 2.14.0",
  "regex",
@@ -541,7 +541,7 @@ dependencies = [
 
 [[package]]
 name = "conduit-daemon"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "conduit-core",
@@ -563,7 +563,7 @@ dependencies = [
 
 [[package]]
 name = "conduit-proto"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -571,7 +571,7 @@ dependencies = [
 
 [[package]]
 name = "conduit-ui"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
  "conduit-proto",

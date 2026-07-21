@@ -1,6 +1,6 @@
 [package]
 name = "conduit-ui"
-version = "0.2.0"
+version = "0.3.0"
 description = "Conduit keyboard remapper — desktop UI"
 authors = []
 edition = "2021"
