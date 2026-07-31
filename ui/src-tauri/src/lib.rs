@@ -7,12 +7,13 @@ use std::time::Duration;
 use conduit_proto::{Push, Request, Response};
 use serde::{Deserialize, Serialize};
 use tauri::{
-    menu::{Menu, MenuItem},
+    menu::{IsMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
     AppHandle, Emitter, Manager,
 };
 
 mod apps;
+mod battery;
 mod ratbag;
 mod setup;
 
@@ -368,6 +369,28 @@ fn show_main_window(app: &AppHandle) {
 /// app should just exit normally on close instead of vanishing).
 static TRAY_OK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Build the tray menu: one disabled line per peripheral battery, a
+/// separator, then Open/Quit. With no batteries it is just Open/Quit.
+fn tray_menu(app: &AppHandle, battery_lines: &[String]) -> tauri::Result<Menu<tauri::Wry>> {
+    let mut items: Vec<Box<dyn IsMenuItem<tauri::Wry>>> = Vec::new();
+    for (i, line) in battery_lines.iter().enumerate() {
+        items.push(Box::new(MenuItem::with_id(
+            app,
+            format!("battery-{i}"),
+            line,
+            false,
+            None::<&str>,
+        )?));
+    }
+    if !battery_lines.is_empty() {
+        items.push(Box::new(PredefinedMenuItem::separator(app)?));
+    }
+    items.push(Box::new(MenuItem::with_id(app, "open", "Open Conduit", true, None::<&str>)?));
+    items.push(Box::new(MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?));
+    let refs: Vec<&dyn IsMenuItem<tauri::Wry>> = items.iter().map(|b| b.as_ref()).collect();
+    Menu::with_items(app, &refs)
+}
+
 /// Build the tray icon/menu. Returns `Err` instead of panicking if any step
 /// fails (e.g. no bundle icon available) so the caller can fall back to a
 /// visible window rather than letting Tauri panic the whole process out of
@@ -378,9 +401,9 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
         .cloned()
         .ok_or_else(|| tauri::Error::AssetNotFound("bundle icon".into()))?;
 
-    let open_item = MenuItem::with_id(app, "open", "Open Conduit", true, None::<&str>)?;
-    let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open_item, &quit_item])?;
+    let lines: Vec<String> =
+        battery::read_batteries().iter().map(battery::menu_line).collect();
+    let menu = tray_menu(&app.handle().clone(), &lines)?;
     TrayIconBuilder::with_id("main-tray")
         .icon(icon)
         .menu(&menu)
@@ -393,6 +416,35 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
         .build(app)?;
 
     Ok(())
+}
+
+/// Poll peripheral batteries every 30 s: emit "conduit://battery" for the UI
+/// and refresh the tray menu/tooltip whenever the rendered lines change.
+fn spawn_battery_poll(app: AppHandle) {
+    thread::spawn(move || {
+        let mut last_lines: Option<Vec<String>> = None;
+        loop {
+            let batteries = battery::read_batteries();
+            let lines: Vec<String> = batteries.iter().map(battery::menu_line).collect();
+            if last_lines.as_ref() != Some(&lines) {
+                if let Some(tray) = app.tray_by_id("main-tray") {
+                    match tray_menu(&app, &lines) {
+                        Ok(menu) => { let _ = tray.set_menu(Some(menu)); }
+                        Err(e) => eprintln!("conduit-ui: tray menu rebuild failed: {e}"),
+                    }
+                    let tooltip = if lines.is_empty() {
+                        "Conduit".to_string()
+                    } else {
+                        lines.join("\n")
+                    };
+                    let _ = tray.set_tooltip(Some(tooltip));
+                }
+                last_lines = Some(lines);
+            }
+            let _ = app.emit("conduit://battery", &batteries);
+            thread::sleep(Duration::from_secs(30));
+        }
+    });
 }
 
 // ---- App entry point ----
@@ -417,6 +469,7 @@ pub fn run() {
                 .map_err(|e| eprintln!("conduit-ui: tray unavailable: {e}"))
                 .is_ok();
             TRAY_OK.store(tray_ok, std::sync::atomic::Ordering::SeqCst);
+            spawn_battery_poll(app.handle().clone());
 
             if !hidden || !tray_ok {
                 show_main_window(&app.handle());
@@ -447,6 +500,7 @@ pub fn run() {
             resume,
             capture_next_key,
             list_installed_apps,
+            battery::list_batteries,
             setup::setup_status,
             setup::setup_install_service,
             setup::setup_fix_permissions,

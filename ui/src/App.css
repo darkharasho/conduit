@@ -1793,6 +1793,12 @@ button {
 .device-card__dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-dim); }
 .device-card__dot--ok { background: var(--accent); }
 .device-card__meta { font-size: 12px; color: var(--text-lo); }
+.device-card__battery {
+  margin-left: 4px; padding: 1px 7px; font-size: 11px; font-weight: 600;
+  color: var(--text-mid); background: var(--accent-bg);
+  border: 1px solid var(--border-structural); border-radius: 999px;
+}
+.device-card__battery--charging { color: var(--ok); border-color: var(--accent-border); }
 .device-card__chev { position: absolute; right: 16px; color: var(--text-dim); font-size: 16px; transition: transform var(--t-fast), color var(--t-fast); }
 .home__remembered { margin-top: 36px; }
 .home__remembered-title { font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--text-dim); }

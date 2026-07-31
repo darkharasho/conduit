@@ -159,6 +159,22 @@ export async function listInstalledApps(): Promise<InstalledApp[]> {
   return call<InstalledApp[]>("list_installed_apps");
 }
 
+export interface BatteryInfo {
+  /** Model name from sysfs, e.g. "G502 X PLUS" */
+  name: string;
+  /** 0–100, or null when the kernel doesn't report a level */
+  percentage: number | null;
+  /** charging | discharging | full | not-charging | unknown */
+  status: string;
+  charging: boolean;
+  serial: string;
+}
+
+/** List peripheral (wireless device) batteries known to the kernel. */
+export async function listBatteries(): Promise<BatteryInfo[]> {
+  return call<BatteryInfo[]>("list_batteries");
+}
+
 export interface SetupStatus {
   service_installed: boolean;
   service_running: boolean;
@@ -276,6 +292,13 @@ export function onKeyEvent(
   cb: (event: WireEvent) => void
 ): Promise<() => void> {
   return listen<WireEvent>("conduit://event", (event) => cb(event.payload));
+}
+
+/** Subscribe to periodic peripheral-battery updates */
+export function onBattery(
+  cb: (batteries: BatteryInfo[]) => void
+): Promise<() => void> {
+  return listen<BatteryInfo[]>("conduit://battery", (event) => cb(event.payload));
 }
 
 /** Subscribe to daemon connection state changes */

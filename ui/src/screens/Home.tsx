@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DeviceArt } from "../components/DeviceArt";
-import { ConduitError, listDevices, onStatus, type DeviceInfo } from "../lib/client";
+import {
+  ConduitError,
+  listBatteries,
+  listDevices,
+  onBattery,
+  onStatus,
+  type BatteryInfo,
+  type DeviceInfo,
+} from "../lib/client";
+import { batteryForDevice, formatBattery } from "../lib/battery";
 import type { ConfigModel } from "../lib/config-model";
 import {
   appCountForDevice,
@@ -30,6 +39,7 @@ function investmentLine(model: ConfigModel | null, phys: PhysicalDevice): string
 
 export function HomeScreen({ model, connected, onOpenDevice }: Props) {
   const [devices, setDevices] = useState<DeviceInfo[] | null>(null);
+  const [batteries, setBatteries] = useState<BatteryInfo[]>([]);
   const [error, setError] = useState<ErrorPresentation | null>(null);
   const lastGrabbedRef = useRef<string | null>(null);
 
@@ -46,6 +56,12 @@ export function HomeScreen({ model, connected, onOpenDevice }: Props) {
   useEffect(() => {
     refresh();
   }, [refresh, connected]);
+
+  useEffect(() => {
+    listBatteries().then(setBatteries).catch(() => {});
+    const unlisten = onBattery(setBatteries);
+    return () => { unlisten.then((f) => f()); };
+  }, []);
 
   useEffect(() => {
     const unlisten = onStatus((s) => {
@@ -85,20 +101,32 @@ export function HomeScreen({ model, connected, onOpenDevice }: Props) {
       )}
 
       <div className="home__grid">
-        {phys.map((d) => (
-          <button key={d.key} className="device-card" onClick={() => onOpenDevice(d)}>
-            <span className="device-card__art"><DeviceArt archetype={d.archetype} width={116} sideView={d.nodes[0] ? layoutFor(d.nodes[0])?.sideButtons : false} /></span>
-            <span className="device-card__info">
-              <span className="device-card__name">{d.name}</span>
-              <span className="device-card__state">
-                <span className={`device-card__dot${connected === true ? " device-card__dot--ok" : ""}`} />
-                {connected === true ? "Working" : "Waiting for Conduit's engine"}
+        {phys.map((d) => {
+          const battery = batteryForDevice(batteries, d);
+          const batteryLabel = battery ? formatBattery(battery) : null;
+          return (
+            <button key={d.key} className="device-card" onClick={() => onOpenDevice(d)}>
+              <span className="device-card__art"><DeviceArt archetype={d.archetype} width={116} sideView={d.nodes[0] ? layoutFor(d.nodes[0])?.sideButtons : false} /></span>
+              <span className="device-card__info">
+                <span className="device-card__name">{d.name}</span>
+                <span className="device-card__state">
+                  <span className={`device-card__dot${connected === true ? " device-card__dot--ok" : ""}`} />
+                  {connected === true ? "Working" : "Waiting for Conduit's engine"}
+                  {batteryLabel && (
+                    <span
+                      className={`device-card__battery${battery?.charging ? " device-card__battery--charging" : ""}`}
+                      title={battery?.charging ? "Battery (charging)" : "Battery"}
+                    >
+                      {batteryLabel}
+                    </span>
+                  )}
+                </span>
+                <span className="device-card__meta">{investmentLine(model, d)}</span>
               </span>
-              <span className="device-card__meta">{investmentLine(model, d)}</span>
-            </span>
-            <span className="device-card__chev" aria-hidden>›</span>
-          </button>
-        ))}
+              <span className="device-card__chev" aria-hidden>›</span>
+            </button>
+          );
+        })}
       </div>
 
       {remembered.length > 0 && (

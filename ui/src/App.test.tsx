@@ -57,9 +57,11 @@ vi.mock("./lib/client", () => ({
       hwheel: false,
     },
   ]),
+  listBatteries: vi.fn(async () => []),
   suspend: vi.fn(async () => {}),
   resume: vi.fn(async () => {}),
   onStatus: vi.fn(() => Promise.resolve(() => {})),
+  onBattery: vi.fn(() => Promise.resolve(() => {})),
   onConnection: vi.fn(() => Promise.resolve([() => {}, () => {}])),
   onKeyEvent: vi.fn(() => Promise.resolve(() => {})),
 }));

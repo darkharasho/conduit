@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { DeviceInfo, Status } from "../lib/client";
+import type { BatteryInfo, DeviceInfo, Status } from "../lib/client";
 import { parseConfigToml } from "../lib/config-model";
 import { HomeScreen } from "./Home";
 
@@ -22,10 +22,16 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
 
 const mockListDevices = vi.fn();
+const mockListBatteries = vi.fn();
 // Captured onStatus callbacks so tests can fire synthetic status pushes.
 let capturedStatusCallbacks: Array<(s: Status) => void> = [];
 const mockOnStatus = vi.fn((cb: (s: Status) => void) => {
   capturedStatusCallbacks.push(cb);
+  return Promise.resolve(() => {});
+});
+let capturedBatteryCallbacks: Array<(b: BatteryInfo[]) => void> = [];
+const mockOnBattery = vi.fn((cb: (b: BatteryInfo[]) => void) => {
+  capturedBatteryCallbacks.push(cb);
   return Promise.resolve(() => {});
 });
 
@@ -47,7 +53,9 @@ const { MockConduitError } = vi.hoisted(() => {
 
 vi.mock("../lib/client", () => ({
   listDevices: (...a: unknown[]) => mockListDevices(...a),
+  listBatteries: (...a: unknown[]) => mockListBatteries(...a),
   onStatus: (...a: unknown[]) => mockOnStatus(a[0] as (s: Status) => void),
+  onBattery: (...a: unknown[]) => mockOnBattery(a[0] as (b: BatteryInfo[]) => void),
   ConduitError: MockConduitError,
 }));
 
@@ -73,8 +81,12 @@ mouse4 = "copy"
 
 beforeEach(() => {
   mockListDevices.mockReset();
+  mockListBatteries.mockReset();
+  mockListBatteries.mockResolvedValue([]);
   capturedStatusCallbacks = [];
+  capturedBatteryCallbacks = [];
   mockOnStatus.mockClear();
+  mockOnBattery.mockClear();
 });
 
 describe("HomeScreen", () => {
@@ -150,6 +162,43 @@ describe("HomeScreen", () => {
 
     expect(await screen.findByRole("button", { name: /Logitech G502 X/ })).toBeInTheDocument();
     expect(screen.queryByText("Plug in a mouse or keyboard to get started")).toBeNull();
+  });
+
+  it("shows a battery pill when a battery matches the device", async () => {
+    mockListDevices.mockResolvedValue([node({ name: "Logitech G502 X PLUS" })]);
+    mockListBatteries.mockResolvedValue([
+      {
+        name: "G502 X PLUS", percentage: 27, status: "charging",
+        charging: true, serial: "04-f9-ab-51",
+      } satisfies BatteryInfo,
+    ]);
+    render(<HomeScreen model={null} connected={true} onOpenDevice={() => {}} />);
+    expect(await screen.findByText("27% ⚡")).toBeInTheDocument();
+  });
+
+  it("updates the battery pill from a battery push event", async () => {
+    mockListDevices.mockResolvedValue([node({ name: "Logitech G502 X PLUS" })]);
+    render(<HomeScreen model={null} connected={true} onOpenDevice={() => {}} />);
+    await screen.findByRole("button", { name: /Logitech G502 X/ });
+    expect(screen.queryByText(/%/)).toBeNull();
+
+    await act(async () => {
+      for (const cb of capturedBatteryCallbacks)
+        cb([{ name: "G502 X PLUS", percentage: 80, status: "discharging", charging: false, serial: "" }]);
+    });
+    expect(await screen.findByText("80%")).toBeInTheDocument();
+  });
+
+  it("shows no battery pill for wired devices", async () => {
+    mockListDevices.mockResolvedValue([
+      node({ name: "Logitech Gaming Mouse G600", vendor: 0x046d, product: 0xc24a, id: "046d:c24a/x" }),
+    ]);
+    mockListBatteries.mockResolvedValue([
+      { name: "G502 X PLUS", percentage: 27, status: "charging", charging: true, serial: "" },
+    ]);
+    render(<HomeScreen model={null} connected={true} onOpenDevice={() => {}} />);
+    await screen.findByRole("button", { name: /Logitech G600/ });
+    expect(screen.queryByText(/27%/)).toBeNull();
   });
 
   it("F1: does not re-fetch when grabbed_devices is unchanged in a status push", async () => {
