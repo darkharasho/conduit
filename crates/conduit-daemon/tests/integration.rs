@@ -206,8 +206,12 @@ fn poll_read_key_events(
 // ── IPC helper ────────────────────────────────────────────────────────────────
 
 fn ipc_send_get_status(sock_path: &PathBuf) -> conduit_proto::Response {
+    ipc_send(sock_path, &conduit_proto::Request::GetStatus)
+}
+
+fn ipc_send(sock_path: &PathBuf, req: &conduit_proto::Request) -> conduit_proto::Response {
     let mut stream = UnixStream::connect(sock_path).expect("connect to IPC socket");
-    let json = serde_json::to_string(&conduit_proto::Request::GetStatus).unwrap();
+    let json = serde_json::to_string(req).unwrap();
     stream.write_all(json.as_bytes()).unwrap();
     stream.write_all(b"\n").unwrap();
     stream.flush().unwrap();
@@ -216,6 +220,28 @@ fn ipc_send_get_status(sock_path: &PathBuf) -> conduit_proto::Response {
     let mut line = String::new();
     reader.read_line(&mut line).unwrap();
     serde_json::from_str(line.trim()).expect("parse IPC response")
+}
+
+/// Poll `get_status` until `grabbed_devices.contains(path) == want` or panic
+/// after `timeout`.
+fn wait_for_grab_state(sock_path: &PathBuf, path: &str, want: bool, timeout: Duration, context: &str) {
+    let deadline = Instant::now() + timeout;
+    let mut last = None;
+    loop {
+        if sock_path.exists() {
+            let resp = ipc_send_get_status(sock_path);
+            if let conduit_proto::Response::Status(st) = &resp {
+                if st.grabbed_devices.contains(&path.to_string()) == want {
+                    return;
+                }
+            }
+            last = Some(resp);
+        }
+        if Instant::now() >= deadline {
+            panic!("[{context}] timed out after {timeout:?} waiting for grabbed={want} for {path}\nlast: {last:?}");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }
 
 // ── Integration tests ─────────────────────────────────────────────────────────
@@ -459,6 +485,82 @@ grab_keyboards = ["Conduit Test Source"]
     handle.shutdown();
     drop(fake_kbd);
 }
+
+/// Reload reconciliation: changing the grab lists via `set_config` must take
+/// effect for devices that are ALREADY plugged in — no re-plug, no restart.
+///
+/// 1. Start with `grab_keyboards = []` → fixture is discovered but not grabbed.
+/// 2. `set_config` adding the fixture → it must appear in `grabbed_devices`.
+/// 3. `set_config` removing it again → it must disappear (grab released).
+#[test]
+#[ignore]
+fn reload_reconciles_grabs_for_present_devices() {
+    let _guard = TEST_SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+
+    let mut fake_kbd = create_fake_keyboard();
+    let kbd_path = fake_kbd
+        .enumerate_dev_nodes_blocking()
+        .expect("enumerate_dev_nodes_blocking")
+        .next()
+        .expect("no dev node")
+        .expect("dev node error");
+    {
+        let settle_deadline = Instant::now() + Duration::from_secs(3);
+        while evdev::Device::open(&kbd_path).is_err() {
+            assert!(Instant::now() < settle_deadline, "fixture never became accessible");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+    let kbd_str = kbd_path.display().to_string();
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let config_path = tmp.path().join("conduit.toml");
+    let socket_path = tmp.path().join("conduit-test.sock");
+
+    const UNGRABBED: &str = r#"
+[devices]
+grab_all_keyboards = false
+grab_keyboards = []
+
+[profile.default.keys]
+"key:183" = "key:184"
+"#;
+    const GRABBED: &str = r#"
+[devices]
+grab_all_keyboards = false
+grab_keyboards = ["Conduit Test Source"]
+
+[profile.default.keys]
+"key:183" = "key:184"
+"#;
+    std::fs::write(&config_path, UNGRABBED).expect("write config");
+
+    let handle = conduit_daemon::start(DaemonConfig {
+        config_path: config_path.clone(),
+        socket_path: Some(socket_path.clone()),
+        enable_focus: false,
+        enable_hotplug: false,
+        enable_watch: false,
+    })
+    .expect("daemon start");
+
+    // Socket up; fixture must NOT be grabbed under the initial config.
+    wait_for_grab_state(&socket_path, &kbd_str, false, Duration::from_secs(5), "initial");
+
+    // Add the fixture to grab_keyboards via IPC → daemon must grab it live.
+    let resp = ipc_send(&socket_path, &conduit_proto::Request::SetConfig { toml: GRABBED.to_string() });
+    assert!(matches!(resp, conduit_proto::Response::ConfigApplied { .. }), "set_config (grab): {resp:?}");
+    wait_for_grab_state(&socket_path, &kbd_str, true, Duration::from_secs(5), "after adding to grab_keyboards");
+
+    // Remove it again → daemon must release it live.
+    let resp = ipc_send(&socket_path, &conduit_proto::Request::SetConfig { toml: UNGRABBED.to_string() });
+    assert!(matches!(resp, conduit_proto::Response::ConfigApplied { .. }), "set_config (release): {resp:?}");
+    wait_for_grab_state(&socket_path, &kbd_str, false, Duration::from_secs(5), "after removing from grab_keyboards");
+
+    handle.shutdown();
+    drop(fake_kbd);
+}
+
 
 /// Smoke test: daemon starts and stops cleanly with no device to match.
 #[test]

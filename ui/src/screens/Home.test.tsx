@@ -114,6 +114,14 @@ describe("HomeScreen", () => {
     expect(accName).not.toMatch(/gaming-mouse|mmo-mouse|keyboard/);
   });
 
+  it("a plugged-in device Conduit isn't controlling never claims to be Working", async () => {
+    mockListDevices.mockResolvedValue([node({ grabbed: false })]);
+    render(<HomeScreen model={MODEL} connected={true} onOpenDevice={() => {}} />);
+    const card = await screen.findByRole("button", { name: /Logitech G502 X/ });
+    expect(card.textContent).toContain("Not controlled yet");
+    expect(card.textContent).not.toContain("Working");
+  });
+
   it("shows remembered devices with the spec copy", async () => {
     mockListDevices.mockResolvedValue([node({})]);
     render(<HomeScreen model={MODEL} connected={true} onOpenDevice={() => {}} />);

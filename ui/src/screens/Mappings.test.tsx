@@ -992,3 +992,84 @@ describe("phase 6 nits", () => {
     expect(setConfigCalls).toHaveLength(0);
   });
 });
+
+describe("MappingsScreen — device present but not controlled by Conduit", () => {
+  const mouseNode = {
+    path: "/dev/input/event9",
+    name: "Logitech Gaming Mouse G600",
+    vendor: 0x046d, product: 0xc24a,
+    is_keyboard: false, is_mouse: true, grabbed: false,
+    id: "046d:c24a/Logitech Gaming Mouse G600",
+    class: "mouse", phys: "usb-1/input0", keys: [], wheel: true, hwheel: false,
+  };
+  const kbdNode = {
+    ...mouseNode,
+    path: "/dev/input/event10",
+    name: "Logitech Gaming Mouse G600 Keyboard",
+    is_keyboard: true, is_mouse: false,
+    id: "046d:c24a/Logitech Gaming Mouse G600 Keyboard",
+    class: "keyboard", phys: "usb-1/input1",
+  };
+
+  function setup(devicesRef: { list: unknown[] }, setConfigCalls: string[]) {
+    let statusCb: ((e: { payload: unknown }) => void) | null = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockInvoke.mockImplementation((async (cmd: string, args?: { toml?: string }) => {
+      if (cmd === "get_config") return MINIMAL_TOML;
+      if (cmd === "list_devices") return devicesRef.list;
+      if (cmd === "set_config") { setConfigCalls.push(args?.toml ?? ""); return 1; }
+      return undefined;
+    }) as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockListen.mockImplementation((async (event: string, cb: (e: { payload: unknown }) => void) => {
+      if (event === "conduit://status") statusCb = cb;
+      return vi.fn();
+    }) as any);
+    return { fireStatus: (grabbed: string[]) => statusCb?.({ payload: { active_profile: "default", active_layers: [], suspended: false, focus: null, grabbed_devices: grabbed, version: "x", config_version: 2 } }) };
+  }
+
+  it("shows the control banner, not the disconnect message", async () => {
+    const devices = { list: [mouseNode, kbdNode] };
+    setup(devices, []);
+    render(
+      <MappingsScreen railActiveProfile="default" onProfilesChange={() => {}} focusDevicePath={mouseNode.path} onBack={() => {}} />
+    );
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); });
+    expect(document.body.textContent).toContain("isn't controlling this device yet");
+    expect(document.body.textContent).not.toContain("isn't connected anymore");
+  });
+
+  it("'Control this device' writes every keyboard and mouse node to the grab lists", async () => {
+    const devices = { list: [mouseNode, kbdNode] };
+    const setConfigCalls: string[] = [];
+    setup(devices, setConfigCalls);
+    render(
+      <MappingsScreen railActiveProfile="default" onProfilesChange={() => {}} focusDevicePath={mouseNode.path} onBack={() => {}} />
+    );
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); });
+    const btn = screen.getByRole("button", { name: "Control this device" });
+    await act(async () => { btn.click(); await Promise.resolve(); });
+    expect(setConfigCalls).toHaveLength(1);
+    expect(setConfigCalls[0]).toMatch(/grab_mice = \[\s*"046d:c24a\/Logitech Gaming Mouse G600"\s*\]/);
+    expect(setConfigCalls[0]).toMatch(/grab_keyboards = \[\s*"046d:c24a\/Logitech Gaming Mouse G600 Keyboard"\s*\]/);
+  });
+
+  it("drops the banner once a status push reports the device grabbed", async () => {
+    const devices = { list: [mouseNode, kbdNode] };
+    const { fireStatus } = setup(devices, []);
+    render(
+      <MappingsScreen railActiveProfile="default" onProfilesChange={() => {}} focusDevicePath={mouseNode.path} onBack={() => {}} />
+    );
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); });
+    expect(document.body.textContent).toContain("isn't controlling this device yet");
+
+    devices.list = [{ ...mouseNode, grabbed: true }, { ...kbdNode, grabbed: true }];
+    await act(async () => { fireStatus([mouseNode.path, kbdNode.path]); await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); });
+    expect(document.body.textContent).not.toContain("isn't controlling this device yet");
+    expect(document.body.textContent).toContain("Select by pressing");
+  });
+});

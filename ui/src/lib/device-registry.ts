@@ -64,6 +64,17 @@ export function resolveDevice(
   return { name: fallbackName, archetype };
 }
 
+// Node classes Conduit grabs when it controls a device (touchpads are only
+// ever grabbed by explicit selector — grabbing one kills compositor gestures).
+const CONTROL_CLASSES = new Set(["keyboard", "mouse"]);
+
+/** True when Conduit is controlling this physical device: every keyboard and
+ *  mouse node is grabbed. A device with no such nodes is never "controlled". */
+export function deviceControlled(nodes: DeviceInfo[]): boolean {
+  const ctl = nodes.filter((n) => CONTROL_CLASSES.has(n.class));
+  return ctl.length > 0 && ctl.every((n) => n.grabbed);
+}
+
 export function groupPhysicalDevices(devices: DeviceInfo[]): PhysicalDevice[] {
   const groups = new Map<string, DeviceInfo[]>();
   for (const d of devices) {

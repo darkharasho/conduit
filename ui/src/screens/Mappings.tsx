@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { getConfig, setConfig, onConnection, onKeyEvent, listDevices, listInstalledApps } from "../lib/client";
+import { getConfig, setConfig, onConnection, onKeyEvent, onStatus, listDevices, listInstalledApps } from "../lib/client";
 import type { DeviceInfo, ConduitError, InstalledApp } from "../lib/client";
+import { deviceControlled } from "../lib/device-registry";
 import {
   parseConfigToml,
   serializeConfigToml,
@@ -20,6 +21,7 @@ import {
   actionWithEverywhereFallback,
   setProfileAutoSwitch,
   removeProfile,
+  setDeviceControl,
 } from "../lib/config-model";
 import type { ConfigModel, ActionModel } from "../lib/config-model";
 import { KeyboardViz } from "../components/KeyboardViz";
@@ -92,7 +94,8 @@ export function MappingsScreen({
     return () => { alive = false; };
   }, []);
 
-  // Grabbed devices (full list — used for deviceScope / device-override paths)
+  // Every input device the engine can see, grabbed or not (used for the
+  // active device, deviceScope / device-override paths, and control state)
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   // True after the first listDevices() call completes (success or failure)
   const [devicesLoaded, setDevicesLoaded] = useState(false);
@@ -131,8 +134,8 @@ export function MappingsScreen({
 
   const loadDevices = useCallback(async () => {
     try {
-      const devs = (await listDevices()).filter((d) => d.grabbed);
-      setDevices(devs);
+      const devs = await listDevices();
+      setDevices(Array.isArray(devs) ? devs : []);
     } catch {
       // Non-fatal: keyboard view without device context
     } finally {
@@ -156,6 +159,20 @@ export function MappingsScreen({
     };
   }, [loadConfig, loadDevices]);
 
+  // The engine pushes a status whenever its grabbed set changes (config
+  // reload, hotplug). Refresh so "controlled" state tracks reality.
+  const lastGrabbedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const unlisten = onStatus((st) => {
+      const key = st.grabbed_devices.join(",");
+      if (key !== lastGrabbedRef.current) {
+        lastGrabbedRef.current = key;
+        loadDevices();
+      }
+    });
+    return () => { unlisten.then((f) => f()); };
+  }, [loadDevices]);
+
   // When rail selects a different profile, reset layer & editing
   useEffect(() => {
     setActiveLayer("base");
@@ -171,13 +188,22 @@ export function MappingsScreen({
   // No tab strip — the active device is fixed for this editor session.
   const activeDevPath = focusDevicePath
     ? (devices.find((d) => d.path === focusDevicePath)?.path ?? null)
-    : (devices[0]?.path ?? null);
+    : ((devices.find((d) => d.grabbed) ?? devices[0])?.path ?? null);
   const activeDev = devices.find((d) => d.path === activeDevPath) ?? null;
 
   // When focusDevicePath was provided and the device list has loaded but the
   // device is absent (unplugged after the editor opened), show a recovery UI.
   const focusDeviceGone =
     !!focusDevicePath && devicesLoaded && !devices.some((d) => d.path === focusDevicePath);
+
+  // All evdev nodes of the active physical device (a mouse with a keyboard
+  // interface shows up as two nodes sharing vid:pid).
+  const activeNodes = activeDev
+    ? devices.filter((d) => d.vendor === activeDev.vendor && d.product === activeDev.product)
+    : [];
+  // Plugged in, but the engine isn't grabbing it: mappings can't take effect
+  // until the user turns control on.
+  const activeDevUncontrolled = !!activeDev && !deviceControlled(activeNodes);
 
   // Detect: select the first key pressed on the active device. HID
   // descriptors over-declare wildly (a 9-button mouse can declare 300
@@ -362,6 +388,13 @@ export function MappingsScreen({
     );
   };
 
+  const handleControlDevice = () => {
+    if (!model || !activeDev) return;
+    const grabbedKeyboardIds = devices.filter((d) => d.class === "keyboard" && d.grabbed).map((d) => d.id);
+    const updated = setDeviceControl(model, activeNodes, true, grabbedKeyboardIds);
+    applyWithUndoImpl(updated, `Conduit now controls ${activeDev.name}`);
+  };
+
   const handleAddLayer = () => {
     setNewLayerPrompt(true);
     setNewLayerName("");
@@ -500,8 +533,20 @@ export function MappingsScreen({
               </div>
             )}
 
-            {/* Detect bar — shown when a device is active */}
-            {activeDev && (
+            {/* Control banner — device is here but the engine isn't grabbing it */}
+            {activeDevUncontrolled && !focusDeviceGone && (
+              <div className="banner--info control-banner" role="status" style={{ margin: "8px 16px" }}>
+                <span>
+                  Conduit isn't controlling this device yet, so its buttons keep their normal behavior.
+                </span>
+                <button className="btn btn--primary" onClick={handleControlDevice}>
+                  Control this device
+                </button>
+              </div>
+            )}
+
+            {/* Detect bar — shown when a controlled device is active */}
+            {activeDev && !activeDevUncontrolled && (
               <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "2px 0 12px" }}>
                 <button
                   className={`btn devtabs__detect${detecting ? " devtabs__detect--active" : ""}`}

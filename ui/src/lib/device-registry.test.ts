@@ -4,6 +4,7 @@ import { parseConfigToml } from "./config-model";
 import {
   appCountForDevice,
   appProfileCount,
+  deviceControlled,
   deviceOverrideCount,
   groupPhysicalDevices,
   rememberedDevices,
@@ -175,5 +176,28 @@ mouse4 = "macro1"
   it("item 10: 'keyboard' match is case-insensitive", () => {
     expect(resolveDevice(0x9999, 0xcccc, "KEYBOARD Pro", "mouse").archetype).toBe("keyboard");
     expect(resolveDevice(0x9999, 0xdddd, "USB KeyBoard", "touchpad").archetype).toBe("keyboard");
+  });
+});
+
+describe("deviceControlled", () => {
+  const g600 = (grabbed: { mouse: boolean; kbd: boolean }) => [
+    node({ vendor: 0x046d, product: 0xc24a, class: "mouse", name: "Logitech Gaming Mouse G600", path: "/dev/input/event9", grabbed: grabbed.mouse }),
+    node({ vendor: 0x046d, product: 0xc24a, class: "keyboard", name: "Logitech Gaming Mouse G600 Keyboard", path: "/dev/input/event10", grabbed: grabbed.kbd }),
+    node({ vendor: 0x046d, product: 0xc24a, class: "other", name: "Logitech Gaming Mouse G600", path: "/dev/input/event11", grabbed: false }),
+  ];
+  it("is true only when every keyboard and mouse node is grabbed", () => {
+    expect(deviceControlled(g600({ mouse: true, kbd: true }))).toBe(true);
+    expect(deviceControlled(g600({ mouse: true, kbd: false }))).toBe(false);
+    expect(deviceControlled(g600({ mouse: false, kbd: false }))).toBe(false);
+  });
+  it("ignores touchpad and non-input nodes", () => {
+    const nodes = [
+      ...g600({ mouse: true, kbd: true }),
+      node({ vendor: 0x046d, product: 0xc24a, class: "touchpad", name: "Pad", path: "/dev/input/event12", grabbed: false }),
+    ];
+    expect(deviceControlled(nodes)).toBe(true);
+  });
+  it("is false for a device with no keyboard/mouse nodes", () => {
+    expect(deviceControlled([node({ class: "other", grabbed: false })])).toBe(false);
   });
 });

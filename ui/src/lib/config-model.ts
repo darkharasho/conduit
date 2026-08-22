@@ -671,6 +671,32 @@ export function setMouseGrab(
   return { ...m, devices: d };
 }
 
+/**
+ * Turn Conduit's control of a whole physical device on or off.
+ *
+ * `nodes` are the device's evdev nodes (one per HID interface). Turning
+ * control ON adds every keyboard node to `grab_keyboards` and every mouse
+ * node to `grab_mice` (canonical `vid:pid/name` ids); touchpad and other
+ * nodes are never grabbed implicitly. Turning it OFF removes every selector
+ * matching any keyboard, mouse or touchpad node.
+ */
+export function setDeviceControl(
+  m: ConfigModel,
+  nodes: Array<DeviceIdent & { id: string; class: string }>,
+  on: boolean,
+  currentlyGrabbedKeyboardIds: string[],
+): ConfigModel {
+  let next = m;
+  for (const n of nodes) {
+    if (n.class === "keyboard") {
+      next = setKeyboardGrab(next, n, on, currentlyGrabbedKeyboardIds);
+    } else if (n.class === "mouse" || (n.class === "touchpad" && !on)) {
+      next = setMouseGrab(next, n, on);
+    }
+  }
+  return next;
+}
+
 /** Set `devices.grab_all_mice` (touchpads are never included by the daemon). */
 export function setGrabAllMice(m: ConfigModel, on: boolean): ConfigModel {
   return { ...m, devices: { ...m.devices, grab_all_mice: on } };

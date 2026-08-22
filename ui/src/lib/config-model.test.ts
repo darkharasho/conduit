@@ -11,6 +11,7 @@ import {
   getDeviceGrabs,
   setKeyboardGrab,
   setMouseGrab,
+  setDeviceControl,
   getProfileMatchLabel,
   actionToTomlLine,
   setProfileAutoSwitch,
@@ -784,5 +785,57 @@ mouse4 = "back"
     const m2 = parseConfigToml(TOML.replace('mouse4 = "back"', 'mouse5 = "back"'));
     expect(actionWithEverywhereFallback(m2, "firefox", null, "base", "mouse4"))
       .toEqual({ action: { kind: "chord", keys: ["leftctrl", "c"] }, source: "everywhere" });
+  });
+});
+
+describe("setDeviceControl", () => {
+  const g600 = [
+    { path: "/dev/input/event9", name: "Logitech Gaming Mouse G600", vendor: 0x046d, product: 0xc24a, class: "mouse", id: "046d:c24a/Logitech Gaming Mouse G600", phys: "" },
+    { path: "/dev/input/event10", name: "Logitech Gaming Mouse G600 Keyboard", vendor: 0x046d, product: 0xc24a, class: "keyboard", id: "046d:c24a/Logitech Gaming Mouse G600 Keyboard", phys: "" },
+    { path: "/dev/input/event11", name: "Logitech Gaming Mouse G600", vendor: 0x046d, product: 0xc24a, class: "other", id: "046d:c24a/Logitech Gaming Mouse G600", phys: "" },
+    { path: "/dev/input/event12", name: "Logitech Gaming Mouse G600 Pad", vendor: 0x046d, product: 0xc24a, class: "touchpad", id: "046d:c24a/Logitech Gaming Mouse G600 Pad", phys: "" },
+  ];
+
+  it("on: writes every keyboard and mouse node to the grab lists by canonical id, skipping touchpad/other nodes", () => {
+    const m = parseConfigToml(EXPLICIT_KEYBOARDS_TOML);
+    const m2 = setDeviceControl(m, g600, true, []);
+    const grabs = getDeviceGrabs(m2);
+    expect(grabs.grabMice).toEqual(["mouse-x", "046d:c24a/Logitech Gaming Mouse G600"]);
+    expect(grabs.grabKeyboards).toEqual(["kbd-a", "kbd-b", "046d:c24a/Logitech Gaming Mouse G600 Keyboard"]);
+    // Original unchanged
+    expect(getDeviceGrabs(m).grabMice).toEqual(["mouse-x"]);
+  });
+
+  it("on: is idempotent when the device is already listed under any selector form", () => {
+    const m = parseConfigToml(`
+[devices]
+grab_keyboards = ["Logitech Gaming Mouse G600 Keyboard"]
+grab_mice = ["046d:c24a"]
+[profile.default.keys]
+`);
+    const grabs = getDeviceGrabs(setDeviceControl(m, g600, true, []));
+    expect(grabs.grabKeyboards).toEqual(["Logitech Gaming Mouse G600 Keyboard"]);
+    expect(grabs.grabMice).toEqual(["046d:c24a"]);
+  });
+
+  it("off: removes every selector matching the device's keyboard, mouse and touchpad nodes", () => {
+    const m = parseConfigToml(`
+[devices]
+grab_keyboards = ["kbd-a", "046d:c24a/Logitech Gaming Mouse G600 Keyboard"]
+grab_mice = ["mouse-x", "046d:c24a", "046d:c24a/Logitech Gaming Mouse G600 Pad"]
+[profile.default.keys]
+`);
+    const grabs = getDeviceGrabs(setDeviceControl(m, g600, false, []));
+    expect(grabs.grabKeyboards).toEqual(["kbd-a"]);
+    expect(grabs.grabMice).toEqual(["mouse-x"]);
+  });
+
+  it("off under grab_all_keyboards: converts to an explicit list without this device's keyboard node", () => {
+    const m = parseConfigToml(GRAB_ALL_TOML);
+    const grabs = getDeviceGrabs(
+      setDeviceControl(m, g600, false, ["kbd-a", "046d:c24a/Logitech Gaming Mouse G600 Keyboard"]),
+    );
+    expect(grabs.grabAllKeyboards).toBe(false);
+    expect(grabs.grabKeyboards).toEqual(["kbd-a"]);
   });
 });

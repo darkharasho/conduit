@@ -13,6 +13,7 @@ import { batteryForDevice, formatBattery } from "../lib/battery";
 import type { ConfigModel } from "../lib/config-model";
 import {
   appCountForDevice,
+  deviceControlled,
   deviceOverrideCount,
   groupPhysicalDevices,
   rememberedDevices,
@@ -104,14 +105,20 @@ export function HomeScreen({ model, connected, onOpenDevice }: Props) {
         {phys.map((d) => {
           const battery = batteryForDevice(batteries, d);
           const batteryLabel = battery ? formatBattery(battery) : null;
+          // "Working" only when the engine is up AND actually grabbing the
+          // device — a card must never claim health that isn't real.
+          const working = connected === true && deviceControlled(d.nodes);
+          const stateLabel = connected !== true
+            ? "Waiting for Conduit's engine"
+            : working ? "Working" : "Not controlled yet";
           return (
             <button key={d.key} className="device-card" onClick={() => onOpenDevice(d)}>
               <span className="device-card__art"><DeviceArt archetype={d.archetype} width={116} sideView={d.nodes[0] ? layoutFor(d.nodes[0])?.sideButtons : false} /></span>
               <span className="device-card__info">
                 <span className="device-card__name">{d.name}</span>
                 <span className="device-card__state">
-                  <span className={`device-card__dot${connected === true ? " device-card__dot--ok" : ""}`} />
-                  {connected === true ? "Working" : "Waiting for Conduit's engine"}
+                  <span className={`device-card__dot${working ? " device-card__dot--ok" : ""}`} />
+                  {stateLabel}
                   {batteryLabel && (
                     <span
                       className={`device-card__battery${battery?.charging ? " device-card__battery--charging" : ""}`}

@@ -278,6 +278,21 @@ pub fn run(
                             .to_vec()
                     };
                     settings = new_settings;
+                    // Grab lists may have changed: grab newly-matching devices
+                    // that are already plugged in and release ones that no
+                    // longer match, so a config change takes effect without a
+                    // re-plug or restart.
+                    let mut evs = evs;
+                    evs.extend(reconcile_grabs(
+                        &settings,
+                        &tx,
+                        &out,
+                        &mut readers,
+                        &mut grabbed_devices,
+                        &mut sources,
+                        &slots,
+                        &mut engine,
+                    ));
                     slots = compute_slots(&sources, &device_selectors);
                     push_status(&engine, &current_focus, &grabbed_devices, config_version, &mut status_subs);
                     evs
@@ -457,6 +472,66 @@ fn try_grab_device(
         grabbed_devices.push(s);
         grabbed_devices.sort();
     }
+}
+
+/// Re-evaluate grabs against `settings` for every device currently present.
+///
+/// Releases held devices that no longer match the grab lists (flushing any
+/// outputs the engine holds on their behalf — returned for the caller to
+/// emit) and grabs present devices that newly match. Called on `Msg::Reload`
+/// so toggling a device in the UI takes effect immediately.
+fn reconcile_grabs(
+    settings: &Settings,
+    tx: &Sender<Msg>,
+    out: &Option<Arc<Mutex<VirtualOutput>>>,
+    readers: &mut HashMap<PathBuf, GrabHandle>,
+    grabbed_devices: &mut Vec<String>,
+    sources: &mut HashMap<PathBuf, SourceInfo>,
+    slots: &HashMap<u16, Option<u16>>,
+    engine: &mut Engine,
+) -> Vec<Event> {
+    let mut release_evs: Vec<Event> = Vec::new();
+
+    // Release devices that no longer match. A device we cannot probe (e.g. it
+    // is mid-unplug) is left alone: its reader will send `DeviceRemoved`.
+    let held: Vec<PathBuf> = readers.keys().cloned().collect();
+    for p in held {
+        let still_wanted = crate::devices::probe(p.clone())
+            .map(|d| crate::devices::should_grab(&d, settings))
+            .unwrap_or(true);
+        if still_wanted {
+            continue;
+        }
+        let removed_slot: Option<u16> = sources
+            .get(&p)
+            .and_then(|si| slots.get(&si.id).copied().flatten());
+        readers.remove(&p); // drop joins the reader → fd closes → grab released
+        sources.remove(&p);
+        if let Some(slot) = removed_slot {
+            release_evs.extend(engine.release_device(slot).to_vec());
+        }
+        let s = p.display().to_string();
+        grabbed_devices.retain(|g| g != &s);
+        eprintln!("conduit: released {} (removed from grab lists)", p.display());
+    }
+
+    // Grab present devices that newly match.
+    match crate::devices::discover() {
+        Ok(discovered) => {
+            for d in discovered {
+                if readers.contains_key(&d.path) || !crate::devices::should_grab(&d, settings) {
+                    continue;
+                }
+                try_grab_device(&d.path, settings, tx, out, readers, grabbed_devices, sources);
+                if readers.contains_key(&d.path) {
+                    eprintln!("conduit: grabbed {} ({}) after config reload", d.name, d.path.display());
+                }
+            }
+        }
+        Err(e) => eprintln!("conduit: device rescan after reload failed: {e}"),
+    }
+
+    release_evs
 }
 
 /// Emit events to the virtual output and post-phase-push them to subscribers.
