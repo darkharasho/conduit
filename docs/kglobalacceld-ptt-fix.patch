@@ -1,5 +1,5 @@
---- globalshortcutsregistry.h.orig	2026-10-28 22:49:42.241049251 -0700
-+++ globalshortcutsregistry.h	2026-10-28 22:49:47.026654070 -0700
+--- globalshortcutsregistry.h.orig
++++ globalshortcutsregistry.h
 @@ -257,6 +257,10 @@
  
      QDBusObjectPath _dbusPath;
@@ -11,8 +11,8 @@
      QTimer m_refreshServicesTimer;
      uint64_t m_serial = 0;
  };
---- globalshortcutsregistry.cpp.orig	2026-10-28 22:49:42.239432605 -0700
-+++ globalshortcutsregistry.cpp	2026-10-28 22:49:57.052623614 -0700
+--- globalshortcutsregistry.cpp.orig
++++ globalshortcutsregistry.cpp
 @@ -521,9 +521,15 @@
      }
  
@@ -30,7 +30,26 @@
          }
      }
  
-@@ -617,6 +623,7 @@
+@@ -578,6 +584,18 @@
+         }
+     }
+ 
++    // Macro-type keys (F13+, XF86Launch0-F — typically extra mouse/keyboard
++    // buttons) should still trigger their modifierless binding when an
++    // unrelated modifier happens to be held (e.g. Shift-to-sprint while
++    // pressing a push-to-talk button). Only consulted when the exact
++    // modified chord matched nothing, so an explicit modifier+key binding
++    // still wins.
++    const int bareKey = keyQt & ~Qt::KeyboardModifierMask;
++    if (!shortcut && (keyQt & Qt::KeyboardModifierMask)
++        && ((bareKey >= Qt::Key_F13 && bareKey <= Qt::Key_F35) || (bareKey >= Qt::Key_Launch0 && bareKey <= Qt::Key_LaunchF))) {
++        shortcut = activeShortcutByKey(QKeySequence(bareKey));
++    }
++
+     qCDebug(KGLOBALACCELD) << "Processed key" << QKeySequence(keyQt).toString() << ", current sequence" << _active_sequence.toString() << "="
+                            << (shortcut ? shortcut->uniqueName() : QStringLiteral("(no shortcut found)"));
+     if (!shortcut) {
+@@ -617,6 +635,7 @@
      // Invoke the action
      shortcut->context()->component()->emitGlobalShortcutEvent(*shortcut, state);
      m_lastShortcut = shortcut;
@@ -38,7 +57,7 @@
  
      return true;
  }
-@@ -967,6 +974,7 @@
+@@ -967,6 +986,7 @@
      if (shortcut && shortcut == m_lastShortcut) {
          m_lastShortcut->context()->component()->emitGlobalShortcutEvent(*m_lastShortcut, ShortcutKeyState::Released);
          m_lastShortcut = nullptr;

@@ -54,6 +54,12 @@ The first deployment attempt (an `Environment=LD_LIBRARY_PATH=…` drop-in on `p
 
 Working deployment: root-owned copy at `/usr/local/lib64/kglobalacceld-patched/libKGlobalAccelD.so.{0,6.7.5}` listed in `/etc/ld.so.conf.d/kglobalacceld-ptt-fix.conf` — the ld.so cache orders it ahead of `/usr/lib64`, and secure-exec binaries do honor the cache. Revert = delete that conf file and the `/usr/local` lib dir, run `ldconfig` (root), relog. The user-level copy at `~/.local/lib64/kglobalacceld-patched/` is kept only as the build artifact. Caution: the cache entry pins this 6.7.5 build ahead of any future Plasma update's `libKGlobalAccelD.so.0` — remove or rebuild it when Plasma upgrades, or KWin may load an ABI-mismatched library.
 
+### Second bug: PTT fails to fire while a modifier is held (fixed 2026-10-28)
+
+After the release fix was verified working, a pre-existing second flavor surfaced: PTT sometimes **never activates**. Cause: `GlobalShortcutsRegistry::processKey()` looks up the incoming chord with the held modifiers included — pressing F18 while holding Shift (sprint) or Ctrl (crouch) is looked up as `Shift+Launch (9)`, which no component registered, so nothing fires. The user confirmed the pattern live: holding Shift before pressing PTT reproduces the no-fire 100%.
+
+The patch adds a fallback in `processKey()`: when the exact modified chord matches nothing **and** the bare key is a macro-type key (`Qt::Key_F13`–`F35` or `Qt::Key_Launch0`–`LaunchF` — the ranges extra mouse/keyboard buttons map to), retry the lookup with modifiers stripped. Restricting it to macro keys keeps normal shortcut semantics (`Ctrl+P` must not fall back to a bare `P` binding), and because it only runs when the modified chord missed, an explicit `Shift+F18` binding would still win. Deactivation is unaffected: the release path already masks modifiers off `m_lastShortcutKey`, so a fallback-activated hold still ends on F18's own release. All 28 upstream autotests still pass (run in the fedora:44 build container — note the host test harness stopped being usable for `shortcutstest` after the 2026-10-28 reboot/relogin: 16 failures even against a known-good lib, environment interference, not code).
+
 **Workarounds until the upstream fix ships:**
 - Avoid other-key releases during PTT (not practical in games).
 - Discord's X11 keybind path (XWayland) only works if the kglobalaccel registration for Launch(9) is removed, and only while an XWayland window is focused.
