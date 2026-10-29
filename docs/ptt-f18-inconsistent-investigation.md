@@ -48,8 +48,9 @@ if (state == ShortcutKeyState::Released) {
 
 File at https://bugs.kde.org against kglobalacceld with the evidence above (suggested title: *"GlobalShortcuts portal: held shortcut (push-to-talk) is Deactivated when any other key is released"*).
 
-**Workarounds until the fix ships:**
-- Build a patched kglobalacceld 6.7.5 and point the `plasma-kglobalaccel` user service at it (revertible drop-in; no rpm-ostree overlay needed).
+**Local fix deployed (2026-10-28):** patched kglobalacceld 6.7.5 built in a fedora:44 container (Qt/KF6 versions matched to host); the full diff is [`kglobalacceld-ptt-fix.patch`](kglobalacceld-ptt-fix.patch) (also tracks the activating key in `m_lastShortcutKey`, clears it on unregister, keeps the release-on-any-key behavior for modifier-only shortcuts). All 28 upstream autotests pass with the patch. Installed to `~/.local/lib64/kglobalacceld-patched/` and loaded via an `Environment=LD_LIBRARY_PATH=…` drop-in at `~/.config/systemd/user/plasma-kwin_wayland.service.d/kglobalacceld-patched.conf` — KWin hosts `libKGlobalAccelD.so.0`, so it takes effect at the next login. Revert = delete the drop-in and the lib dir, `systemctl --user daemon-reload`, relog.
+
+**Workarounds until the upstream fix ships:**
 - Avoid other-key releases during PTT (not practical in games).
 - Discord's X11 keybind path (XWayland) only works if the kglobalaccel registration for Launch(9) is removed, and only while an XWayland window is focused.
 

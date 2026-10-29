@@ -1,0 +1,48 @@
+--- globalshortcutsregistry.h.orig	2026-10-28 22:49:42.241049251 -0700
++++ globalshortcutsregistry.h	2026-10-28 22:49:47.026654070 -0700
+@@ -257,6 +257,10 @@
+ 
+     QDBusObjectPath _dbusPath;
+     GlobalShortcut *m_lastShortcut = nullptr;
++    // The keyQt that activated m_lastShortcut; 0 key part for modifier-only
++    // shortcuts. Used so an unrelated key release does not deactivate a held
++    // shortcut (e.g. push-to-talk cut off by releasing W while walking).
++    int m_lastShortcutKey = 0;
+     QTimer m_refreshServicesTimer;
+     uint64_t m_serial = 0;
+ };
+--- globalshortcutsregistry.cpp.orig	2026-10-28 22:49:42.239432605 -0700
++++ globalshortcutsregistry.cpp	2026-10-28 22:49:57.052623614 -0700
+@@ -521,9 +521,15 @@
+     }
+ 
+     if (state == ShortcutKeyState::Released) {
+-        if (m_lastShortcut) {
++        // Only deactivate the held shortcut when the key that activated it is
++        // released; releasing an unrelated key must not end a held shortcut
++        // (push-to-talk). Modifier-only shortcuts (key part 0) keep the old
++        // behavior of releasing on any key release.
++        const int lastKey = m_lastShortcutKey & ~Qt::KeyboardModifierMask;
++        if (m_lastShortcut && (lastKey == 0 || lastKey == key)) {
+             m_lastShortcut->context()->component()->emitGlobalShortcutEvent(*m_lastShortcut, state);
+             m_lastShortcut = nullptr;
++            m_lastShortcutKey = 0;
+         }
+     }
+ 
+@@ -617,6 +623,7 @@
+     // Invoke the action
+     shortcut->context()->component()->emitGlobalShortcutEvent(*shortcut, state);
+     m_lastShortcut = shortcut;
++    m_lastShortcutKey = keyQt;
+ 
+     return true;
+ }
+@@ -967,6 +974,7 @@
+     if (shortcut && shortcut == m_lastShortcut) {
+         m_lastShortcut->context()->component()->emitGlobalShortcutEvent(*m_lastShortcut, ShortcutKeyState::Released);
+         m_lastShortcut = nullptr;
++        m_lastShortcutKey = 0;
+     }
+ 
+     _active_keys.remove(key, shortcut);
