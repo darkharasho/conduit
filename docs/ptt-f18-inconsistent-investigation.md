@@ -1,7 +1,63 @@
 # Investigation: Push-to-Talk key (F18) inconsistently delivered
 
-**Status:** diagnosed, not yet fixed. Written up 2026-10-28 after a long live debugging session.
+**Status: ROOT CAUSE CONFIRMED 2026-10-28** — see "Confirmed root cause" below. It is a **KDE kglobalacceld bug**, not conduit, not the G502 wireless, not Discord. The original write-up below is kept for history; its TL;DR and ranked causes are superseded.
+
+**Original status:** diagnosed, not yet fixed. Written up 2026-10-28 after a long live debugging session.
 **Symptom (user-facing):** Discord push-to-talk is unreliable — mic opens then cuts out mid-hold, or doesn't trigger at all. Behaviour is *intermittent*, not deterministic. Reproduces across every Discord client (Flatpak, native tarball, Vesktop) and is independent of KDE shortcut config.
+
+## Confirmed root cause (2026-10-28, live boundary trace)
+
+**KDE's kglobalacceld deactivates a held portal global shortcut when ANY other key is released.**
+
+Discord registers PTT via the XDG GlobalShortcuts portal — that's why its keybind shows the kglobalaccel-grabbed "Launch (9)"/UNK196, and why keycode 196 never reaches XWayland (kglobalaccel consumes it). kglobalacceld tracks the currently-held shortcut in `m_lastShortcut`, and `GlobalShortcutsRegistry::keyEvent()` (`src/globalshortcutsregistry.cpp`) runs this on **every non-modifier key release**:
+
+```cpp
+if (state == ShortcutKeyState::Released) {
+    if (m_lastShortcut) {
+        m_lastShortcut->context()->component()->emitGlobalShortcutEvent(*m_lastShortcut, state);
+        m_lastShortcut = nullptr;
+    }
+}
+```
+
+It never compares the released key to the shortcut's key. Hold F18 (PTT active) and release W/A/S/D while moving in a game → kglobalacceld emits shortcut-released for the PTT shortcut → xdg-desktop-portal-kde sends `Deactivated` → Discord closes the mic while F18 is still physically held and still streaming through conduit. The "never fires at all" flavor is the same bug: press PTT while moving and the next WASD release deactivates it milliseconds after activation.
+
+### Evidence (2026-10-28, Plasma 6.7.5)
+
+- **CONDUIT_TRACE** (commit `7212d9f`): every F18 press/repeat/release was read from the G502 and emitted on the virtual keyboard; zero hotplug/disconnect events; zero synthesized releases all session. Wireless (old cause #1) and conduit (old causes #2/#3) exonerated.
+- **dbus-monitor** on `org.freedesktop.portal.GlobalShortcuts`: `Activated` matches each conduit F18 Press to the millisecond. On bad holds, `Deactivated` arrives mid-hold:
+  - hold 22:28:47.496→22:28:50.317 — Deactivated 22:28:49.420, **1 ms after a Wooting `a` release** (22:28:49.419)
+  - hold 22:32:27.013→22:32:28.187 — Deactivated 22:32:27.446, **1 ms after a Wooting `w` release** (22:32:27.445)
+  - control hold 22:33:34.984→22:33:37.077 with a `d` *press* mid-hold (no release): no early Deactivated. Other-key **presses** are fine; other-key **releases** kill it.
+- **xinput test-xi2 (XWayland)**: 323 raw presses of other keys captured, keycode 196 never — confirms the portal path and rules out the X11 path.
+- Bug present in installed `kglobalacceld-6.7.5` and still in kglobalacceld **master** as of 2026-10-28. No existing upstream report found.
+- Side observation: the portal delivered every signal to **two** live Discord sessions (`discord_gs_9_1`, `discord_gs_123_1`, same shortcut `discord-push-to-talk-173`) — likely a stale duplicate registration; not the cause, but worth cleaning up by toggling the keybind in Discord.
+
+### Fix
+
+**Upstream (proper fix):** kglobalacceld must remember which key activated `m_lastShortcut` and emit released only for that key. Sketch — add `int m_lastShortcutKey = 0;`, set it next to `m_lastShortcut = shortcut;` in `processKey()` (`m_lastShortcutKey = keyQt & ~Qt::KeyboardModifierMask;`), then:
+
+```cpp
+if (state == ShortcutKeyState::Released) {
+    if (m_lastShortcut && key == m_lastShortcutKey) {
+        m_lastShortcut->context()->component()->emitGlobalShortcutEvent(*m_lastShortcut, state);
+        m_lastShortcut = nullptr;
+    }
+}
+```
+
+File at https://bugs.kde.org against kglobalacceld with the evidence above (suggested title: *"GlobalShortcuts portal: held shortcut (push-to-talk) is Deactivated when any other key is released"*).
+
+**Workarounds until the fix ships:**
+- Build a patched kglobalacceld 6.7.5 and point the `plasma-kglobalaccel` user service at it (revertible drop-in; no rpm-ostree overlay needed).
+- Avoid other-key releases during PTT (not practical in games).
+- Discord's X11 keybind path (XWayland) only works if the kglobalaccel registration for Launch(9) is removed, and only while an XWayland window is focused.
+
+**Conduit is not the fix locus** — nothing to change in conduit. The CONDUIT_TRACE instrumentation did its job; disable it after the dust settles (`systemctl --user revert`-style removal of the drop-in) since it logs key names to journald.
+
+---
+
+## Original analysis (superseded)
 
 ## TL;DR root cause
 
