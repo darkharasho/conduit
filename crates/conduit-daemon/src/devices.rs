@@ -319,6 +319,25 @@ pub fn spawn_reader(
             eprintln!("conduit: monitoring (no-grab) {} ({})", name, path.display());
         }
 
+        // Opt-in trace (CONDUIT_TRACE=1): count EV_KEY events read from the
+        // kernel vs Msg::Input actually sent to the engine. A gap between the
+        // two (beyond unknown EV_KEY values) means the reader dropped events;
+        // zero reads during a physical press means the kernel never delivered
+        // the event (e.g. wireless device asleep). See
+        // docs/ptt-f18-inconsistent-investigation.md.
+        let tracing = crate::trace::enabled();
+        let mut keys_read: u64 = 0;
+        let mut inputs_sent: u64 = 0;
+        let trace_exit = |reason: &str, keys_read: u64, inputs_sent: u64| {
+            if tracing {
+                crate::trace::log(format_args!(
+                    "reader exit ({reason}): {} ({}) ev_key_read={keys_read} inputs_sent={inputs_sent}",
+                    name,
+                    path.display(),
+                ));
+            }
+        };
+
         while !stop_flag.load(Ordering::Relaxed) {
             if do_grab {
                 // poll(2) with a 50 ms timeout: block until the fd becomes
@@ -357,6 +376,7 @@ pub fn spawn_reader(
                 }
                 Err(e) => {
                     eprintln!("conduit: read error on {} ({}): {}", name, path.display(), e);
+                    trace_exit("read error", keys_read, inputs_sent);
                     let _ = tx.send(Msg::DeviceRemoved(path));
                     return;
                 }
@@ -364,6 +384,17 @@ pub fn spawn_reader(
             for raw in events {
                 let ev_type = raw.event_type();
                 if ev_type == evdev::EventType::KEY {
+                    keys_read += 1;
+                    if tracing {
+                        crate::trace::log(format_args!(
+                            "read: {} code={} ({}) value={} from {}",
+                            keys_read,
+                            raw.code(),
+                            conduit_core::keys::name(Key(raw.code())),
+                            raw.value(),
+                            name,
+                        ));
+                    }
                     let state = match raw.value() {
                         1 => KeyState::Press,
                         0 => KeyState::Release,
@@ -372,8 +403,10 @@ pub fn spawn_reader(
                     };
                     let ev = Event { key: Key(raw.code()), state, time_us: now_us() };
                     if tx.send(Msg::Input(ev, Some(source))).is_err() {
+                        trace_exit("engine gone", keys_read, inputs_sent);
                         return; // engine thread gone; shut down
                     }
+                    inputs_sent += 1;
                 } else if is_pointer && ev_type == evdev::EventType::RELATIVE {
                     match raw.code() {
                         REL_WHEEL | REL_HWHEEL => {
@@ -405,6 +438,7 @@ pub fn spawn_reader(
             }
         }
         // Stop requested: Device drops here → fd closes → grab released.
+        trace_exit("stop requested", keys_read, inputs_sent);
         eprintln!("conduit: released {} ({})", name, path.display());
     });
 

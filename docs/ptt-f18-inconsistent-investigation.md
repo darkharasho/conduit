@@ -1,0 +1,94 @@
+# Investigation: Push-to-Talk key (F18) inconsistently delivered
+
+**Status:** diagnosed, not yet fixed. Written up 2026-10-28 after a long live debugging session.
+**Symptom (user-facing):** Discord push-to-talk is unreliable — mic opens then cuts out mid-hold, or doesn't trigger at all. Behaviour is *intermittent*, not deterministic. Reproduces across every Discord client (Flatpak, native tarball, Vesktop) and is independent of KDE shortcut config.
+
+## TL;DR root cause
+
+The PTT key is **not** a Discord/KDE/portal problem. It is the **physical key event (F18) arriving intermittently** at the OS. Conduit grabs the source device and re-emits F18 on its virtual keyboard; sometimes the key never comes out at all. Every downstream layer (KDE global-shortcut portal, Discord's keybind) was faithfully reacting to a signal that wasn't reliably there.
+
+## Key facts established
+
+1. **It's ONE key with three names.** The button sends Linux evdev `KEY_F18` (code 188). In X11/XWayland that becomes keycode **196**, whose keysym in the default map is **`XF86Launch9`** → KDE labels it **"Launch (9)"**, Discord labels it **"UNK196"**. F18 == 196 == Launch(9) == UNK196. (This caused hours of confusion: binding Discord to "F18" never matched because the actual keysym delivered is XF86Launch9; binding to "Launch (9)" did match.)
+
+2. **Conduit does not remap F18.** `~/.config/conduit/conduit.toml` maps only f13/f14/f15/f20/f21. F18 is pure **passthrough**: conduit grabs the source device, reads the F18 EV_KEY event, and re-emits it unchanged on "Conduit Virtual Keyboard" (`/dev/input/event262`, vendor 1234 product 5678).
+
+3. **The source is almost certainly the Logitech G502 X PLUS** (wireless). It's in both grab lists:
+   ```toml
+   grab_keyboards = [ "Logitech G502 X PLUS", "Wooting Wooting 80HE" ]
+   grab_mice      = [ "046d:4099/Logitech G502 X PLUS" ]
+   ```
+   The G502 presents a single node `event7` with handlers `sysrq kbd leds mouse1` — i.e. it reports **both** keyboard keys and relative motion. A G502 onboard button is bound to F18.
+
+4. **Direct evdev capture of a *hold* is inconsistent.** With conduit running, `sudo libinput debug-events` during a 5 s hold once showed exactly one `KEY_F18 (188) pressed` (good, sustained); a separate 12 s hold showed **zero** F18 events. Same physical action, different result → the key event itself is being lost before/at capture.
+
+5. Confirmed NOT the cause: Discord client choice, KDE `kglobalshortcutsrc` duplicate/ghost entries (those F18 ghosts never fire — wrong keysym), the OpenH264 codec (separate, already fixed), release-delay setting, hardware-accel.
+
+## Suspected root causes (ranked)
+
+1. **G502 X PLUS wireless sleep/wake dropping events (most likely).** The G502 X PLUS aggressively power-saves. On wake it can disconnect/reconnect (hotplug) or drop the first event(s). If the PTT press lands during/just after a sleep→wake, the F18 press (or its release) is lost → mic never opens, or opens and the release/next-press cycle is corrupted → cutout. Intermittency matches idle→active transitions.
+2. **Conduit grab gap on G502 reconnect.** If #1 triggers a `DeviceRemoved`/`DeviceAdded` cycle, there's a window where the device is ungrabbed/being re-grabbed. Events in that window are lost, and `engine.release_device()` fires on removal (see `runloop.rs` DeviceRemoved arm) — if a release is synthesized while the key is physically still held, PTT drops even though the user never let go.
+3. **Reader poll/read race.** `devices::spawn_reader` uses `poll(fd, 50ms)` + `O_NONBLOCK` `fetch_events()`; comment acknowledges "rare race between poll & read" handled by WouldBlock. Unlikely to be primary but worth ruling out.
+
+## How to reproduce / isolate (do this first)
+
+Goal: determine whether F18 is lost **before** conduit (hardware/wireless) or **inside** conduit.
+
+1. **Stop conduit** so nothing grabs the G502:
+   `systemctl --user stop conduit.service`
+2. Find the G502 raw node (currently `event7`) and watch ONLY it while holding the button for 10 s several times, including after letting the mouse sit idle 30–60 s first:
+   `sudo evtest /dev/input/event7`  (or `sudo libinput debug-events --show-keycodes` filtered to F18)
+3. Interpret:
+   - **F18 press+release clean and sustained every time, even after idle** → conduit is dropping it; focus on reader/hotplug (causes #2/#3).
+   - **F18 missing/stuttering after idle, or device shows disconnect/reconnect** → it's the G502 wireless (cause #1); conduit can only mitigate.
+4. Cross-check with conduit running: `conduit-ui` has an event viewer (pre/post phase pushes — see `runloop.rs` `event_subs`), or subscribe over IPC, to see whether conduit *received* the F18 and whether it *emitted* it.
+
+## Fix directions
+
+- **If G502 wireless (cause #1):**
+  - Disable the G502's power-saving/sleep (Logitech onboard profile via `libratbag`/`piper`, or keep it on the wired/charging cable so it never sleeps).
+  - Consider moving the PTT bind to the **wired Wooting 80HE** or **wired G600** instead of the wireless G502 — a wired device won't sleep. (Note: Wooting analog keys with rapid-trigger can also double-fire; prefer a digital/standard key.)
+  - In conduit: when a grabbed wireless device disconnects mid-hold, `release_device()` synthesizes releases for its held outputs. For a *passthrough* key that's fine, but consider NOT synthesizing a release for passthrough keys on transient unplug if the device returns within N ms (debounced re-grab) so a brief wireless blip doesn't cut PTT.
+
+- **If conduit grab gap (cause #2):** add debounce to the hotplug remove→add cycle for a known device id so a wake doesn't fully tear down and rebuild the grab; hold the grab across a short reconnect window. Files: `crates/conduit-daemon/src/hotplug.rs`, `runloop.rs` (`DeviceRemoved`/`DeviceAdded` arms, `reconcile_grabs`).
+
+- **If reader race (cause #3):** audit `crates/conduit-daemon/src/devices.rs::spawn_reader` poll/fetch loop for any path that could silently drop a key event; add a debug counter of EV_KEY in vs Msg::Input sent.
+
+## Relevant code
+
+- `crates/conduit-daemon/src/devices.rs` — `spawn_reader` (reader thread: grab, poll, fetch_events, EV_KEY→Msg::Input), `should_grab`, `probe`.
+- `crates/conduit-daemon/src/runloop.rs` — engine thread; `DeviceRemoved`/`DeviceAdded`/`reconcile_grabs`; `emit_all`; pre/post event subscriber pushes (useful for a built-in event trace).
+- `crates/conduit-daemon/src/hotplug.rs` — hotplug add/remove + EACCES settle/retry.
+- `crates/conduit-core/src/engine.rs` — `release_device()` (synthesizes releases for a departed device's held outputs — review for PTT-cutting-on-blip), passthrough path in `process()`.
+- `crates/conduit-daemon/src/output.rs` — virtual keyboard (no EV_REP; compositor handles repeat). Passthrough emit path.
+- `~/.config/conduit/conduit.toml` — grab lists + profiles (no F18 remap; F18 is passthrough).
+
+## Suggested first commit
+
+Add an opt-in debug trace: per-grabbed-device counters of EV_KEY read vs `Msg::Input` sent, and log every `DeviceRemoved`/`DeviceAdded` with timestamps + device id. Run it, reproduce the cutout, and the logs will immediately show whether F18 was read-but-not-emitted (conduit bug) or never-read (wireless). That single data point decides between cause #1 and #2/#3.
+
+**Status: implemented (2026-10-28).** `crates/conduit-daemon/src/trace.rs`, wired into `devices.rs::spawn_reader`, `runloop.rs` (`DeviceAdded`/`DeviceRemoved` incl. which releases `release_device` synthesized, and every emitted output event), and `hotplug.rs` (raw udev add/remove, which predates `Msg::DeviceAdded` by the 100 ms settle sleep).
+
+### Using the trace
+
+Enable by setting `CONDUIT_TRACE=1` in the daemon's environment and restarting it:
+
+```sh
+systemctl --user edit conduit.service   # add under [Service]: Environment=CONDUIT_TRACE=1
+systemctl --user restart conduit.service
+```
+
+Then reproduce (hold PTT after letting the G502 idle 30–60 s) and read the journal:
+
+```sh
+journalctl --user -u conduit.service -f | grep -E 'trace.*(f18|code=188|udev|hotplug|reader exit)'
+```
+
+Lines are stamped `t=<monotonic µs>` on the same time base as event `time_us`. What to look for during a bad hold:
+
+- **No `read: … code=188` line** → the kernel never delivered F18 → wireless/hardware (cause #1). A nearby `udev: remove`/`udev: add` pair confirms a sleep-wake reconnect blip.
+- **`read` line but no matching `emit: code=188`** → conduit dropped it between reader and output (causes #2/#3).
+- **`hotplug: removed … synthesized_releases=["f18"]` mid-hold** → the grab-gap release synthesis is cutting PTT (cause #2's second half).
+- **`reader exit` lines** show per-device totals `ev_key_read` vs `inputs_sent`; a gap (beyond unknown EV_KEY values, which are counted as read but not sent) means the reader dropped events.
+
+Disable again by removing the drop-in (`systemctl --user revert conduit.service`) — off is the default and the trace has no cost when disabled.

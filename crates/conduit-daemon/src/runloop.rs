@@ -308,6 +308,13 @@ pub fn run(
                     &mut grabbed_devices,
                     &mut sources,
                 );
+                if crate::trace::enabled() {
+                    crate::trace::log(format_args!(
+                        "hotplug: added {} grabbed={}",
+                        p.display(),
+                        readers.contains_key(&p),
+                    ));
+                }
                 slots = compute_slots(&sources, &device_selectors);
                 push_status(&engine, &current_focus, &grabbed_devices, config_version, &mut status_subs);
                 Vec::new()
@@ -330,6 +337,16 @@ pub fn run(
                 } else {
                     Vec::new()
                 };
+                if crate::trace::enabled() {
+                    let released: Vec<String> =
+                        release_evs.iter().map(|e| conduit_core::keys::name(e.key)).collect();
+                    crate::trace::log(format_args!(
+                        "hotplug: removed {} slot={:?} synthesized_releases={:?}",
+                        p.display(),
+                        removed_slot,
+                        released,
+                    ));
+                }
                 if !release_evs.is_empty() {
                     emit_all(&out, &release_evs, &mut event_subs);
                 }
@@ -540,6 +557,17 @@ fn reconcile_grabs(
 /// computed events are still pushed to event subscribers but not forwarded to
 /// any virtual device.
 fn emit_all(out: &Option<Arc<Mutex<VirtualOutput>>>, events: &[Event], subs: &mut Vec<Sender<Push>>) {
+    if crate::trace::enabled() {
+        for ev in events {
+            crate::trace::log(format_args!(
+                "emit: code={} ({}) {:?} time_us={}",
+                ev.key.0,
+                conduit_core::keys::name(ev.key),
+                ev.state,
+                ev.time_us,
+            ));
+        }
+    }
     if let Some(out) = out {
         let mut o = out.lock().unwrap();
         for ev in events {

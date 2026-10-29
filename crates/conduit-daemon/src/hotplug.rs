@@ -150,6 +150,13 @@ fn handle_event(event: udev::Event, tx: &Sender<Msg>) -> bool {
 
     match event.event_type() {
         udev::EventType::Add => {
+            // Trace the raw udev event time: Msg::DeviceAdded lags it by the
+            // settle sleep(s) below, and correlating a wireless device's
+            // disconnect/reconnect blip against lost key events needs the
+            // earliest timestamp available.
+            if crate::trace::enabled() {
+                crate::trace::log(format_args!("udev: add {}", path.display()));
+            }
             // Sleep 100 ms: udev may not have applied group/mode yet.
             std::thread::sleep(Duration::from_millis(100));
 
@@ -187,6 +194,9 @@ fn handle_event(event: udev::Event, tx: &Sender<Msg>) -> bool {
             }
         }
         udev::EventType::Remove => {
+            if crate::trace::enabled() {
+                crate::trace::log(format_args!("udev: remove {}", path.display()));
+            }
             tx.send(Msg::DeviceRemoved(path)).is_ok()
         }
         _ => true,

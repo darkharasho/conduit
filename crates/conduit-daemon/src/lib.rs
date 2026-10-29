@@ -16,6 +16,7 @@ pub mod ipc;
 pub mod output;
 pub mod paths;
 pub mod runloop;
+pub mod trace;
 pub mod watch;
 
 use std::collections::HashMap;
