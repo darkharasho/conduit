@@ -9,17 +9,25 @@ use crate::{find_conduit_daemon_binary, socket_path, ErrorPayload};
 
 // ---- Constants ----
 
+// Starts with the graphical session, not default.target: input-device
+// access comes from logind's uaccess ACLs, which only exist once the seat's
+// session is active. Started earlier, the daemon finds every
+// /dev/input/event* blocked, exits 2, and fast restarts hit the start limit.
 pub const SERVICE_UNIT: &str = "\
 [Unit]\n\
 Description=Conduit input remapping daemon\n\
+After=graphical-session.target\n\
+PartOf=graphical-session.target\n\
+StartLimitIntervalSec=60\n\
+StartLimitBurst=10\n\
 \n\
 [Service]\n\
 ExecStart=%h/.local/bin/conduit-daemon\n\
 Restart=on-failure\n\
-RestartSec=1\n\
+RestartSec=3\n\
 \n\
 [Install]\n\
-WantedBy=default.target\n";
+WantedBy=graphical-session.target\n";
 
 pub const UDEV_RULE: &str =
     "KERNEL==\"uinput\", GROUP=\"input\", MODE=\"0660\", OPTIONS+=\"static_node=uinput\"\n";
@@ -353,21 +361,42 @@ pub async fn setup_install_service() -> Result<(), ErrorPayload> {
         ));
     }
 
-    // systemctl --user enable --now conduit.service
+    // systemctl --user reenable conduit.service — reenable (not enable) so
+    // installs from before the WantedBy change drop their stale
+    // default.target.wants link instead of keeping both.
     let out = std::process::Command::new("systemctl")
-        .args(["--user", "enable", "--now", "conduit.service"])
+        .args(["--user", "reenable", "conduit.service"])
         .output()
         .map_err(|e| {
             ErrorPayload::new(
                 "internal",
-                "failed to run systemctl enable --now",
+                "failed to run systemctl reenable",
                 e.to_string(),
             )
         })?;
     if !out.status.success() {
         return Err(ErrorPayload::new(
             "internal",
-            "systemctl enable --now failed",
+            "systemctl reenable failed",
+            String::from_utf8_lossy(&out.stderr).to_string(),
+        ));
+    }
+
+    // systemctl --user start conduit.service
+    let out = std::process::Command::new("systemctl")
+        .args(["--user", "start", "conduit.service"])
+        .output()
+        .map_err(|e| {
+            ErrorPayload::new(
+                "internal",
+                "failed to run systemctl start",
+                e.to_string(),
+            )
+        })?;
+    if !out.status.success() {
+        return Err(ErrorPayload::new(
+            "internal",
+            "systemctl start failed",
             String::from_utf8_lossy(&out.stderr).to_string(),
         ));
     }
